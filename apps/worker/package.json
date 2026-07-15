@@ -1,0 +1,37 @@
+{
+  "name": "@family/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Family Memory AI — BullMQ worker service (NestJS 11 + Fastify 5, port 3002)",
+  "scripts": {
+    "dev": "nest start --watch --preserveWatchOutput -b swc",
+    "build": "nest build -b swc",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo noop"
+  },
+  "dependencies": {
+    "@family/config": "workspace:*",
+    "@family/database": "workspace:*",
+    "@family/shared": "workspace:*",
+    "@nestjs/bullmq": "^11.0.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-fastify": "^11.0.0",
+    "bullmq": "^5.34.0",
+    "drizzle-orm": "^0.38.3",
+    "ioredis": "^5.4.2",
+    "postgres": "^3.4.5",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@swc/cli": "^0.5.2",
+    "@swc/core": "^1.10.4",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
