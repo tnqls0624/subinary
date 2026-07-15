@@ -155,3 +155,18 @@ export type {
   BudgetSummary,
   BudgetListResponse,
 } from './budget.js';
+
+export {
+  slackImportResponseSchema,
+  slackWorkspaceSummarySchema,
+  slackMessageSummarySchema,
+  slackMessageListResponseSchema,
+  slackThreadResponseSchema,
+} from './slack.js';
+export type {
+  SlackImportResponse,
+  SlackWorkspaceSummary,
+  SlackMessageSummary,
+  SlackMessageListResponse,
+  SlackThreadResponse,
+} from './slack.js';
