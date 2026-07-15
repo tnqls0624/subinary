@@ -5,12 +5,36 @@
  * 실제 LLM/Embedding/Reranker API 호출은 Phase 2+에서 구현체를 추가한다.
  */
 
+/**
+ * LLM에 전달하는 컨텍스트 passage (RAG 근거 청크).
+ *
+ * `id`는 역추적용 청크 식별자, `text`는 발췌 원문이다.
+ * 주의: 이 값은 로그로 출력하지 않는다 (원문/PII 로그 금지 정책).
+ */
+export interface GenerateContextPassage {
+  /** 근거 청크 식별자. */
+  id: string;
+  /** 근거 청크 본문. */
+  text: string;
+}
+
 /** LLM 텍스트 생성 요청. */
 export interface GenerateRequest {
-  /** 사용자 프롬프트. */
-  prompt: string;
+  /**
+   * 사용자 프롬프트 (선택).
+   * Phase 7 RAG 흐름은 `question` + `context`를 사용하지만,
+   * 하위 호환을 위해 `prompt` 단독 호출도 허용한다.
+   */
+  prompt?: string;
   /** 시스템 프롬프트 (선택). */
   system?: string;
+  /** 사용자 질문 (선택, RAG 흐름). */
+  question?: string;
+  /**
+   * 근거 컨텍스트 passage 목록 (선택, RAG 흐름).
+   * 값이 있으면 근거 기반 답변, 없으면 "근거 없음"을 생성한다(앱 로직 판정과 일치).
+   */
+  context?: GenerateContextPassage[];
   /** 생성 최대 토큰 수 (선택, 양의 정수). */
   maxTokens?: number;
   /** 샘플링 온도 (선택). */
@@ -92,6 +116,11 @@ export interface LlmProvider {
 
 /** 임베딩 provider 인터페이스 (PRD 3.4). */
 export interface EmbeddingProvider {
+  /** 임베딩 벡터의 차원 수 (예: Mock=256). */
+  readonly dimensions: number;
+  /** 임베딩을 생성한 모델 식별자 (예: 'mock'). */
+  readonly model: string;
+  /** 텍스트 목록을 입력 순서대로 임베딩한다. */
   embed(texts: string[]): Promise<number[][]>;
 }
 
