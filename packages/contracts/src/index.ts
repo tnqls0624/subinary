@@ -121,3 +121,37 @@ export type {
   TransactionListResponse,
   TransactionSummaryResponse,
 } from './transaction.js';
+
+export {
+  analyticsPeriodSchema,
+  analyticsMetaSchema,
+  monthlyAnalyticsSchema,
+  categoryBreakdownSchema,
+  memberBreakdownSchema,
+  cardBreakdownSchema,
+  merchantBreakdownSchema,
+} from './analytics.js';
+export type {
+  AnalyticsPeriod,
+  AnalyticsMeta,
+  MonthlyAnalytics,
+  CategoryBreakdown,
+  MemberBreakdown,
+  CardBreakdown,
+  MerchantBreakdown,
+} from './analytics.js';
+
+export {
+  budgetScopeTypeSchema,
+  budgetCreateRequestSchema,
+  budgetUpdateRequestSchema,
+  budgetSummarySchema,
+  budgetListResponseSchema,
+} from './budget.js';
+export type {
+  BudgetScopeType,
+  BudgetCreateRequest,
+  BudgetUpdateRequest,
+  BudgetSummary,
+  BudgetListResponse,
+} from './budget.js';
