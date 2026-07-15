@@ -11,10 +11,12 @@
     "lint": "echo noop"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
     "@family/card-parsers": "workspace:*",
     "@family/config": "workspace:*",
     "@family/database": "workspace:*",
     "@family/shared": "workspace:*",
+    "@family/slack-parser": "workspace:*",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
