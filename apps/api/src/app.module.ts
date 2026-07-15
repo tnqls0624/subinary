@@ -9,6 +9,8 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { CardSmsModule } from './card-sms/card-sms.module';
+import { CardsModule } from './cards/cards.module';
+import { CategoriesModule } from './categories/categories.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
 import { DevicesModule } from './devices/devices.module';
@@ -16,6 +18,7 @@ import { HealthModule } from './health/health.module';
 import { HouseholdModule } from './household/household.module';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 /**
  * DevModule exposes development-only endpoints (echo, test-job, storage-test)
@@ -35,6 +38,9 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     HouseholdModule,
     DevicesModule,
     CardSmsModule,
+    CardsModule,
+    CategoriesModule,
+    TransactionsModule,
     ...devOnlyModules,
   ],
   providers: [
