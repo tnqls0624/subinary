@@ -38,6 +38,14 @@ async function bootstrap(): Promise<void> {
   const appConfig = configService.get<AppConfig['app']>('app');
   const port = appConfig?.apiPort ?? DEFAULT_API_PORT;
 
+  // web(3000)→api(3001)는 cross-origin. refresh 쿠키를 주고받기 위해
+  // credentials 허용 + 명시적 origin(와일드카드 금지). listen 이전에 등록.
+  const webConfig = configService.get<AppConfig['web']>('web');
+  app.enableCors({
+    origin: webConfig?.corsOrigin ?? 'http://localhost:3000',
+    credentials: true,
+  });
+
   await app.listen(port, '0.0.0.0');
   logger.info({ port, prefix: 'v1' }, 'API server listening');
 }

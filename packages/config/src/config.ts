@@ -27,7 +27,7 @@ const portFromEnv = z.coerce.number().int().min(1).max(65535);
 /**
  * Application configuration schema (grouped).
  *
- * Groups: `app` / `database` / `redis` / `queue` / `storage` / `ai` / `auth` / `device`.
+ * Groups: `app` / `database` / `redis` / `queue` / `storage` / `ai` / `auth` / `device` / `web`.
  * Numbers and booleans are coerced from environment variable strings.
  */
 export const configSchema = z.object({
@@ -69,6 +69,9 @@ export const configSchema = z.object({
     hmacTimestampToleranceSec: z.coerce.number().int().positive().default(300),
     nonceTtlSec: z.coerce.number().int().positive().default(600),
     maxBodyBytes: z.coerce.number().int().positive().default(16384),
+  }),
+  web: z.object({
+    corsOrigin: z.string().min(1).default('http://localhost:3000'),
   }),
 });
 
@@ -124,6 +127,9 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       nonceTtlSec: env.DEVICE_NONCE_TTL_SEC,
       maxBodyBytes: env.MOBILE_MAX_BODY_BYTES,
     },
+    web: {
+      corsOrigin: env.CORS_ORIGIN,
+    },
   };
 
   const parsed = configSchema.safeParse(candidate);
@@ -141,7 +147,7 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
  *
  * NestJS usage: `ConfigModule.forRoot({ isGlobal: true, load: [loadConfig] })`
  * — passing `loadConfig` directly makes each top-level group key
- * (`app`, `database`, `redis`, `queue`, `storage`, `ai`, `auth`, `device`) a root key of the
+ * (`app`, `database`, `redis`, `queue`, `storage`, `ai`, `auth`, `device`, `web`) a root key of the
  * config store, so it can be read as
  * `configService.get<AppConfig['database']>('database')`.
  */
