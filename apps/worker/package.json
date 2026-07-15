@@ -11,6 +11,7 @@
     "lint": "echo noop"
   },
   "dependencies": {
+    "@family/card-parsers": "workspace:*",
     "@family/config": "workspace:*",
     "@family/database": "workspace:*",
     "@family/shared": "workspace:*",
