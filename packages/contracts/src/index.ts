@@ -52,3 +52,18 @@ export type {
   InvitationCreated,
   InvitationSummary,
 } from './household.js';
+
+export {
+  devicePlatformSchema,
+  deviceRegisterRequestSchema,
+  deviceSummarySchema,
+  deviceSecretResponseSchema,
+  devicePingResponseSchema,
+} from './device.js';
+export type {
+  DevicePlatform,
+  DeviceRegisterRequest,
+  DeviceSummary,
+  DeviceSecretResponse,
+  DevicePingResponse,
+} from './device.js';
