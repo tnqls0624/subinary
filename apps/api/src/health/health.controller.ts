@@ -7,8 +7,11 @@ import {
 
 import type { LivezResponse, ReadyzResponse } from '@family/contracts';
 
+import { Public } from '../auth/decorators/public.decorator';
+
 import { HealthService } from './health.service';
 
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}

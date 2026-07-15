@@ -1,12 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_PIPE } from '@nestjs/core';
 
 import { loadConfig } from '@family/config';
 
+import { ZodValidationPipe } from 'nestjs-zod';
+
 import { AiModule } from './ai/ai.module';
+import { AuthModule } from './auth/auth.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
 import { HealthModule } from './health/health.module';
+import { HouseholdModule } from './household/household.module';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
 
@@ -24,7 +29,13 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     QueueModule,
     AiModule,
     HealthModule,
+    AuthModule,
+    HouseholdModule,
     ...devOnlyModules,
+  ],
+  providers: [
+    // 전역 zod 검증 파이프. APP_GUARD(AccessTokenGuard)는 AuthModule에서 provide.
+    { provide: APP_PIPE, useClass: ZodValidationPipe },
   ],
 })
 export class AppModule {}

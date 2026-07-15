@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 
+import fastifyCookie from '@fastify/cookie';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import {
@@ -26,6 +27,9 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('v1');
   app.enableShutdownHooks();
+
+  // HttpOnly refresh-token 쿠키 지원(Fastify 어댑터). listen 이전에 등록.
+  await app.register(fastifyCookie);
 
   const configService = app.get(ConfigService);
   const appConfig = configService.get<AppConfig['app']>('app');

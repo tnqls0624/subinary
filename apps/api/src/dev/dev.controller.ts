@@ -17,6 +17,7 @@ import type {
   TestJobStatusResponse,
 } from '@family/contracts';
 
+import { Public } from '../auth/decorators/public.decorator';
 import { QueueService } from '../queue/queue.service';
 import { ObjectStorageService } from '../storage/object-storage.service';
 
@@ -24,6 +25,7 @@ import { ObjectStorageService } from '../storage/object-storage.service';
  * Development-only endpoints (mounted when NODE_ENV !== 'production').
  * Used by the Phase 0 verification contract (spec §9).
  */
+@Public()
 @Controller('dev')
 export class DevController {
   constructor(
