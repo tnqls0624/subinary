@@ -10,6 +10,7 @@ import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
+import { DevicesModule } from './devices/devices.module';
 import { HealthModule } from './health/health.module';
 import { HouseholdModule } from './household/household.module';
 import { QueueModule } from './queue/queue.module';
@@ -31,6 +32,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     HealthModule,
     AuthModule,
     HouseholdModule,
+    DevicesModule,
     ...devOnlyModules,
   ],
   providers: [

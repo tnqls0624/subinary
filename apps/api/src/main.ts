@@ -20,9 +20,12 @@ async function bootstrap(): Promise<void> {
     pretty: process.env.NODE_ENV !== 'production',
   });
 
+  // bodyLimit은 config 로딩 이전이므로 상수를 사용한다(MOBILE_MAX_BODY_BYTES 기본값과 동일).
+  // rawBody:true 는 장치 HMAC 서명 대상(원본 바이트) 접근을 위해 필수.
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter(),
+    new FastifyAdapter({ bodyLimit: 16384 }),
+    { rawBody: true },
   );
 
   app.setGlobalPrefix('v1');
