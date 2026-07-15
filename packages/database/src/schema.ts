@@ -707,3 +707,75 @@ export type NewMerchantCategoryRule = typeof merchantCategoryRules.$inferInsert;
 
 export type CardTransaction = typeof cardTransactions.$inferSelect;
 export type NewCardTransaction = typeof cardTransactions.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 5 — 예산 (Phase 5 Build Spec §2)                                      */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (budget)                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 예산 스코프 종류(PRD §7.2 / 스펙 §1.4). scopeRefId 대상:
+ * - household: 가족 전체(scopeRefId=null)
+ * - member: 특정 구성원(scopeRefId=householdMembers.id)
+ * - category: 특정 카테고리(scopeRefId=expenseCategories.id)
+ * - card: 특정 카드(scopeRefId=paymentCards.id)
+ */
+export const budgetScopeType = pgEnum('budget_scope_type', [
+  'household',
+  'member',
+  'category',
+  'card',
+]);
+
+/** 예산 주기(MVP는 월 예산만). */
+export const budgetPeriod = pgEnum('budget_period', ['monthly']);
+
+/* -------------------------------------------------------------------------- */
+/* budgets                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 가족 예산. `amount`는 KRW 정수(원)인 월 예산이며, 사용률은 스코프별 현재월
+ * 순지출(`sum(netAmount) WHERE transactionType='approval'`, 공개범위 반영) /
+ * `amount`로 계산한다(스펙 §1.4). `scopeRefId`는 scopeType이 household면 null,
+ * 그 외에는 member/category/card의 id다. `createdBy`는 예산을 생성한 사용자다.
+ * (householdId, scopeType, scopeRefId)는 유일하다(중복 예산 방지).
+ */
+export const budgets = pgTable(
+  'budgets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    name: text('name'),
+    scopeType: budgetScopeType('scope_type').notNull(),
+    scopeRefId: uuid('scope_ref_id'),
+    amount: integer('amount').notNull(),
+    period: budgetPeriod('period').notNull().default('monthly'),
+    currency: text('currency').notNull().default('KRW'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('budgets_household_scope_type_scope_ref_id_unique').on(
+      table.householdId,
+      table.scopeType,
+      table.scopeRefId,
+    ),
+    index('budgets_household_id_idx').on(table.householdId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (budget)                                                         */
+/* -------------------------------------------------------------------------- */
+
+export type Budget = typeof budgets.$inferSelect;
+export type NewBudget = typeof budgets.$inferInsert;
