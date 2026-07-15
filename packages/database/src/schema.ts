@@ -16,6 +16,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -23,6 +24,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  vector,
 } from 'drizzle-orm/pg-core';
 
 /* -------------------------------------------------------------------------- */
@@ -1017,3 +1019,120 @@ export type NewSlackMessage = typeof slackMessages.$inferInsert;
 
 export type SlackThread = typeof slackThreads.$inferSelect;
 export type NewSlackThread = typeof slackThreads.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 7 — Hybrid RAG (Phase 7 Build Spec §2)                               */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* 상수 (embedding 차원)                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Embedding 벡터 차원. Mock provider 기준 고정값이며 pgvector `vector` 컬럼
+ * 차원과 일치해야 한다(PRD §3.4 / 스펙 §2). 실제 OpenAI/Anthropic provider가
+ * 다른 차원을 반환하면 재임베딩 + 컬럼 차원 변경(마이그레이션)이 필요하다.
+ */
+export const EMBEDDING_DIM = 256;
+
+/* -------------------------------------------------------------------------- */
+/* chunks                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * RAG 검색 단위 청크(PRD §31 Phase 7 / 스펙 §1.1). Slack 스레드(threadTs 그룹)를
+ * 하나의 청크로 결합하거나 비-스레드 단독 메시지를 청크로 만든다. 소유 스코프는
+ * `workspaceId`(workspaces.ownerUserId 소유자 본인만 접근, PRD §26)다.
+ *
+ * - `sourceType`: 'slack_thread' | 'slack_message'.
+ * - `sourceRefId`: threadTs(스레드) 또는 message ts(단독 메시지).
+ * - `slackChannelId`는 `slack_channels.id`(내부 uuid) FK(nullable), `channelName`은
+ *   citation 표기용 사본이다. `occurredAt`은 스레드 root의 occurredAt이다.
+ *
+ * 멱등 재인덱싱은 UNIQUE(workspaceId, sourceType, sourceRefId) +
+ * onConflictDoUpdate(text/occurredAt 갱신)로 강제한다(중복 없음). `text`
+ * GIN(gin_trgm_ops) 인덱스는 FTS(pg_trgm similarity)용이며, 원문·PII는 로그에
+ * 남기지 않는다.
+ */
+export const chunks = pgTable(
+  'chunks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    sourceType: text('source_type').notNull(),
+    sourceRefId: text('source_ref_id').notNull(),
+    slackChannelId: uuid('slack_channel_id').references(() => slackChannels.id),
+    channelName: text('channel_name'),
+    text: text('text').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('chunks_workspace_id_source_type_source_ref_id_unique').on(
+      table.workspaceId,
+      table.sourceType,
+      table.sourceRefId,
+    ),
+    index('chunks_workspace_id_idx').on(table.workspaceId),
+    index('chunks_occurred_at_idx').on(table.occurredAt),
+    // FTS(pg_trgm similarity)용 trigram GIN 인덱스(pg_trgm 확장, Phase 0에서 설치).
+    // drizzle-kit generate가 이 인덱스를 누락하면 통합에서 마이그레이션 SQL에
+    // `CREATE INDEX ... USING gin (text gin_trgm_ops)`를 수동 보강한다.
+    index('chunks_text_trgm_idx').using('gin', sql`${table.text} gin_trgm_ops`),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* embeddings                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 청크 embedding(pgvector). 청크당 1건(UNIQUE(chunkId))이며 재인덱싱은
+ * onConflictDoUpdate로 갱신한다(중복 없음, 스펙 §1.1/§5). `embedding`은
+ * `vector(EMBEDDING_DIM)` 컬럼이고 검색은 코사인 거리(`<=>`) 오름차순으로 한다.
+ * `model`은 provider 식별자('mock' 등), `dim`은 벡터 차원 사본이다.
+ * 임베딩 값 자체는 로그에 남기지 않는다(count/식별자만).
+ *
+ * HNSW cosine 인덱스는 drizzle `.using('hnsw', sql\`... vector_cosine_ops\`)`로
+ * 시도한다. drizzle-kit generate가 이 인덱스를 누락하면 통합에서 마이그레이션
+ * SQL에 `CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)`를 수동
+ * 보강한다(pgvector 0.8 지원).
+ */
+export const embeddings = pgTable(
+  'embeddings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    chunkId: uuid('chunk_id')
+      .notNull()
+      .references(() => chunks.id),
+    model: text('model').notNull(),
+    dim: integer('dim').notNull(),
+    embedding: vector('embedding', { dimensions: EMBEDDING_DIM }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('embeddings_chunk_id_unique').on(table.chunkId),
+    // HNSW cosine 인덱스(pgvector). generate 누락 시 마이그레이션 SQL 수동 보강.
+    index('embeddings_embedding_hnsw_idx').using(
+      'hnsw',
+      sql`${table.embedding} vector_cosine_ops`,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (RAG)                                                            */
+/* -------------------------------------------------------------------------- */
+
+export type Chunk = typeof chunks.$inferSelect;
+export type NewChunk = typeof chunks.$inferInsert;
+
+export type Embedding = typeof embeddings.$inferSelect;
+export type NewEmbedding = typeof embeddings.$inferInsert;
