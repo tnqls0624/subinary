@@ -7,7 +7,9 @@ import { loadConfig } from '@family/config';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { AiModule } from './ai/ai.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
+import { BudgetsModule } from './budgets/budgets.module';
 import { CardSmsModule } from './card-sms/card-sms.module';
 import { CardsModule } from './cards/cards.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -41,6 +43,8 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     CardsModule,
     CategoriesModule,
     TransactionsModule,
+    AnalyticsModule,
+    BudgetsModule,
     ...devOnlyModules,
   ],
   providers: [
