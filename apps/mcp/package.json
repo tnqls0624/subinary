@@ -1,0 +1,12 @@
+{
+  "name": "@family/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP server placeholder — Phase 10 예정 (현재 비활성, 실행 서비스 아님)",
+  "scripts": {
+    "build": "echo 'build: noop (@family/mcp — Phase 10 예정)'",
+    "dev": "echo 'dev: noop (@family/mcp — Phase 10 예정)'",
+    "typecheck": "echo 'typecheck: noop (@family/mcp — Phase 10 예정)'",
+    "lint": "echo 'lint: noop (@family/mcp — Phase 10 예정)'"
+  }
+}
