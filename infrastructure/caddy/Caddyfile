@@ -1,0 +1,33 @@
+# Family Memory AI — 로컬 리버스 프록시 (compose profile: proxy)
+#
+# 사용:
+#   docker compose --profile proxy up
+#   → https://localhost  (web: Next.js)
+#   → https://localhost/v1/*  (api: NestJS)
+#
+# `localhost` 사이트 주소를 쓰면 Caddy가 로컬 신뢰 인증서를 자동 발급한다(internal TLS).
+#
+# --- Production 안내 ---
+# prod에서는 localhost 대신 실제 도메인을 지정하면 Caddy가 Let's Encrypt로
+# HTTPS 인증서를 자동 발급/갱신한다. 예:
+#
+#   family.example.com {
+#       handle /v1/* {
+#           reverse_proxy api:3001
+#       }
+#       handle {
+#           reverse_proxy web:3000
+#       }
+#   }
+
+localhost {
+	# API — /v1/* 경로는 NestJS api 서비스로
+	handle /v1/* {
+		reverse_proxy api:3001
+	}
+
+	# 나머지 전부 — Next.js web 서비스로
+	handle {
+		reverse_proxy web:3000
+	}
+}

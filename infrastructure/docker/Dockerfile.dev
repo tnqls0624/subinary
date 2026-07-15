@@ -1,0 +1,17 @@
+# Family Memory AI — 공용 dev 이미지 (api / worker / web 이 동일 이미지 공유)
+# 실제 실행 커맨드는 docker-compose.yml 의 서비스별 `command`(pnpm --filter <pkg> dev)로 지정된다.
+FROM node:22-bookworm-slim
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+WORKDIR /app
+COPY . .
+# NOTE: --frozen-lockfile 은 커밋된 pnpm-lock.yaml 을 요구한다.
+#       lockfile 이 아직 없다면 아래 라인을 `RUN pnpm install` (non-frozen) 로 임시 변경해 폴백할 수 있다.
+#       lockfile 생성(호스트 Node 불필요):
+#         docker run --rm -v "$PWD":/app -w /app node:22-bookworm-slim \
+#           sh -c "corepack enable && pnpm install --lockfile-only"
+RUN pnpm install --frozen-lockfile
+# 패키지만 dist로 빌드(앱은 dev에서 소스 실행)
+RUN pnpm -r --filter "./packages/*" build
+EXPOSE 3000 3001 3002
+CMD ["node","-e","console.log('override in compose')"]

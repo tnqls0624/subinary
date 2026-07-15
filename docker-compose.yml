@@ -1,0 +1,177 @@
+# Family Memory AI — Phase 0 dev stack
+#
+# 사용:
+#   cp .env.example .env
+#   docker compose up --build
+#
+# 참고:
+# - api/worker/web 은 동일 dev 이미지(family-memory-ai/dev:local)를 공유한다.
+# - 바인드마운트는 apps/*/src 만 → 이미지 내 node_modules / packages dist 가 가려지지 않음.
+#   앱의 package.json / tsconfig / nest-cli.json 등 설정 변경 시 `docker compose up --build` 로 재빌드 필요.
+# - caddy 는 profile "proxy" 로만 기동: `docker compose --profile proxy up`
+
+name: family-memory-ai
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-family}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-family_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-family_memory}
+      TZ: ${TZ:-Asia/Seoul}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin_dev_pw}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    # healthcheck 생략 — 준비 여부는 minio-setup 완료(service_completed_successfully)로 대체
+    restart: unless-stopped
+
+  minio-setup:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin_dev_pw}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-family-memory}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$STORAGE_ACCESS_KEY" "$$STORAGE_SECRET_KEY" >/dev/null 2>&1; do
+          echo "minio not ready yet; retrying in 2s..."
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$STORAGE_BUCKET"
+        echo "minio setup complete: bucket ensured"
+        exit 0
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.dev
+    image: family-memory-ai/dev:local
+    command: pnpm --filter @family/api dev
+    env_file: .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.dev
+    image: family-memory-ai/dev:local
+    command: pnpm --filter @family/worker dev
+    env_file: .env
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./apps/worker/src:/app/apps/worker/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.dev
+    image: family-memory-ai/dev:local
+    command: pnpm --filter @family/web dev
+    env_file: .env
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web/src:/app/apps/web/src
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["proxy"]
+    image: caddy:2-alpine
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
