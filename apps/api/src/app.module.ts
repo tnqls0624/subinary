@@ -8,6 +8,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
+import { CardSmsModule } from './card-sms/card-sms.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
 import { DevicesModule } from './devices/devices.module';
@@ -33,6 +34,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     AuthModule,
     HouseholdModule,
     DevicesModule,
+    CardSmsModule,
     ...devOnlyModules,
   ],
   providers: [
