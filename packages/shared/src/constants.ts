@@ -6,8 +6,11 @@ export const DEFAULT_TIMEZONE = 'Asia/Seoul';
  * - `test`: Phase 0 end-to-end smoke queue.
  * - `card-sms-parse`: Phase 3 asynchronous card-SMS parsing queue
  *   (api enqueues, worker consumes).
+ * - `slack-import`: Phase 6 asynchronous Slack export parsing queue
+ *   (api enqueues, worker consumes).
  */
 export const QUEUE_NAMES = {
   TEST: 'test',
   CARD_SMS_PARSE: 'card-sms-parse',
+  SLACK_IMPORT: 'slack-import',
 } as const;
