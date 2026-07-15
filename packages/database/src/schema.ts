@@ -388,9 +388,10 @@ export const sourceItems = pgTable(
   'source_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    householdId: uuid('household_id')
-      .notNull()
-      .references(() => households.id),
+    // 소유 스코프는 소스 종류별로 다르다: card_sms→householdId(가족), slack→workspaceId
+    // (개인/회사 workspace, PRD §3.6). 둘 다 nullable, 종류별로 하나만 채운다.
+    householdId: uuid('household_id').references(() => households.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     kind: sourceKind('kind').notNull(),
     objectKey: text('object_key').notNull(),
     contentHash: text('content_hash').notNull(),
@@ -402,6 +403,7 @@ export const sourceItems = pgTable(
   },
   (table) => [
     index('source_items_household_id_idx').on(table.householdId),
+    index('source_items_workspace_id_idx').on(table.workspaceId),
     index('source_items_content_hash_idx').on(table.contentHash),
   ],
 );
@@ -779,3 +781,239 @@ export const budgets = pgTable(
 
 export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 6 — Slack Import (Phase 6 Build Spec §2)                              */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (workspace)                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 개인 데이터 컨테이너 종류(PRD §3.6/§26). 'personal'=개인, 'company'=회사.
+ * Slack Import은 기본 'company'로 생성한다.
+ */
+export const workspaceKindEnum = pgEnum('workspace_kind', [
+  'personal',
+  'company',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* workspaces                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 개인 데이터 컨테이너(PRD §3.6/§26). `ownerUserId`가 소유하며, Slack 등
+ * 개인화 데이터는 이 workspace를 통해 **소유자 본인만** 접근한다(가족 구성원도
+ * 접근 불가). 향후 Phase 8 `personal_events`가 `workspaceId`로 연결된다.
+ */
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id')
+      .notNull()
+      .references(() => users.id),
+    kind: workspaceKindEnum('kind').notNull(),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('workspaces_owner_user_id_idx').on(table.ownerUserId)],
+);
+
+/* -------------------------------------------------------------------------- */
+/* slackWorkspaces                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slack 워크스페이스(Export 대상). 소유 `workspaces` 1개당 1건(UNIQUE).
+ * `mySlackUserId`는 "내 메시지" 필터용 Slack user id 문자열이며,
+ * `lastImportedAt`은 마지막 Import 완료 시각이다.
+ */
+export const slackWorkspaces = pgTable(
+  'slack_workspaces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    slackTeamId: text('slack_team_id'),
+    name: text('name').notNull(),
+    mySlackUserId: text('my_slack_user_id'),
+    lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('slack_workspaces_workspace_id_unique').on(table.workspaceId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* slackChannels                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slack 채널 정규화. `slackChannelId`는 Slack 채널 id 문자열(예: 'C1').
+ * (slackWorkspaceId, slackChannelId)는 유일하며, 재import 시 이름을 갱신한다
+ * (onConflictDoUpdate).
+ */
+export const slackChannels = pgTable(
+  'slack_channels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackWorkspaceId: uuid('slack_workspace_id')
+      .notNull()
+      .references(() => slackWorkspaces.id),
+    slackChannelId: text('slack_channel_id').notNull(),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('slack_channels_slack_workspace_id_slack_channel_id_unique').on(
+      table.slackWorkspaceId,
+      table.slackChannelId,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* slackUsers                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slack 사용자 정규화. `slackUserId`는 Slack user id 문자열(예: 'U1').
+ * (slackWorkspaceId, slackUserId)는 유일하며, 재import 시 이름을 갱신한다
+ * (onConflictDoUpdate).
+ */
+export const slackUsers = pgTable(
+  'slack_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackWorkspaceId: uuid('slack_workspace_id')
+      .notNull()
+      .references(() => slackWorkspaces.id),
+    slackUserId: text('slack_user_id').notNull(),
+    name: text('name').notNull(),
+    realName: text('real_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('slack_users_slack_workspace_id_slack_user_id_unique').on(
+      table.slackWorkspaceId,
+      table.slackUserId,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* slackMessages                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slack 메시지. `slackChannelId`는 `slack_channels.id`(내부 uuid)를 가리키는 FK,
+ * `slackUserId`는 정규화 전 Slack user id 문자열(정규화는 slack_users)이다.
+ * `ts`/`threadTs`/`editedTs`는 Slack "epoch.micro" 문자열, `occurredAt`은 ts를
+ * Date로 변환한 값(Asia/Seoul 기준 timestamptz)이다. 멱등 Import는
+ * UNIQUE(slackChannelId, ts) + onConflictDoNothing으로 강제한다.
+ * `text` GIN(gin_trgm_ops) 인덱스는 키워드 검색(ILIKE)용이며, 원문·PII는
+ * 로그에 남기지 않는다.
+ */
+export const slackMessages = pgTable(
+  'slack_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackWorkspaceId: uuid('slack_workspace_id')
+      .notNull()
+      .references(() => slackWorkspaces.id),
+    slackChannelId: uuid('slack_channel_id')
+      .notNull()
+      .references(() => slackChannels.id),
+    slackUserId: text('slack_user_id'),
+    ts: text('ts').notNull(),
+    threadTs: text('thread_ts'),
+    text: text('text').notNull(),
+    editedTs: text('edited_ts'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    sourceItemId: uuid('source_item_id').references(() => sourceItems.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('slack_messages_slack_channel_id_ts_unique').on(
+      table.slackChannelId,
+      table.ts,
+    ),
+    index('slack_messages_slack_workspace_id_idx').on(table.slackWorkspaceId),
+    index('slack_messages_slack_channel_id_idx').on(table.slackChannelId),
+    index('slack_messages_thread_ts_idx').on(table.threadTs),
+    index('slack_messages_occurred_at_idx').on(table.occurredAt),
+    // 키워드 검색용 trigram GIN 인덱스(pg_trgm 확장, Phase 0에서 설치).
+    // drizzle-kit generate가 이 인덱스를 누락하면 통합에서 마이그레이션 SQL에
+    // `CREATE INDEX ... USING gin (text gin_trgm_ops)`를 수동 보강한다.
+    index('slack_messages_text_trgm_idx').using(
+      'gin',
+      sql`${table.text} gin_trgm_ops`,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* slackThreads                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Slack 스레드 요약(복원용). `threadTs`로 그룹핑하며 `rootTs`(최소 ts),
+ * `replyCount`(그룹 크기-1), `lastReplyAt`(최대 occurredAt)을 저장한다.
+ * (slackChannelId, threadTs)는 유일하며 재import 시 재계산 upsert한다.
+ * `slackChannelId`는 `slack_channels.id`(내부 uuid)를 가리키는 FK다.
+ */
+export const slackThreads = pgTable(
+  'slack_threads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackWorkspaceId: uuid('slack_workspace_id')
+      .notNull()
+      .references(() => slackWorkspaces.id),
+    slackChannelId: uuid('slack_channel_id')
+      .notNull()
+      .references(() => slackChannels.id),
+    threadTs: text('thread_ts').notNull(),
+    rootTs: text('root_ts').notNull(),
+    replyCount: integer('reply_count').notNull().default(0),
+    lastReplyAt: timestamp('last_reply_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('slack_threads_slack_channel_id_thread_ts_unique').on(
+      table.slackChannelId,
+      table.threadTs,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (workspace & slack)                                              */
+/* -------------------------------------------------------------------------- */
+
+export type Workspace = typeof workspaces.$inferSelect;
+export type NewWorkspace = typeof workspaces.$inferInsert;
+
+export type SlackWorkspace = typeof slackWorkspaces.$inferSelect;
+export type NewSlackWorkspace = typeof slackWorkspaces.$inferInsert;
+
+export type SlackChannel = typeof slackChannels.$inferSelect;
+export type NewSlackChannel = typeof slackChannels.$inferInsert;
+
+export type SlackUser = typeof slackUsers.$inferSelect;
+export type NewSlackUser = typeof slackUsers.$inferInsert;
+
+export type SlackMessage = typeof slackMessages.$inferSelect;
+export type NewSlackMessage = typeof slackMessages.$inferInsert;
+
+export type SlackThread = typeof slackThreads.$inferSelect;
+export type NewSlackThread = typeof slackThreads.$inferInsert;

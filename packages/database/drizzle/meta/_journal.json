@@ -36,6 +36,20 @@
       "when": 1784130939805,
       "tag": "0004_hot_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784144141386,
+      "tag": "0005_windy_kronos",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784144334980,
+      "tag": "0006_third_mystique",
+      "breakpoints": true
     }
   ]
 }
