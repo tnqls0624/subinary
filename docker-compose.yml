@@ -82,6 +82,21 @@ services:
         exit 0
     restart: "no"
 
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.dev
+    image: family-memory-ai/dev:local
+    command: pnpm --filter @family/database migrate
+    env_file: .env
+    volumes:
+      # 마이그레이션 SQL 바인드마운트(이미지에 굽지 않음)
+      - ./packages/database/drizzle:/app/packages/database/drizzle
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -99,6 +114,8 @@ services:
       redis:
         condition: service_healthy
       minio-setup:
+        condition: service_completed_successfully
+      migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -125,6 +142,8 @@ services:
       redis:
         condition: service_healthy
       minio-setup:
+        condition: service_completed_successfully
+      migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3002/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
