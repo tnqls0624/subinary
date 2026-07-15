@@ -170,3 +170,24 @@ export type {
   SlackMessageListResponse,
   SlackThreadResponse,
 } from './slack.js';
+
+export {
+  chunkSourceTypeSchema,
+  citationSchema,
+  workQueryRequestSchema,
+  retrievalRequestSchema,
+  workQueryMetaSchema,
+  workQueryResponseSchema,
+  retrievalItemSchema,
+  retrievalResponseSchema,
+} from './ai.js';
+export type {
+  ChunkSourceType,
+  Citation,
+  WorkQueryRequest,
+  RetrievalRequest,
+  WorkQueryMeta,
+  WorkQueryResponse,
+  RetrievalItem,
+  RetrievalResponse,
+} from './ai.js';
