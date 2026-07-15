@@ -9,6 +9,7 @@ import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
+import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 
 /**
  * 워커가 기록하는 card_sms_events.parseStatus(cardSmsParseStatus enum) 부분집합.
@@ -35,6 +36,7 @@ export class CardSmsParseProcessor extends WorkerHost {
 
   constructor(
     @Inject(DB) private readonly db: Db,
+    private readonly promotionService: TransactionPromotionService,
     configService: ConfigService,
   ) {
     super();
@@ -130,6 +132,13 @@ export class CardSmsParseProcessor extends WorkerHost {
       },
       'card-sms event parsed',
     );
+
+    // 파싱 성공(또는 사람 검토 필요) 건은 같은 잡 안에서 거래로 승격한다(스펙 §1.1/§6).
+    // parse_failed는 승격 대상이 아니다. 승격 실패는 잡을 재시도하게 두되, 멱등
+    // (sourceEventId UNIQUE)이라 재승격이 안전하다.
+    if (parseStatus === 'parsed' || parseStatus === 'pending_review') {
+      await this.promotionService.promote(cardSmsEventId);
+    }
 
     return { cardSmsEventId, parseStatus };
   }

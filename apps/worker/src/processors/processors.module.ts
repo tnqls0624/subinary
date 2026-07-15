@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { QUEUE_NAMES } from '@family/shared';
 
+import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { CardSmsParseProcessor } from './card-sms-parse.processor';
 import { TestProcessor } from './test.processor';
 
@@ -14,6 +15,8 @@ import { TestProcessor } from './test.processor';
       { name: QUEUE_NAMES.CARD_SMS_PARSE },
     ),
   ],
-  providers: [TestProcessor, CardSmsParseProcessor],
+  // TransactionPromotionService는 파싱 잡 안에서 거래 승격을 담당한다(스펙 §6).
+  // DB(@Global)/ConfigService(@Global)만 의존하므로 별도 import 없이 provider로 둔다.
+  providers: [TestProcessor, CardSmsParseProcessor, TransactionPromotionService],
 })
 export class ProcessorsModule {}
