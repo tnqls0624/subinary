@@ -18,6 +18,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint: noop'",
+    "migrate": "node dist/migrate.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
