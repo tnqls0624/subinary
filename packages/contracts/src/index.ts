@@ -67,3 +67,22 @@ export type {
   DeviceSecretResponse,
   DevicePingResponse,
 } from './device.js';
+
+export {
+  cardSmsParseStatusSchema,
+  cardSmsTransactionTypeSchema,
+  cardSmsIngestRequestSchema,
+  cardSmsIngestResponseSchema,
+  cardSmsEventSummarySchema,
+  cardSmsEventDetailSchema,
+  mobileEventStatusResponseSchema,
+} from './card-sms.js';
+export type {
+  CardSmsParseStatus,
+  CardSmsTransactionType,
+  CardSmsIngestRequest,
+  CardSmsIngestResponse,
+  CardSmsEventSummary,
+  CardSmsEventDetail,
+  MobileEventStatusResponse,
+} from './card-sms.js';
