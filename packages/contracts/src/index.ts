@@ -86,3 +86,38 @@ export type {
   CardSmsEventDetail,
   MobileEventStatusResponse,
 } from './card-sms.js';
+
+export {
+  cardVisibilitySchema,
+  cardCreateRequestSchema,
+  cardUpdateRequestSchema,
+  cardSummarySchema,
+} from './card.js';
+export type {
+  CardVisibility,
+  CardCreateRequest,
+  CardUpdateRequest,
+  CardSummary,
+} from './card.js';
+
+export { categorySummarySchema } from './category.js';
+export type { CategorySummary } from './category.js';
+
+export {
+  transactionTypeSchema,
+  transactionStatusSchema,
+  transactionUpdateRequestSchema,
+  linkCancellationRequestSchema,
+  transactionSummarySchema,
+  transactionListResponseSchema,
+  transactionSummaryResponseSchema,
+} from './transaction.js';
+export type {
+  TransactionType,
+  TransactionStatus,
+  TransactionUpdateRequest,
+  LinkCancellationRequest,
+  TransactionSummary,
+  TransactionListResponse,
+  TransactionSummaryResponse,
+} from './transaction.js';
