@@ -27,7 +27,7 @@ const portFromEnv = z.coerce.number().int().min(1).max(65535);
 /**
  * Application configuration schema (grouped).
  *
- * Groups: `app` / `database` / `redis` / `queue` / `storage` / `ai` / `auth`.
+ * Groups: `app` / `database` / `redis` / `queue` / `storage` / `ai` / `auth` / `device`.
  * Numbers and booleans are coerced from environment variable strings.
  */
 export const configSchema = z.object({
@@ -63,6 +63,12 @@ export const configSchema = z.object({
     accessSecret: z.string().min(16),
     accessTtlSec: z.coerce.number().int().positive().default(900),
     refreshTtlSec: z.coerce.number().int().positive().default(2592000),
+  }),
+  device: z.object({
+    secretEncKey: z.string().regex(/^[0-9a-fA-F]{64}$/),
+    hmacTimestampToleranceSec: z.coerce.number().int().positive().default(300),
+    nonceTtlSec: z.coerce.number().int().positive().default(600),
+    maxBodyBytes: z.coerce.number().int().positive().default(16384),
   }),
 });
 
@@ -112,6 +118,12 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       accessTtlSec: env.JWT_ACCESS_TTL_SEC,
       refreshTtlSec: env.JWT_REFRESH_TTL_SEC,
     },
+    device: {
+      secretEncKey: env.DEVICE_SECRET_ENC_KEY,
+      hmacTimestampToleranceSec: env.HMAC_TIMESTAMP_TOLERANCE_SEC,
+      nonceTtlSec: env.DEVICE_NONCE_TTL_SEC,
+      maxBodyBytes: env.MOBILE_MAX_BODY_BYTES,
+    },
   };
 
   const parsed = configSchema.safeParse(candidate);
@@ -129,7 +141,7 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
  *
  * NestJS usage: `ConfigModule.forRoot({ isGlobal: true, load: [loadConfig] })`
  * — passing `loadConfig` directly makes each top-level group key
- * (`app`, `database`, `redis`, `queue`, `storage`, `ai`, `auth`) a root key of the
+ * (`app`, `database`, `redis`, `queue`, `storage`, `ai`, `auth`, `device`) a root key of the
  * config store, so it can be read as
  * `configService.get<AppConfig['database']>('database')`.
  */
