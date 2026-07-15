@@ -17,7 +17,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint: noop'"
+    "lint": "echo 'lint: noop'",
+    "test": "vitest run"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^22.10.7",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
   }
 }
