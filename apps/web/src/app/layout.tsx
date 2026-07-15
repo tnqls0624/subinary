@@ -6,7 +6,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Family Memory AI",
-  description: "Family Memory AI — Phase 0 infrastructure dashboard",
+  description: "가족 금융 웹앱 — 대시보드 · 거래 · 예산 · 장치 · 가족 관리",
 };
 
 export default function RootLayout({

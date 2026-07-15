@@ -1,0 +1,414 @@
+/* ---------------------------------------------------------------------------
+ * Family Memory AI — web · API 클라이언트 (Phase 5 §6.1)
+ *
+ * 얇은 fetch 래퍼 + 도메인별 호출 함수. 모든 요청은:
+ *  - `${NEXT_PUBLIC_API_URL}` 기준 절대경로(글로벌 prefix `/v1`).
+ *  - `credentials:'include'` (HttpOnly refresh 쿠키는 `/v1/auth` 스코프에서 자동 전송).
+ *  - access token은 인자로 받아 `Authorization: Bearer` 헤더로만 전달(메모리 보관).
+ *
+ * 401 재시도/refresh 로직은 auth-context의 authedFetch가 담당한다(여기선 순수 호출).
+ * 타입은 전부 @family/contracts 계약을 사용한다.
+ * ------------------------------------------------------------------------- */
+import type {
+  AcceptInvitationRequest,
+  AuthResult,
+  CardBreakdown,
+  CardCreateRequest,
+  CardSummary,
+  CardUpdateRequest,
+  CategoryBreakdown,
+  CategorySummary,
+  DeviceRegisterRequest,
+  DeviceSecretResponse,
+  DeviceSummary,
+  HouseholdCreateRequest,
+  HouseholdSummary,
+  InvitationCreateRequest,
+  InvitationCreated,
+  InvitationSummary,
+  LinkCancellationRequest,
+  LoginRequest,
+  MemberBreakdown,
+  MemberRoleUpdateRequest,
+  MemberSummary,
+  MeResponse,
+  MerchantBreakdown,
+  MonthlyAnalytics,
+  RegisterRequest,
+  TransactionListResponse,
+  TransactionSummary,
+  TransactionSummaryResponse,
+  TransactionUpdateRequest,
+  BudgetCreateRequest,
+  BudgetListResponse,
+  BudgetSummary,
+  BudgetUpdateRequest,
+} from "@family/contracts";
+
+/** API 베이스 URL. 환경변수 우선, 로컬 개발 기본값 fallback. */
+const API =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+
+/** access token 타입 별칭(메모리 보관, 없을 수 있음). */
+export type AccessToken = string | null;
+
+/** 실패한 API 응답을 표현하는 에러(HTTP status + 서버 메시지 보존). */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, message: string, body?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+interface ApiFetchOptions {
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+  body?: unknown;
+  accessToken?: AccessToken;
+  signal?: AbortSignal;
+}
+
+/** 서버 에러 본문(`{ statusCode, message, error }`)에서 사람이 읽을 메시지를 추출한다. */
+function extractErrorMessage(status: number, body: unknown): string {
+  if (body && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    const message = record.message;
+    if (typeof message === "string" && message.length > 0) return message;
+    if (Array.isArray(message) && message.length > 0) {
+      return message.map((m) => String(m)).join(", ");
+    }
+    if (typeof record.error === "string") return record.error;
+  }
+  return `요청이 실패했습니다 (HTTP ${status})`;
+}
+
+/**
+ * 핵심 fetch 래퍼. JSON 요청/응답, 쿠키 포함, 실패 시 {@link ApiError} throw.
+ * 204/빈 본문은 `undefined`로 반환한다.
+ */
+export async function apiFetch<T>(
+  path: string,
+  options: ApiFetchOptions = {},
+): Promise<T> {
+  const { method = "GET", body, accessToken, signal } = options;
+
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (accessToken) headers["authorization"] = `Bearer ${accessToken}`;
+
+  const response = await fetch(`${API}${path}`, {
+    method,
+    credentials: "include",
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
+    cache: "no-store",
+  });
+
+  const text = await response.text();
+  let parsed: unknown;
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      extractErrorMessage(response.status, parsed),
+      parsed,
+    );
+  }
+
+  return parsed as T;
+}
+
+/** undefined/null/'' 를 건너뛰고 쿼리스트링을 만든다(선행 `?` 포함, 없으면 빈 문자열). */
+function buildQuery(
+  params: Readonly<Record<string, string | number | boolean | null | undefined>>,
+): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    search.set(key, String(value));
+  }
+  const encoded = search.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+// --- 요청 파라미터 타입 -----------------------------------------------------
+
+/** analytics.* 공통 쿼리(월 또는 from/to 범위). */
+export interface AnalyticsParams {
+  householdId: string;
+  month?: string;
+  from?: string;
+  to?: string;
+}
+
+/** transactions.list 필터(PRD §17.4). 금액은 KRW 정수. */
+export interface TransactionListParams {
+  householdId: string;
+  memberId?: string;
+  cardId?: string;
+  type?: string;
+  status?: string;
+  categoryId?: string;
+  from?: string;
+  to?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  limit?: number;
+  cursor?: string;
+}
+
+/** transactions.summary(검증용 월 요약) 쿼리. */
+export interface TransactionSummaryParams {
+  householdId: string;
+  from?: string;
+  to?: string;
+}
+
+/** budgets.list 쿼리(현재월 사용률 기준). */
+export interface BudgetListParams {
+  householdId: string;
+  month?: string;
+}
+
+// --- 도메인 호출 함수 -------------------------------------------------------
+
+/**
+ * 도메인별 API 함수. 인증이 필요한 호출은 첫 인자로 accessToken을 받는다.
+ * (auth-context가 authedFetch로 감싸 401 재시도를 처리한다.)
+ */
+export const api = {
+  auth: {
+    register: (body: RegisterRequest) =>
+      apiFetch<AuthResult>("/v1/auth/register", { method: "POST", body }),
+    login: (body: LoginRequest) =>
+      apiFetch<AuthResult>("/v1/auth/login", { method: "POST", body }),
+    refresh: () => apiFetch<AuthResult>("/v1/auth/refresh", { method: "POST" }),
+    logout: () =>
+      apiFetch<{ success: true }>("/v1/auth/logout", { method: "POST" }),
+    me: (accessToken: AccessToken) =>
+      apiFetch<MeResponse>("/v1/auth/me", { accessToken }),
+  },
+
+  households: {
+    create: (accessToken: AccessToken, body: HouseholdCreateRequest) =>
+      apiFetch<HouseholdSummary>("/v1/households", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    get: (accessToken: AccessToken, id: string) =>
+      apiFetch<HouseholdSummary>(`/v1/households/${id}`, { accessToken }),
+    members: (accessToken: AccessToken, id: string) =>
+      apiFetch<MemberSummary[]>(`/v1/households/${id}/members`, { accessToken }),
+    invitations: (accessToken: AccessToken, id: string) =>
+      apiFetch<InvitationSummary[]>(`/v1/households/${id}/invitations`, {
+        accessToken,
+      }),
+    invite: (
+      accessToken: AccessToken,
+      id: string,
+      body: InvitationCreateRequest,
+    ) =>
+      apiFetch<InvitationCreated>(`/v1/households/${id}/invitations`, {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    acceptInvite: (
+      accessToken: AccessToken,
+      token: string,
+      body: AcceptInvitationRequest,
+    ) =>
+      apiFetch<HouseholdSummary>(
+        `/v1/household-invitations/${token}/accept`,
+        { method: "POST", body, accessToken },
+      ),
+    updateRole: (
+      accessToken: AccessToken,
+      id: string,
+      memberId: string,
+      body: MemberRoleUpdateRequest,
+    ) =>
+      apiFetch<MemberSummary>(`/v1/households/${id}/members/${memberId}`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
+    removeMember: (accessToken: AccessToken, id: string, memberId: string) =>
+      apiFetch<{ removed: true }>(
+        `/v1/households/${id}/members/${memberId}`,
+        { method: "DELETE", accessToken },
+      ),
+    revokeInvite: (
+      accessToken: AccessToken,
+      id: string,
+      invitationId: string,
+    ) =>
+      apiFetch<InvitationSummary>(
+        `/v1/households/${id}/invitations/${invitationId}`,
+        { method: "DELETE", accessToken },
+      ),
+  },
+
+  devices: {
+    list: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<DeviceSummary[]>(
+        `/v1/devices${buildQuery({ householdId })}`,
+        { accessToken },
+      ),
+    register: (accessToken: AccessToken, body: DeviceRegisterRequest) =>
+      apiFetch<DeviceSecretResponse>("/v1/devices/register", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    rotate: (accessToken: AccessToken, id: string) =>
+      apiFetch<DeviceSecretResponse>(`/v1/devices/${id}/rotate-secret`, {
+        method: "POST",
+        accessToken,
+      }),
+    revoke: (accessToken: AccessToken, id: string) =>
+      apiFetch<{ revoked: true }>(`/v1/devices/${id}`, {
+        method: "DELETE",
+        accessToken,
+      }),
+  },
+
+  cards: {
+    list: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<CardSummary[]>(`/v1/cards${buildQuery({ householdId })}`, {
+        accessToken,
+      }),
+    create: (accessToken: AccessToken, body: CardCreateRequest) =>
+      apiFetch<CardSummary>("/v1/cards", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    get: (accessToken: AccessToken, id: string) =>
+      apiFetch<CardSummary>(`/v1/cards/${id}`, { accessToken }),
+    update: (accessToken: AccessToken, id: string, body: CardUpdateRequest) =>
+      apiFetch<CardSummary>(`/v1/cards/${id}`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
+  },
+
+  categories: {
+    list: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<CategorySummary[]>(
+        `/v1/categories${buildQuery({ householdId })}`,
+        { accessToken },
+      ),
+  },
+
+  transactions: {
+    list: (accessToken: AccessToken, params: TransactionListParams) =>
+      apiFetch<TransactionListResponse>(
+        `/v1/transactions${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    get: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}`, { accessToken }),
+    update: (
+      accessToken: AccessToken,
+      id: string,
+      body: TransactionUpdateRequest,
+    ) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
+    linkCancellation: (
+      accessToken: AccessToken,
+      id: string,
+      body: LinkCancellationRequest,
+    ) =>
+      apiFetch<TransactionSummary>(
+        `/v1/transactions/${id}/link-cancellation`,
+        { method: "POST", body, accessToken },
+      ),
+    markDuplicate: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}/mark-duplicate`, {
+        method: "POST",
+        accessToken,
+      }),
+    markValid: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}/mark-valid`, {
+        method: "POST",
+        accessToken,
+      }),
+    summary: (accessToken: AccessToken, params: TransactionSummaryParams) =>
+      apiFetch<TransactionSummaryResponse>(
+        `/v1/transactions/summary${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+  },
+
+  analytics: {
+    monthly: (accessToken: AccessToken, params: AnalyticsParams) =>
+      apiFetch<MonthlyAnalytics>(
+        `/v1/analytics/monthly${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    categories: (accessToken: AccessToken, params: AnalyticsParams) =>
+      apiFetch<CategoryBreakdown>(
+        `/v1/analytics/categories${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    members: (accessToken: AccessToken, params: AnalyticsParams) =>
+      apiFetch<MemberBreakdown>(
+        `/v1/analytics/members${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    cards: (accessToken: AccessToken, params: AnalyticsParams) =>
+      apiFetch<CardBreakdown>(
+        `/v1/analytics/cards${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    merchants: (accessToken: AccessToken, params: AnalyticsParams) =>
+      apiFetch<MerchantBreakdown>(
+        `/v1/analytics/merchants${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+  },
+
+  budgets: {
+    list: (accessToken: AccessToken, params: BudgetListParams) =>
+      apiFetch<BudgetListResponse>(
+        `/v1/budgets${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    create: (accessToken: AccessToken, body: BudgetCreateRequest) =>
+      apiFetch<BudgetSummary>("/v1/budgets", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    update: (accessToken: AccessToken, id: string, body: BudgetUpdateRequest) =>
+      apiFetch<BudgetSummary>(`/v1/budgets/${id}`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
+    delete: (accessToken: AccessToken, id: string) =>
+      apiFetch<void>(`/v1/budgets/${id}`, {
+        method: "DELETE",
+        accessToken,
+      }),
+  },
+} as const;
