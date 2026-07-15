@@ -1,0 +1,33 @@
+{
+  "name": "@family/database",
+  "version": "0.0.0",
+  "private": true,
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint: noop'",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.4",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.6",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
+  }
+}
