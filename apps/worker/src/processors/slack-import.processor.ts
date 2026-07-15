@@ -20,14 +20,14 @@
  * Secret hygiene (spec §1/§6): message text, PII, secrets and tokens are never
  * logged — only counts and identifiers.
  */
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '@family/config';
 import { schema, type Db } from '@family/database';
 import { createLogger, QUEUE_NAMES } from '@family/shared';
 import { parseSlackExport } from '@family/slack-parser';
-import type { Job } from 'bullmq';
+import type { Job, Queue } from 'bullmq';
 import { eq, sql } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
@@ -66,6 +66,8 @@ export class SlackImportProcessor extends WorkerHost {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
+    // import 성공 후 RAG 인덱싱을 트리거하기 위한 rag-index 큐(스펙 §5).
+    @InjectQueue(QUEUE_NAMES.RAG_INDEX) private readonly ragIndexQueue: Queue,
     configService: ConfigService,
   ) {
     super();
@@ -272,12 +274,15 @@ export class SlackImportProcessor extends WorkerHost {
       /* ---------------------------------------------------------------- */
       /* 5) workspace.lastImportedAt 갱신                                   */
       /* ---------------------------------------------------------------- */
-      await tx
+      // 범용 workspaces.id(= RAG 인덱싱 잡 payload)를 함께 회수한다.
+      const [updatedWorkspace] = await tx
         .update(schema.slackWorkspaces)
         .set({ lastImportedAt: now, updatedAt: now })
-        .where(eq(schema.slackWorkspaces.id, slackWorkspaceId));
+        .where(eq(schema.slackWorkspaces.id, slackWorkspaceId))
+        .returning({ workspaceId: schema.slackWorkspaces.workspaceId });
 
       return {
+        workspaceId: updatedWorkspace?.workspaceId ?? null,
         channelCount: channelIdBySlackId.size,
         userCount: userRows.length,
         messageCount: messageRows.length,
@@ -301,6 +306,18 @@ export class SlackImportProcessor extends WorkerHost {
       },
       'slack export imported',
     );
+
+    // import 성공 후 RAG 인덱싱을 enqueue한다(스펙 §5). jobId를 workspaceId 기반으로
+    // 고정해 과다 enqueue를 흡수하고, 완료 잡은 재인덱싱을 위해 제거한다(removeOnComplete).
+    // 주의: BullMQ 커스텀 jobId 에는 ':' 를 쓸 수 없다(Custom Id cannot contain :) —
+    // 구분자로 밑줄을 사용한다. workspaceId 는 slack_workspaces.workspaceId(= workspaces.id).
+    if (counts.workspaceId) {
+      await this.ragIndexQueue.add(
+        'index',
+        { workspaceId: counts.workspaceId },
+        { jobId: `rag-index_${counts.workspaceId}`, removeOnComplete: true },
+      );
+    }
 
     return {
       sourceItemId,
