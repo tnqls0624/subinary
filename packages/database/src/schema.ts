@@ -340,3 +340,136 @@ export type NewDeviceCredential = typeof deviceCredentials.$inferInsert;
 
 export type DeviceNonce = typeof deviceNonces.$inferSelect;
 export type NewDeviceNonce = typeof deviceNonces.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 3 — 카드 문자 수집 & 파싱 (Phase 3 Build Spec §2)                      */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (card sms)                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** 범용 원문 Source Item 종류(Phase 3는 card_sms만 사용, 향후 확장). */
+export const sourceKind = pgEnum('source_kind', [
+  'card_sms',
+  'slack',
+  'manual',
+]);
+
+/** 카드 문자 파싱 상태(pending→parsed/parse_failed/pending_review). */
+export const cardSmsParseStatus = pgEnum('card_sms_parse_status', [
+  'pending',
+  'parsed',
+  'parse_failed',
+  'pending_review',
+]);
+
+/** 카드 거래 종류(승인/취소/미상). */
+export const cardSmsTxnType = pgEnum('card_sms_txn_type', [
+  'approval',
+  'cancellation',
+  'unknown',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* sourceItems                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 범용 원문 레코드(PRD §11 "원문 우선"). 실제 원문 텍스트는 MinIO에 저장하고
+ * 여기에는 `objectKey` + `contentHash`(sha256 hex) + 메타만 보관한다.
+ * 원문 전체·PII는 로그에 남기지 않는다.
+ */
+export const sourceItems = pgTable(
+  'source_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    kind: sourceKind('kind').notNull(),
+    objectKey: text('object_key').notNull(),
+    contentHash: text('content_hash').notNull(),
+    sizeBytes: integer('size_bytes').notNull().default(0),
+    deviceId: uuid('device_id').references(() => registeredDevices.id),
+    memberId: uuid('member_id').references(() => householdMembers.id),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('source_items_household_id_idx').on(table.householdId),
+    index('source_items_content_hash_idx').on(table.contentHash),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* cardSmsEvents                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 카드 문자 이벤트(수집 + 비동기 파싱 결과). 멱등성은 UNIQUE(device_id, event_id)로
+ * 강제한다(동일 장치의 동일 eventId 재전송 차단). `rawContent`는 워커가 매번 MinIO를
+ * fetch하지 않도록 두는 편의 사본이다. `amount`는 KRW 정수(원), `confidence`는
+ * 0~100 정수(부동소수 회피), `occurredAt`은 Asia/Seoul 기준으로 파서가 계산한다.
+ * 파싱 결과는 Phase 4에서 `card_transactions`로 승격된다.
+ */
+export const cardSmsEvents = pgTable(
+  'card_sms_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => householdMembers.id),
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => registeredDevices.id),
+    sourceItemId: uuid('source_item_id')
+      .notNull()
+      .references(() => sourceItems.id),
+    eventId: text('event_id').notNull(),
+    sender: text('sender').notNull(),
+    rawContent: text('raw_content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    parseStatus: cardSmsParseStatus('parse_status').notNull().default('pending'),
+    parseError: text('parse_error'),
+    // 파싱 결과(구조화, Phase 4에서 card_transactions로 승격).
+    issuer: text('issuer'),
+    transactionType: cardSmsTxnType('transaction_type'),
+    amount: integer('amount'),
+    currency: text('currency').default('KRW'),
+    merchantRaw: text('merchant_raw'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }),
+    maskedCardNumber: text('masked_card_number'),
+    installmentMonths: integer('installment_months'),
+    confidence: integer('confidence'),
+    parsedAt: timestamp('parsed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('card_sms_events_device_id_event_id_unique').on(
+      table.deviceId,
+      table.eventId,
+    ),
+    index('card_sms_events_household_id_idx').on(table.householdId),
+    index('card_sms_events_parse_status_idx').on(table.parseStatus),
+    index('card_sms_events_household_id_parse_status_idx').on(
+      table.householdId,
+      table.parseStatus,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (card sms)                                                       */
+/* -------------------------------------------------------------------------- */
+
+export type SourceItem = typeof sourceItems.$inferSelect;
+export type NewSourceItem = typeof sourceItems.$inferInsert;
+
+export type CardSmsEvent = typeof cardSmsEvents.$inferSelect;
+export type NewCardSmsEvent = typeof cardSmsEvents.$inferInsert;
