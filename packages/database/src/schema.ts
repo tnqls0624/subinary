@@ -10,7 +10,10 @@
  *   여기서 다루지 않는다.
  * - 금액 컬럼은 KRW 정수 원칙(Phase 1 테이블에는 금액 컬럼 없음).
  */
+import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
+  boolean,
   index,
   integer,
   pgEnum,
@@ -18,6 +21,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -473,3 +477,233 @@ export type NewSourceItem = typeof sourceItems.$inferInsert;
 
 export type CardSmsEvent = typeof cardSmsEvents.$inferSelect;
 export type NewCardSmsEvent = typeof cardSmsEvents.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 4 — 거래 관리 (Phase 4 Build Spec §2)                                 */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (cards & transactions)                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 거래/카드 공개 범위(PRD §8, §26). 'private'=본인만, 'household'=가족 공유,
+ * 'summary_only'=통계엔 포함하되 목록에서 가맹점은 타인에게 마스킹.
+ */
+export const cardVisibility = pgEnum('card_visibility', [
+  'private',
+  'household',
+  'summary_only',
+]);
+
+/** 카드 상태(비활성 시 inactive). */
+export const cardStatus = pgEnum('card_status', ['active', 'inactive']);
+
+/** 거래 종류(승인/취소). */
+export const txnType = pgEnum('txn_type', ['approval', 'cancellation']);
+
+/**
+ * 거래 상태. 취소 반영/검토 상태를 포함한다.
+ * - approved: 정상 승인
+ * - partially_cancelled: 부분 취소(netAmount = amount - cancelledAmount)
+ * - cancelled: 전체 취소(netAmount = 0)
+ * - pending_review: 검토 필요(취소 연결 애매 등)
+ * - duplicate_suspected: 2차 유사중복 의심
+ */
+export const txnStatus = pgEnum('txn_status', [
+  'approved',
+  'partially_cancelled',
+  'cancelled',
+  'pending_review',
+  'duplicate_suspected',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* paymentCards                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 결제 카드. `householdId`+`ownerMemberId`가 소유하며, `createdBy`는 등록을
+ * 수행한 사용자다. `maskedNumber`는 카드번호 뒤 4자리만 저장(전체 PAN 저장 금지)하며
+ * 승격 시 파서 `maskedCardNumber` 뒤 4자리와 매칭해 거래를 자동 연결한다.
+ * 거래는 이 카드의 `visibility`를 상속한다(카드 없으면 'household').
+ */
+export const paymentCards = pgTable(
+  'payment_cards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    ownerMemberId: uuid('owner_member_id')
+      .notNull()
+      .references(() => householdMembers.id),
+    issuer: text('issuer').notNull(),
+    alias: text('alias').notNull(),
+    maskedNumber: text('masked_number'),
+    cardFingerprint: text('card_fingerprint'),
+    visibility: cardVisibility('visibility').notNull().default('household'),
+    status: cardStatus('status').notNull().default('active'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('payment_cards_household_id_idx').on(table.householdId),
+    index('payment_cards_household_id_masked_number_idx').on(
+      table.householdId,
+      table.maskedNumber,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* expenseCategories                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 지출 카테고리. `householdId`가 null이면 시스템 기본 카테고리(모든 가족 공용),
+ * 값이 있으면 해당 household 커스텀 카테고리(Phase 4는 시스템 기본만 사용).
+ * 시스템 카테고리 `slug`는 partial unique index로, household 커스텀은
+ * (householdId, slug)로 유일성을 강제한다.
+ */
+export const expenseCategories = pgTable(
+  'expense_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id').references(() => households.id),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    isSystem: boolean('is_system').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('expense_categories_system_slug_unique')
+      .on(table.slug)
+      .where(sql`${table.householdId} is null`),
+    unique('expense_categories_household_id_slug_unique').on(
+      table.householdId,
+      table.slug,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* merchantCategoryRules                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 가맹점→카테고리 사용자 규칙(PRD §15 1~2순위). 사용자가 거래 카테고리를 바꾸면
+ * (householdId, merchantPattern) → categoryId로 upsert하며, 이후 승격/재분류에
+ * 정확 매칭으로 반영된다(과거 거래 소급 안 함). `merchantPattern`은 정규화 가맹점명.
+ */
+export const merchantCategoryRules = pgTable(
+  'merchant_category_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    merchantPattern: text('merchant_pattern').notNull(),
+    categoryId: uuid('category_id')
+      .notNull()
+      .references(() => expenseCategories.id),
+    priority: integer('priority').notNull().default(100),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('merchant_category_rules_household_id_merchant_pattern_unique').on(
+      table.householdId,
+      table.merchantPattern,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* cardTransactions                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 카드 거래(파싱 이벤트에서 승격). 금액은 모두 KRW 정수(원)다.
+ *
+ * netAmount 규약(PRD §31 / 스펙 §1.2):
+ * - `approval` 거래: netAmount = amount - cancelledAmount. 통계는 승인 거래의
+ *   netAmount 합으로 계산한다.
+ * - `cancellation` 거래: 이력/감사용 레코드로 netAmount = 0(이중계상 방지),
+ *   `parentTransactionId`로 대응 승인 거래에 연결한다.
+ *
+ * 승격 멱등성은 `sourceEventId` UNIQUE로 강제한다(재승격 시 onConflictDoNothing).
+ * `parentTransactionId`는 같은 테이블을 가리키는 self-FK다.
+ */
+export const cardTransactions = pgTable(
+  'card_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => householdMembers.id),
+    cardId: uuid('card_id').references(() => paymentCards.id),
+    sourceEventId: uuid('source_event_id')
+      .notNull()
+      .references(() => cardSmsEvents.id),
+    transactionType: txnType('transaction_type').notNull(),
+    status: txnStatus('status').notNull(),
+    amount: integer('amount').notNull(),
+    cancelledAmount: integer('cancelled_amount').notNull().default(0),
+    netAmount: integer('net_amount').notNull(),
+    currency: text('currency').notNull().default('KRW'),
+    merchantRaw: text('merchant_raw'),
+    merchantNormalized: text('merchant_normalized'),
+    categoryId: uuid('category_id').references(() => expenseCategories.id),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    authorizationCode: text('authorization_code'),
+    installmentMonths: integer('installment_months'),
+    parentTransactionId: uuid('parent_transaction_id').references(
+      (): AnyPgColumn => cardTransactions.id,
+    ),
+    visibility: cardVisibility('visibility').notNull().default('household'),
+    memo: text('memo'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('card_transactions_source_event_id_unique').on(table.sourceEventId),
+    index('card_transactions_household_id_idx').on(table.householdId),
+    index('card_transactions_household_id_member_id_idx').on(
+      table.householdId,
+      table.memberId,
+    ),
+    index('card_transactions_card_id_idx').on(table.cardId),
+    index('card_transactions_household_id_transaction_type_idx').on(
+      table.householdId,
+      table.transactionType,
+    ),
+    index('card_transactions_parent_transaction_id_idx').on(
+      table.parentTransactionId,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (cards & transactions)                                           */
+/* -------------------------------------------------------------------------- */
+
+export type PaymentCard = typeof paymentCards.$inferSelect;
+export type NewPaymentCard = typeof paymentCards.$inferInsert;
+
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
+export type NewExpenseCategory = typeof expenseCategories.$inferInsert;
+
+export type MerchantCategoryRule = typeof merchantCategoryRules.$inferSelect;
+export type NewMerchantCategoryRule = typeof merchantCategoryRules.$inferInsert;
+
+export type CardTransaction = typeof cardTransactions.$inferSelect;
+export type NewCardTransaction = typeof cardTransactions.$inferInsert;
