@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 
 import fastifyCookie from '@fastify/cookie';
+import fastifyMultipart from '@fastify/multipart';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import {
@@ -33,6 +34,12 @@ async function bootstrap(): Promise<void> {
 
   // HttpOnly refresh-token 쿠키 지원(Fastify 어댑터). listen 이전에 등록.
   await app.register(fastifyCookie);
+
+  // Slack export 번들 업로드(Phase 6)용 multipart 파서. 파일 크기 50MB, 1개 제한.
+  // multipart는 별도 content-type 파서로 처리되어 JSON bodyLimit(16KB)과 무관하다.
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: 50 * 1024 * 1024, files: 1 },
+  });
 
   const configService = app.get(ConfigService);
   const appConfig = configService.get<AppConfig['app']>('app');
