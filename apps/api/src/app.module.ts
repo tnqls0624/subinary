@@ -18,6 +18,7 @@ import { DevModule } from './dev/dev.module';
 import { DevicesModule } from './devices/devices.module';
 import { HealthModule } from './health/health.module';
 import { HouseholdModule } from './household/household.module';
+import { MemoryModule } from './memory/memory.module';
 import { QueueModule } from './queue/queue.module';
 import { RetrievalModule } from './retrieval/retrieval.module';
 import { SlackModule } from './slack/slack.module';
@@ -49,6 +50,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     BudgetsModule,
     SlackModule,
     RetrievalModule,
+    MemoryModule,
     ...devOnlyModules,
   ],
   providers: [
