@@ -191,3 +191,34 @@ export type {
   RetrievalItem,
   RetrievalResponse,
 } from './ai.js';
+
+export {
+  memoryTypeSchema,
+  memoryStatusSchema,
+  candidateStatusSchema,
+  memoryExtractRequestSchema,
+  candidateApproveRequestSchema,
+  memoryCreateRequestSchema,
+  memoryUpdateRequestSchema,
+  memorySupersedeRequestSchema,
+  memoryExtractResponseSchema,
+  candidateSummarySchema,
+  memorySummarySchema,
+  candidateListResponseSchema,
+  memoryListResponseSchema,
+} from './memory.js';
+export type {
+  MemoryType,
+  MemoryStatus,
+  CandidateStatus,
+  MemoryExtractRequest,
+  CandidateApproveRequest,
+  MemoryCreateRequest,
+  MemoryUpdateRequest,
+  MemorySupersedeRequest,
+  MemoryExtractResponse,
+  CandidateSummary,
+  MemorySummary,
+  CandidateListResponse,
+  MemoryListResponse,
+} from './memory.js';
