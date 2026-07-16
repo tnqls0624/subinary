@@ -1136,3 +1136,229 @@ export type NewChunk = typeof chunks.$inferInsert;
 
 export type Embedding = typeof embeddings.$inferSelect;
 export type NewEmbedding = typeof embeddings.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 8 — 장기 기억 (Phase 8 Build Spec §2)                                 */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (memory)                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** 기억 종류(PRD §20). */
+export const memoryType = pgEnum('memory_type', [
+  'event',
+  'fact',
+  'decision',
+  'preference',
+  'procedure',
+  'incident',
+  'task',
+]);
+
+/** 기억 상태(후보/승인/거부/대체). */
+export const memoryStatus = pgEnum('memory_status', [
+  'candidate',
+  'approved',
+  'rejected',
+  'superseded',
+]);
+
+/** 후보 기억 검토 상태(대기/승인/거부). */
+export const candidateStatus = pgEnum('candidate_status', [
+  'pending',
+  'approved',
+  'rejected',
+]);
+
+/** 기억 원문 종류(PRD §3.1 원문 연결). */
+export const memorySourceType = pgEnum('memory_source_type', [
+  'chunk',
+  'slack_message',
+  'card_sms',
+  'manual',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* memoryCandidates                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 후보 기억(추출 → 검토 대기, 스펙 §1.1). 워커 `memory-extract` 잡이 workspace의
+ * chunks 텍스트를 결정적 규칙 함수(`@family/rag` extractMemoryCandidates)로
+ * 분류해 생성한다(status='pending'). 소유 스코프는 `workspaceId`
+ * (workspaces.ownerUserId 소유자 본인만 접근, PRD §26)다.
+ *
+ * 멱등성은 UNIQUE(workspaceId, sourceChunkId, type, subjectHash)로 강제한다 —
+ * `subjectHash`는 앱이 계산한 md5(subject) 사본이며, 동일 chunk에서 같은
+ * type/subject 후보가 중복 생성되지 않도록 한다(재추출 시 onConflictDoNothing/
+ * Update). `confidence`는 0~100 정수(규칙 강도), `sourceRefId`는 chunk의
+ * sourceRefId(threadTs 등) 사본, 승인 시 `promotedMemoryId`로 생성된 memory에
+ * 연결한다(memories를 나중에 선언하므로 forward-FK는 AnyPgColumn lazy 콜백).
+ */
+export const memoryCandidates = pgTable(
+  'memory_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    type: memoryType('type').notNull(),
+    subject: text('subject').notNull(),
+    subjectHash: text('subject_hash').notNull(),
+    content: text('content').notNull(),
+    confidence: integer('confidence').notNull(),
+    sourceChunkId: uuid('source_chunk_id').references(() => chunks.id),
+    sourceRefId: text('source_ref_id'),
+    status: candidateStatus('status').notNull().default('pending'),
+    extractedAt: timestamp('extracted_at', { withTimezone: true }).notNull(),
+    promotedMemoryId: uuid('promoted_memory_id').references(
+      (): AnyPgColumn => memories.id,
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('memory_candidates_workspace_chunk_type_hash_unique').on(
+      table.workspaceId,
+      table.sourceChunkId,
+      table.type,
+      table.subjectHash,
+    ),
+    index('memory_candidates_workspace_id_idx').on(table.workspaceId),
+    index('memory_candidates_workspace_id_status_idx').on(
+      table.workspaceId,
+      table.status,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* memories                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 승인된 장기 기억(PRD §20). 소유 스코프는 `workspaceId`
+ * (workspaces.ownerUserId 소유자 본인만 접근, PRD §26)다. 현재/과거 구분은
+ * `validFrom`(기본 observedAt) / `validUntil`(null=현재 유효)로 하며, supersede
+ * 시 기존 기억을 status='superseded' + validUntil=now로 마감하고 새 기억이
+ * `supersedesMemoryId`로 이전 기억을 가리킨다(스펙 §1.3, self-FK AnyPgColumn).
+ * `observedAt`은 관측 시점, `confidence`는 0~100 정수, `createdBy`는 승인/생성
+ * 사용자, `deletedAt`은 soft delete다.
+ */
+export const memories = pgTable(
+  'memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    type: memoryType('type').notNull(),
+    subject: text('subject').notNull(),
+    content: text('content').notNull(),
+    validFrom: timestamp('valid_from', { withTimezone: true }),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    confidence: integer('confidence').notNull(),
+    status: memoryStatus('status').notNull().default('approved'),
+    supersedesMemoryId: uuid('supersedes_memory_id').references(
+      (): AnyPgColumn => memories.id,
+    ),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('memories_workspace_id_idx').on(table.workspaceId),
+    index('memories_workspace_id_type_idx').on(table.workspaceId, table.type),
+    index('memories_workspace_id_status_idx').on(
+      table.workspaceId,
+      table.status,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* memorySources                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 기억 원문 연결(PRD §3.1). 하나의 memory는 여러 원문을 참조할 수 있으며,
+ * `sourceType`('chunk'|'slack_message'|'card_sms'|'manual')별로 `sourceRefId`
+ * (chunkId, slack threadTs, 'manual' 등)를 가리킨다. 승인 시 chunk → 원본 Slack
+ * 스레드 역추적이 가능하다. (memoryId, sourceType, sourceRefId)는 유일하다
+ * (동일 원문 중복 연결 방지).
+ */
+export const memorySources = pgTable(
+  'memory_sources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    memoryId: uuid('memory_id')
+      .notNull()
+      .references(() => memories.id),
+    sourceType: memorySourceType('source_type').notNull(),
+    sourceRefId: text('source_ref_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('memory_sources_memory_id_source_type_source_ref_id_unique').on(
+      table.memoryId,
+      table.sourceType,
+      table.sourceRefId,
+    ),
+    index('memory_sources_memory_id_idx').on(table.memoryId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* memoryVersions                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 기억 수정 이력(스펙 §1.4). PATCH 시 변경 *전* 스냅샷을 저장한다(version 증가).
+ * `subject`/`content`는 변경 전 값, `changeReason`은 변경 사유(선택),
+ * `changedBy`는 변경 사용자다. (memoryId, version)은 유일하다.
+ */
+export const memoryVersions = pgTable(
+  'memory_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    memoryId: uuid('memory_id')
+      .notNull()
+      .references(() => memories.id),
+    version: integer('version').notNull(),
+    subject: text('subject').notNull(),
+    content: text('content').notNull(),
+    changeReason: text('change_reason'),
+    changedBy: uuid('changed_by')
+      .notNull()
+      .references(() => users.id),
+    changedAt: timestamp('changed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('memory_versions_memory_id_version_unique').on(
+      table.memoryId,
+      table.version,
+    ),
+    index('memory_versions_memory_id_idx').on(table.memoryId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (memory)                                                         */
+/* -------------------------------------------------------------------------- */
+
+export type MemoryCandidate = typeof memoryCandidates.$inferSelect;
+export type NewMemoryCandidate = typeof memoryCandidates.$inferInsert;
+
+export type Memory = typeof memories.$inferSelect;
+export type NewMemory = typeof memories.$inferInsert;
+
+export type MemorySource = typeof memorySources.$inferSelect;
+export type NewMemorySource = typeof memorySources.$inferInsert;
+
+export type MemoryVersion = typeof memoryVersions.$inferSelect;
+export type NewMemoryVersion = typeof memoryVersions.$inferInsert;
