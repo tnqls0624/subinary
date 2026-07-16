@@ -10,3 +10,6 @@ export type { RankedItem, FusedItem } from './fusion.js';
 export { reciprocalRankFusion, cosineDistanceToScore, RRF_K } from './fusion.js';
 
 export { toVectorLiteral } from './vector.js';
+
+export type { MemoryType, MemoryCandidateDraft } from './extract.js';
+export { extractMemoryCandidates } from './extract.js';
