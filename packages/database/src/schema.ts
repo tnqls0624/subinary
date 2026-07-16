@@ -1362,3 +1362,148 @@ export type NewMemorySource = typeof memorySources.$inferInsert;
 
 export type MemoryVersion = typeof memoryVersions.$inferSelect;
 export type NewMemoryVersion = typeof memoryVersions.$inferInsert;
+
+/* ========================================================================== */
+/* Phase 9 — Temporal GraphRAG (Phase 9 Build Spec §2)                        */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* pgEnum (graph)                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** 엔티티 종류(PRD §22 / 스펙 §2). person/technology는 규칙 추출, 나머지는 확장 지점. */
+export const entityType = pgEnum('entity_type', [
+  'person',
+  'technology',
+  'project',
+  'decision',
+  'incident',
+  'topic',
+]);
+
+/** 관계 종류(PRD §20/§22 / 스펙 §2). supersedes는 명시적 대체 체인용. */
+export const relationshipType = pgEnum('relationship_type', [
+  'relates_to',
+  'resolves',
+  'works_on',
+  'uses',
+  'decides',
+  'supersedes',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* entities                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 지식 그래프 엔티티(스펙 §1.1). 소유 스코프는 `workspaceId`
+ * (workspaces.ownerUserId 소유자 본인만 접근, PRD §26)다. 규칙 추출은 person
+ * (canonicalName=slackUserId, name=realName??name)과 technology
+ * (canonicalName=정규화 소문자 term, name=표시형)을 만든다.
+ *
+ * 현재/과거 구분은 `validFrom`(최초 등장 chunk occurredAt) / `validUntil`
+ * (null=현재 유효)로 한다. 멱등 재추출은 UNIQUE(workspaceId, type, canonicalName) +
+ * onConflictDoUpdate(validFrom = least(기존, 신규))로 강제한다(중복 없음).
+ * `metadata`는 확장 메타(원문·PII는 담지 않음)다.
+ */
+export const entities = pgTable(
+  'entities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    type: entityType('type').notNull(),
+    name: text('name').notNull(),
+    canonicalName: text('canonical_name').notNull(),
+    validFrom: timestamp('valid_from', { withTimezone: true }),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('entities_workspace_id_type_canonical_name_unique').on(
+      table.workspaceId,
+      table.type,
+      table.canonicalName,
+    ),
+    index('entities_workspace_id_idx').on(table.workspaceId),
+    index('entities_workspace_id_type_idx').on(table.workspaceId, table.type),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* relationships                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 지식 그래프 관계(스펙 §1.2/§1.3). 소유 스코프는 `workspaceId`
+ * (workspaces.ownerUserId 소유자 본인만 접근, PRD §26)다. 규칙 추출은 chunk 단위로
+ * technology 쌍의 relates_to/resolves를 만들며 `validFrom`=chunk.occurredAt,
+ * `sourceRefId`=chunk sourceRefId(원문 연결), `confidence`(0~100 정수)를 담는다.
+ *
+ * Temporal supersede는 **명시적 API**다(자동 결정변경 추론 안 함): 새 관계가 기존을
+ * 대체하면 기존을 `validUntil`=now로 마감하고, 새 관계가 `supersedesRelationshipId`로
+ * 이전 관계를 가리킨다(self-FK, forward 없이 자기참조이므로 AnyPgColumn lazy 콜백).
+ *
+ * 멱등 재추출은 UNIQUE(workspaceId, sourceEntityId, type, targetEntityId,
+ * sourceRefId) + onConflictDoNothing으로 강제한다 — 추출은 항상 sourceRefId를
+ * 채우므로 중복이 없고, 명시적 supersede는 새 row(제약 무관)다. Postgres는 UNIQUE의
+ * nullable 컬럼 null을 distinct로 취급한다.
+ */
+export const relationships = pgTable(
+  'relationships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    sourceEntityId: uuid('source_entity_id')
+      .notNull()
+      .references(() => entities.id),
+    targetEntityId: uuid('target_entity_id')
+      .notNull()
+      .references(() => entities.id),
+    type: relationshipType('type').notNull(),
+    validFrom: timestamp('valid_from', { withTimezone: true }),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    supersedesRelationshipId: uuid('supersedes_relationship_id').references(
+      (): AnyPgColumn => relationships.id,
+    ),
+    sourceRefId: text('source_ref_id'),
+    confidence: integer('confidence').notNull().default(60),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // 5컬럼 UNIQUE 이름은 기본 생성 시 63자를 넘으므로 축약한다(ws/src/tgt/ref).
+    unique('relationships_ws_src_type_tgt_ref_unique').on(
+      table.workspaceId,
+      table.sourceEntityId,
+      table.type,
+      table.targetEntityId,
+      table.sourceRefId,
+    ),
+    index('relationships_workspace_id_idx').on(table.workspaceId),
+    index('relationships_source_entity_id_idx').on(table.sourceEntityId),
+    index('relationships_target_entity_id_idx').on(table.targetEntityId),
+    index('relationships_workspace_id_type_idx').on(
+      table.workspaceId,
+      table.type,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* 추론 타입 (graph)                                                          */
+/* -------------------------------------------------------------------------- */
+
+export type Entity = typeof entities.$inferSelect;
+export type NewEntity = typeof entities.$inferInsert;
+
+export type Relationship = typeof relationships.$inferSelect;
+export type NewRelationship = typeof relationships.$inferInsert;
