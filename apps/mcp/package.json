@@ -1,12 +1,27 @@
 {
   "name": "@family/mcp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "MCP server placeholder — Phase 10 예정 (현재 비활성, 실행 서비스 아님)",
+  "description": "Family Memory AI — stdio MCP server (Phase 10). Exposes personal memory + finance tools over the existing HTTP API.",
+  "bin": {
+    "family-memory-mcp": "dist/main.js"
+  },
   "scripts": {
-    "build": "echo 'build: noop (@family/mcp — Phase 10 예정)'",
-    "dev": "echo 'dev: noop (@family/mcp — Phase 10 예정)'",
-    "typecheck": "echo 'typecheck: noop (@family/mcp — Phase 10 예정)'",
-    "lint": "echo 'lint: noop (@family/mcp — Phase 10 예정)'"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo noop",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@family/contracts": "workspace:*",
+    "@family/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
   }
 }
