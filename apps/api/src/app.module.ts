@@ -16,6 +16,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
 import { DevicesModule } from './devices/devices.module';
+import { GraphModule } from './graph/graph.module';
 import { HealthModule } from './health/health.module';
 import { HouseholdModule } from './household/household.module';
 import { MemoryModule } from './memory/memory.module';
@@ -51,6 +52,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     SlackModule,
     RetrievalModule,
     MemoryModule,
+    GraphModule,
     ...devOnlyModules,
   ],
   providers: [
