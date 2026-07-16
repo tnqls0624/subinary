@@ -13,5 +13,8 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # 패키지만 dist로 빌드(앱은 dev에서 소스 실행)
 RUN pnpm -r --filter "./packages/*" build
+# MCP 서버(apps/mcp)는 예외로 dist 빌드해 이미지에 포함
+# (compose 서비스 아님 — verify-phase10 이 컨테이너 내부에서 `node apps/mcp/dist/main.js` 를 spawn)
+RUN pnpm --filter @family/mcp build
 EXPOSE 3000 3001 3002
 CMD ["node","-e","console.log('override in compose')"]
