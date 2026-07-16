@@ -222,3 +222,30 @@ export type {
   CandidateListResponse,
   MemoryListResponse,
 } from './memory.js';
+
+export {
+  entityTypeSchema,
+  relationshipTypeSchema,
+  graphExtractRequestSchema,
+  relationshipSupersedeRequestSchema,
+  graphExtractResponseSchema,
+  entitySummarySchema,
+  relationshipSummarySchema,
+  entityDetailSchema,
+  entityListResponseSchema,
+  relationshipListResponseSchema,
+  timelineResponseSchema,
+} from './graph.js';
+export type {
+  EntityType,
+  RelationshipType,
+  GraphExtractRequest,
+  RelationshipSupersedeRequest,
+  GraphExtractResponse,
+  EntitySummary,
+  RelationshipSummary,
+  EntityDetail,
+  EntityListResponse,
+  RelationshipListResponse,
+  TimelineResponse,
+} from './graph.js';
