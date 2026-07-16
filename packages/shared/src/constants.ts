@@ -14,6 +14,10 @@ export const DEFAULT_TIMEZONE = 'Asia/Seoul';
  * - `memory-extract`: Phase 8 long-term memory extraction queue — rule-based
  *   extraction of memory candidates from a workspace's chunks (api enqueues,
  *   worker consumes; jobId keyed by workspace to collapse re-enqueues).
+ * - `graph-extract`: Phase 9 temporal-graph extraction queue — deterministic
+ *   rule-based extraction of entities/relationships from a workspace's chunks
+ *   (api enqueues, worker consumes; jobId keyed by workspace to collapse
+ *   re-enqueues).
  */
 export const QUEUE_NAMES = {
   TEST: 'test',
@@ -21,4 +25,5 @@ export const QUEUE_NAMES = {
   SLACK_IMPORT: 'slack-import',
   RAG_INDEX: 'rag-index',
   MEMORY_EXTRACT: 'memory-extract',
+  GRAPH_EXTRACT: 'graph-extract',
 } as const;
