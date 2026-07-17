@@ -57,7 +57,13 @@ export const configSchema = z.object({
     forcePathStyle: booleanFromEnv,
   }),
   ai: z.object({
-    provider: z.enum(['mock', 'openai', 'anthropic', 'google']).default('mock'),
+    provider: z
+      .enum(['mock', 'openai', 'anthropic', 'google', 'gemini'])
+      .default('mock'),
+    /** Gemini API 키 (provider=gemini일 때 필요; 없으면 provider가 Mock 폴백). */
+    geminiApiKey: z.string().min(1).optional(),
+    /** LLM 모델명 override (선택, 예: gemini-2.0-flash). */
+    llmModel: z.string().min(1).optional(),
   }),
   auth: z.object({
     accessSecret: z.string().min(16),
@@ -115,6 +121,8 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
     },
     ai: {
       provider: env.AI_PROVIDER,
+      geminiApiKey: env.GEMINI_API_KEY,
+      llmModel: env.GEMINI_MODEL,
     },
     auth: {
       accessSecret: env.JWT_ACCESS_SECRET,

@@ -9,3 +9,4 @@ export * from './types.js';
 export * from './mocks.js';
 export * from './factory.js';
 export * from './openai.js';
+export * from './gemini.js';

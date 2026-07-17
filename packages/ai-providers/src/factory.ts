@@ -1,6 +1,7 @@
 /**
  * Provider 팩토리 (Phase 0 Build Spec §6.4 / Phase 7 Build Spec §4).
  */
+import { GeminiLlmProvider } from './gemini.js';
 import { MockEmbeddingProvider, MockLlmProvider, MockRerankerProvider } from './mocks.js';
 import { OpenAiEmbeddingProvider } from './openai.js';
 import type { EmbeddingProvider, LlmProvider, RerankerProvider } from './types.js';
@@ -19,12 +20,16 @@ export interface ProviderSet {
  * API 키는 cfg 또는 환경변수에서 읽는다.
  */
 export interface CreateProvidersConfig {
-  /** 'mock'(기본) | 'openai' | 'anthropic' | 'google'. */
+  /** 'mock'(기본) | 'gemini'('google' 별칭) | 'openai' | 'anthropic'. */
   provider?: string;
   /** OpenAI API 키 (없으면 `process.env.OPENAI_API_KEY`). */
   openaiApiKey?: string;
   /** Anthropic API 키 (없으면 `process.env.ANTHROPIC_API_KEY`). */
   anthropicApiKey?: string;
+  /** Gemini API 키 (없으면 `process.env.GEMINI_API_KEY`). */
+  geminiApiKey?: string;
+  /** LLM 모델명 override (선택, 예: 'gemini-2.0-flash'). */
+  llmModel?: string;
   /** 임베딩 모델명 override (선택). */
   embeddingModel?: string;
 }
@@ -57,9 +62,11 @@ function createMockProviders(): ProviderSet {
  * 설정값으로부터 LLM/Embedding/Reranker provider 묶음을 생성한다.
  *
  * - `mock`(기본): 결정적 Mock 묶음. Phase 7 검증은 이 경로로 수행된다.
+ * - `gemini`(별칭 `google`): 키가 있으면 LLM만 Gemini(generateContent), 임베딩/리랭커는
+ *   Mock 유지(vector(256) 스키마 계약). 키가 없으면 경고 후 Mock 폴백.
  * - `openai`: API 키가 있으면 임베딩만 OpenAI 스켈레톤으로 배선(검증 미사용, llm/reranker는 Mock),
  *   키가 없으면 경고 후 Mock 폴백.
- * - `anthropic` / `google`: 미구현. 경고 후 Mock 폴백.
+ * - `anthropic`: 미구현. 경고 후 Mock 폴백.
  *
  * 어떤 경우에도 예외로 파이프라인을 중단시키지 않고 Mock으로 폴백한다.
  */
@@ -93,9 +100,24 @@ export function createProviders(cfg?: CreateProvidersConfig): ProviderSet {
       }
       return createMockProviders();
     }
-    case 'google':
-      warn("provider 'google' is not implemented; falling back to mock providers");
-      return createMockProviders();
+    case 'gemini':
+    case 'google': {
+      const apiKey = cfg?.geminiApiKey ?? readEnv('GEMINI_API_KEY');
+      if (!apiKey) {
+        warn("provider 'gemini' has no API key; falling back to mock providers");
+        return createMockProviders();
+      }
+      // LLM만 Gemini로 배선한다. 임베딩은 Phase 7 스키마가 vector(256)로 고정돼
+      // 있어(재임베딩 필요) Mock을 유지한다 — 분류/질의/인사이트는 LLM만 사용.
+      return {
+        llm: new GeminiLlmProvider({
+          apiKey,
+          ...(cfg?.llmModel !== undefined ? { model: cfg.llmModel } : {}),
+        }),
+        embedding: new MockEmbeddingProvider(),
+        reranker: new MockRerankerProvider(),
+      };
+    }
     case 'mock':
     default:
       return createMockProviders();
