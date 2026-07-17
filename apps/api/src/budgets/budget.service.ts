@@ -35,7 +35,7 @@ import type {
   BudgetUpdateRequest,
   HouseholdRole,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { isUniqueViolation, schema, type Db } from '@family/database';
 import { assertKrwInteger } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -52,19 +52,6 @@ const PRIVILEGED_ROLES: readonly HouseholdRole[] = ['owner', 'admin'];
 
 /** `month=YYYY-MM` (01–12). */
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
-
-/** Postgres unique-violation SQLSTATE (budgets scope collision). */
-const UNIQUE_VIOLATION = '23505';
-
-/** Narrows an unknown error to a Postgres unique-constraint violation. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === UNIQUE_VIOLATION
-  );
-}
 
 /** Coerces a driver-returned numeric aggregate (string | number) to an int. */
 function toInt(value: string | number | null | undefined): number {

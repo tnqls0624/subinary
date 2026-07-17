@@ -22,15 +22,12 @@ import { Queue } from 'bullmq';
 import { and, eq } from 'drizzle-orm';
 
 import type { CardSmsIngestRequest, CardSmsIngestResponse } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { isUniqueViolation, schema, type Db } from '@family/database';
 import { QUEUE_NAMES } from '@family/shared';
 
 import { DB } from '../database/database.constants';
 import type { DeviceContext } from '../devices/decorators/device.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
-
-/** Postgres unique-violation SQLSTATE (device_id, event_id collision). */
-const UNIQUE_VIOLATION = '23505';
 
 /**
  * Internal sentinel thrown inside the ingest transaction when the event insert
@@ -42,16 +39,6 @@ class DuplicateEventError extends Error {
     super('duplicate card-sms event');
     this.name = 'DuplicateEventError';
   }
-}
-
-/** Narrows an unknown error to a Postgres unique-constraint violation. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === UNIQUE_VIOLATION
-  );
 }
 
 @Injectable()

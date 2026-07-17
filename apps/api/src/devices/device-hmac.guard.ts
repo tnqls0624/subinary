@@ -28,28 +28,20 @@ import { eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 
 import type { AppConfig } from '@family/config';
-import { schema, type Db, type DeviceCredential } from '@family/database';
+import {
+  isUniqueViolation,
+  schema,
+  type Db,
+  type DeviceCredential,
+} from '@family/database';
 
 import { DB } from '../database/database.constants';
 import { DeviceSecretCipher } from './device-secret.cipher';
 import { DeviceService } from './device.service';
 import type { RequestWithDevice } from './decorators/device.decorator';
 
-/** Postgres unique-violation SQLSTATE (nonce replay). */
-const UNIQUE_VIOLATION = '23505';
-
 /** Fastify request with raw body access and the injected device principal. */
 type HmacRequest = RequestWithDevice & { rawBody?: Buffer };
-
-/** Narrows an unknown error to a Postgres unique-constraint violation. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === UNIQUE_VIOLATION
-  );
-}
 
 @Injectable()
 export class DeviceHmacGuard implements CanActivate {
