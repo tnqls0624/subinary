@@ -14,13 +14,17 @@ const cardStatusSchema = z.enum(['active', 'inactive']);
 
 /**
  * `POST /v1/cards` — register a payment card under a household (PRD §31 Phase 4).
- * Store only the trailing digits of `maskedNumber`; auto-linking matches the last 4.
+ * `maskedNumber` carries **only the last 4 digits** (auto-linking matches on them);
+ * the `^\d{4}$` guard rejects a full PAN or any masked/formatted value server-side.
  */
 export const cardCreateRequestSchema = z.object({
   householdId: z.string().uuid(),
   issuer: z.string().min(1).max(50),
   alias: z.string().min(1).max(100),
-  maskedNumber: z.string().max(40).optional(),
+  maskedNumber: z
+    .string()
+    .regex(/^\d{4}$/, 'maskedNumber must be exactly the last 4 digits')
+    .optional(),
   visibility: cardVisibilitySchema.default('household'),
 });
 export type CardCreateRequest = z.infer<typeof cardCreateRequestSchema>;
