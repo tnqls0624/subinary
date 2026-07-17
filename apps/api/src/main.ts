@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 
+import { Readable } from 'node:stream';
+
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +17,55 @@ import { createLogger } from '@family/shared';
 import { AppModule } from './app.module';
 
 const DEFAULT_API_PORT = 3001;
+
+/**
+ * JSON 문자열 리터럴 안의 raw 제어문자(개행/탭 등)를 이스케이프해 "거의 JSON"을
+ * 유효한 JSON으로 수리한다. MacroDroid/단축어가 카드문자 원문을 JSON body에
+ * 그대로 삽입하면 문자열 안에 raw 개행이 들어가 표준 파서가 400을 내는데, 이
+ * 케이스가 자동화 도구에서는 사실상 회피 불가능하다(도구의 이스케이프 미지원).
+ * 문자열 컨텍스트만 추적하므로 구조(따옴표/중괄호)는 건드리지 않는다.
+ */
+function escapeCtrlInJsonStrings(input: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of input) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        out += ch;
+        continue;
+      }
+      const code = ch.codePointAt(0) ?? 0;
+      if (code < 0x20) {
+        out +=
+          code === 0x0a
+            ? '\\n'
+            : code === 0x0d
+              ? '\\r'
+              : code === 0x09
+                ? '\\t'
+                : `\\u${code.toString(16).padStart(4, '0')}`;
+        continue;
+      }
+      out += ch;
+    } else {
+      if (ch === '"') inString = true;
+      out += ch;
+    }
+  }
+  return out;
+}
 
 async function bootstrap(): Promise<void> {
   const logger = createLogger('api', {
@@ -36,14 +87,49 @@ async function bootstrap(): Promise<void> {
   // text/plain 본문 파서: 자동화 도구(안드로이드 MacroDroid, iOS 단축어)가 개행/
   // 따옴표가 든 카드문자 원문을 JSON 이스케이프 없이 raw body로 보낼 수 있게 한다
   // (POST /v1/mobile-events/card-sms-text). eventId/sender는 헤더로 받는다.
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .addContentTypeParser(
-      'text/plain',
-      { parseAs: 'string' },
-      (_req, body, done) => done(null, body),
-    );
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.addContentTypeParser(
+    'text/plain',
+    { parseAs: 'string' },
+    (_req, body, done) => done(null, body),
+  );
+
+  // card-sms-token(JSON) 경로 한정 lenient JSON 수리: MacroDroid가 content에
+  // 카드문자를 raw로 넣으면 문자열 안 개행 때문에 표준 JSON 파서가 400을 낸다.
+  // preParsing 훅에서 이 경로의 body가 strict JSON 파싱에 실패할 때만 문자열 내
+  // 제어문자를 이스케이프해 재구성한다(유효 JSON은 바이트 그대로 통과, 다른
+  // 라우트·HMAC(rawBody 서명) 경로는 접촉하지 않음). content-length는 수리로
+  // 길이가 변하므로 함께 갱신한다.
+  fastify.addHook('preParsing', (req, _reply, payload, done) => {
+    const url = req.raw.url ?? '';
+    const contentType = req.headers['content-type'] ?? '';
+    if (
+      !url.startsWith('/v1/mobile-events/card-sms-token') ||
+      !contentType.includes('application/json')
+    ) {
+      done(null, payload);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    payload.on('data', (chunk: Buffer) => chunks.push(chunk));
+    payload.on('error', (err: Error) => done(err));
+    payload.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      let repaired = raw;
+      try {
+        JSON.parse(raw);
+      } catch {
+        repaired = escapeCtrlInJsonStrings(raw);
+      }
+      const buf = Buffer.from(repaired, 'utf8');
+      req.headers['content-length'] = String(buf.byteLength);
+      const stream = Readable.from([buf]) as Readable & {
+        receivedEncodedLength?: number;
+      };
+      stream.receivedEncodedLength = buf.byteLength;
+      done(null, stream);
+    });
+  });
 
   // HttpOnly refresh-token 쿠키 지원(Fastify 어댑터). listen 이전에 등록.
   await app.register(fastifyCookie);
