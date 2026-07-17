@@ -17,7 +17,7 @@
     "@family/database": "workspace:*",
     "@family/shared": "workspace:*",
     "@fastify/cookie": "^11",
-    "@fastify/multipart": "^9",
+    "@fastify/multipart": "^10.1.0",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
@@ -26,19 +26,19 @@
     "@nestjs/platform-fastify": "^11.0.0",
     "@node-rs/argon2": "^2",
     "bullmq": "^5.34.0",
-    "drizzle-orm": "^0.38.0",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^5.4.2",
-    "nestjs-zod": "^4",
+    "nestjs-zod": "^5.4.0",
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "zod": "^3.24.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
-    "@swc/cli": "^0.5.2",
+    "@swc/cli": "^0.8.1",
     "@swc/core": "^1.10.1",
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.9.3"
   }
 }
