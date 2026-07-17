@@ -51,7 +51,7 @@ const RIGHT_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/more", label: "더보기", icon: LayoutGrid },
 ];
 /** '더보기' 탭이 활성으로 취급하는 관리 경로(하위 목적지 포함). */
-const MORE_PATHS = ["/more", "/household", "/devices"];
+const MORE_PATHS = ["/more", "/household", "/cards", "/devices"];
 
 function BrandMark() {
   return (

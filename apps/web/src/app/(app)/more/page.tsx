@@ -8,6 +8,7 @@
  * ------------------------------------------------------------------------- */
 import {
   ChevronRight,
+  CreditCard,
   Smartphone,
   Users,
   type LucideIcon,
@@ -30,6 +31,12 @@ const ITEMS: ReadonlyArray<MoreItem> = [
     icon: Users,
     title: "가족 관리",
     description: "구성원 초대·역할, 대기 중인 초대를 관리해요",
+  },
+  {
+    href: "/cards",
+    icon: CreditCard,
+    title: "결제 카드",
+    description: "카드를 등록하면 문자 내역이 자동으로 연결돼요",
   },
   {
     href: "/devices",
