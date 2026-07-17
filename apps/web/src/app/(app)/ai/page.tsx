@@ -92,7 +92,9 @@ export default function AiPage() {
   const empty = turns.length === 0;
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-3.5rem-5rem)] w-full max-w-2xl flex-col">
+    // 가용 높이 = 100dvh − header(3.5rem) − main.pt-6(1.5rem) − main.pb-28(7rem).
+    // main 패딩을 그대로 상속하므로 자체 dvh 계산에서 중복 차감해야 스크롤이 안 생긴다.
+    <div className="mx-auto flex h-[calc(100dvh-12rem)] w-full max-w-2xl flex-col">
       {/* 대화 영역(스크롤) */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto pb-4">
         {empty ? (
