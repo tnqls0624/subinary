@@ -294,8 +294,10 @@ export const api = {
       apiFetch<CardSummary[]>(`/v1/cards${buildQuery({ householdId })}`, {
         accessToken,
       }),
+    // create additionally reports how many previously-unlinked transactions the
+    // registration retroactively linked (server-side backfill), for disclosure.
     create: (accessToken: AccessToken, body: CardCreateRequest) =>
-      apiFetch<CardSummary>("/v1/cards", {
+      apiFetch<CardSummary & { linkedTransactionCount: number }>("/v1/cards", {
         method: "POST",
         body,
         accessToken,

@@ -32,7 +32,7 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
-import { CardService } from './card.service';
+import { CardService, type CardCreateResult } from './card.service';
 
 class CardCreateDto extends createZodDto(cardCreateRequestSchema) {}
 class CardUpdateDto extends createZodDto(cardUpdateRequestSchema) {}
@@ -60,7 +60,7 @@ export class CardController {
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CardCreateDto,
-  ): Promise<CardSummary> {
+  ): Promise<CardCreateResult> {
     return this.cardService.create(user.userId, dto);
   }
 

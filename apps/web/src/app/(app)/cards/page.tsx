@@ -15,6 +15,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, MoreHorizontal, Plus } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 
 import type {
   CardCreateRequest,
@@ -190,8 +191,16 @@ export default function CardsPage() {
   const createMutation = useMutation({
     mutationFn: (body: CardCreateRequest) =>
       authedFetch((token) => api.cards.create(token, body)),
-    onSuccess: () => {
+    onSuccess: (result) => {
       invalidateCards();
+      // 소급 연결(backfill)이 과거 거래를 건드렸으면 목록/집계도 갱신하고 알린다.
+      if (result.linkedTransactionCount > 0) {
+        void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+        void queryClient.invalidateQueries({ queryKey: ["budgets"] });
+        toast.success(
+          `과거 거래 ${result.linkedTransactionCount}건을 이 카드에 연결했어요.`,
+        );
+      }
       setIssuer("");
       setAlias("");
       setMasked("");
