@@ -12,7 +12,9 @@
  *   approval → netAmount = amount - cancelledAmount, cancellation → netAmount = 0.
  * - 카드 자동연결: 파서 `maskedCardNumber` 뒤 4자리 ↔ 같은 household
  *   `payment_cards.maskedNumber` 뒤 4자리(스펙 §1.5). 매칭 없으면 cardId=null,
- *   visibility='household'.
+ *   visibility='household'. 뒤 4자리가 같은 활성 카드가 2장 이상이면 어느 카드인지
+ *   확정 불가 → 임의 연결 대신 cardId=null + 후보 중 가장 제한적인 visibility(누출
+ *   방지)로 두고, 승인은 pending_review로 표시해 사람 검토를 유도한다.
  * - 카테고리: merchant_category_rules(household, merchantNormalized) →
  *   키워드(categorizeByKeyword → slug → 시스템 expense_categories) →
  *   LLM 제안(category-suggest 큐, 비동기 자가학습) → null (스펙 §1.3).
@@ -62,7 +64,16 @@ const CARD_TAIL_LENGTH = 4;
 interface CardLink {
   cardId: string | null;
   visibility: CardVisibility;
+  /** 뒤 4자리가 같은 활성 카드가 2장 이상이라 카드를 확정하지 못한 경우. */
+  ambiguous: boolean;
 }
+
+/** visibility 제한 강도 순위(클수록 더 비공개). */
+const VISIBILITY_RANK: Record<CardVisibility, number> = {
+  household: 0,
+  summary_only: 1,
+  private: 2,
+};
 
 /** 취소 승격 결과(로깅용). */
 interface CancellationOutcome {
@@ -210,9 +221,10 @@ export class TransactionPromotionService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * 승인 거래를 승격한다(스펙 §6.6). 2차 유사중복이면 status='duplicate_suspected',
-   * 아니면 'approved'. netAmount=amount, cancelledAmount=0, approvedAt=occurredAt.
-   * onConflictDoNothing(sourceEventId)로 재승격을 흡수한다.
+   * 승인 거래를 승격한다(스펙 §6.6). 카드 자동연결이 모호하면(뒤 4자리 중복)
+   * status='pending_review'로 남겨 검토를 유도한다. 그렇지 않으면 2차 유사중복이면
+   * 'duplicate_suspected', 아니면 'approved'. netAmount=amount, cancelledAmount=0,
+   * approvedAt=occurredAt. onConflictDoNothing(sourceEventId)로 재승격을 흡수한다.
    *
    * @returns 실제 기록된 status. 경합으로 삽입되지 않았으면 'already_promoted'.
    */
@@ -223,14 +235,21 @@ export class TransactionPromotionService {
     merchantNormalized: string | null,
     categoryId: string | null,
   ): Promise<TransactionStatus | 'already_promoted'> {
-    const isDuplicate = await this.isDuplicateApproval(
-      event.householdId,
-      link.cardId,
-      amount,
-      merchantNormalized,
-      event.occurredAt,
-    );
-    const status: TransactionStatus = isDuplicate ? 'duplicate_suspected' : 'approved';
+    // 모호 매칭은 cardId=null이라 중복 판정 기준(카드)이 없고, '어느 카드인지 미정'
+    // 자체가 검토 대상이므로 중복 검사를 건너뛰고 pending_review로 확정한다.
+    let status: TransactionStatus;
+    if (link.ambiguous) {
+      status = 'pending_review';
+    } else {
+      const isDuplicate = await this.isDuplicateApproval(
+        event.householdId,
+        link.cardId,
+        amount,
+        merchantNormalized,
+        event.occurredAt,
+      );
+      status = isDuplicate ? 'duplicate_suspected' : 'approved';
+    }
 
     const [inserted] = await this.db
       .insert(schema.cardTransactions)
@@ -438,7 +457,14 @@ export class TransactionPromotionService {
   /**
    * 파서 maskedCardNumber 뒤 4자리로 같은 household의 활성 카드를 찾아 연결한다
    * (스펙 §1.5). 저장 포맷 차이('1234' vs '****1234')를 흡수하려 양쪽에서 숫자만
-   * 추출해 뒤 4자리를 비교한다. 매칭 없으면 cardId=null, visibility='household'.
+   * 추출해 뒤 4자리를 비교한다.
+   *
+   * - 매칭 0건: cardId=null, visibility='household'.
+   * - 매칭 1건: 그 카드에 연결하고 카드 visibility를 상속.
+   * - 매칭 2건 이상(뒤 4자리 중복): 어느 카드인지 확정 불가. 임의 카드에 붙이면
+   *   비결정적이고 private↔household 오상속(누출) 위험이 있으므로, 연결하지 않고
+   *   (cardId=null) 후보 중 가장 제한적인 visibility를 상속해 프라이버시 하향을
+   *   막는다. ambiguous=true로 표시해 승인 승격이 pending_review로 남긴다.
    */
   private async resolveCard(
     householdId: string,
@@ -446,7 +472,7 @@ export class TransactionPromotionService {
   ): Promise<CardLink> {
     const tail = lastFourDigits(maskedCardNumber);
     if (!tail) {
-      return { cardId: null, visibility: 'household' };
+      return { cardId: null, visibility: 'household', ambiguous: false };
     }
 
     const cards = await this.db
@@ -463,11 +489,31 @@ export class TransactionPromotionService {
         ),
       );
 
-    const match = cards.find((card) => lastFourDigits(card.maskedNumber) === tail);
-    if (!match) {
-      return { cardId: null, visibility: 'household' };
+    const matches = cards.filter(
+      (card) => lastFourDigits(card.maskedNumber) === tail,
+    );
+
+    if (matches.length === 0) {
+      return { cardId: null, visibility: 'household', ambiguous: false };
     }
-    return { cardId: match.id, visibility: match.visibility };
+    if (matches.length === 1) {
+      return {
+        cardId: matches[0].id,
+        visibility: matches[0].visibility,
+        ambiguous: false,
+      };
+    }
+
+    // 뒤 4자리 중복 → 확정 불가. 로그는 식별자/건수만(카드번호·PII 미기록).
+    this.logger.warn(
+      { householdId, matchCount: matches.length },
+      'card auto-link ambiguous: multiple active cards share the last 4 digits; left unlinked for review',
+    );
+    return {
+      cardId: null,
+      visibility: mostRestrictiveVisibility(matches.map((c) => c.visibility)),
+      ambiguous: true,
+    };
   }
 
   /**
@@ -562,6 +608,19 @@ export class TransactionPromotionService {
       );
     }
   }
+}
+
+/**
+ * 후보 카드 visibility 중 가장 제한적인 값을 고른다(private > summary_only >
+ * household). 뒤 4자리 모호 매칭 시 프라이버시 하향(예: private 지출이 household로
+ * 노출)을 막기 위한 보수적 상속. `visibilities`는 비어 있지 않다고 가정한다.
+ */
+function mostRestrictiveVisibility(
+  visibilities: readonly CardVisibility[],
+): CardVisibility {
+  return visibilities.reduce((acc, v) =>
+    VISIBILITY_RANK[v] > VISIBILITY_RANK[acc] ? v : acc,
+  );
 }
 
 /**
