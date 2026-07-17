@@ -180,6 +180,15 @@ export {
   workQueryResponseSchema,
   retrievalItemSchema,
   retrievalResponseSchema,
+  aiAnswerMethodSchema,
+  financeQueryRequestSchema,
+  financeAggregateKindSchema,
+  financeQueryItemSchema,
+  financeQueryDataSchema,
+  financeQueryResponseSchema,
+  monthlyInsightKindSchema,
+  monthlyInsightSchema,
+  monthlyInsightsResponseSchema,
 } from './ai.js';
 export type {
   ChunkSourceType,
@@ -190,6 +199,15 @@ export type {
   WorkQueryResponse,
   RetrievalItem,
   RetrievalResponse,
+  AiAnswerMethod,
+  FinanceQueryRequest,
+  FinanceAggregateKind,
+  FinanceQueryItem,
+  FinanceQueryData,
+  FinanceQueryResponse,
+  MonthlyInsightKind,
+  MonthlyInsight,
+  MonthlyInsightsResponse,
 } from './ai.js';
 
 export {
