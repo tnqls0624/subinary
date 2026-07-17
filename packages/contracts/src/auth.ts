@@ -44,10 +44,18 @@ export const authTokensSchema = z.object({
 });
 export type AuthTokens = z.infer<typeof authTokensSchema>;
 
-/** Response body for register / login / refresh. */
+/**
+ * Response body for register / login / refresh.
+ *
+ * `refreshToken` is populated **only for native clients** (Capacitor), which
+ * cannot rely on the cross-site HttpOnly refresh cookie. Web clients keep the
+ * cookie and never receive this field. Detected server-side via the
+ * `X-Client-Platform: capacitor` request header.
+ */
 export const authResultSchema = z.object({
   user: userSummarySchema,
   tokens: authTokensSchema,
+  refreshToken: z.string().optional(),
 });
 export type AuthResult = z.infer<typeof authResultSchema>;
 

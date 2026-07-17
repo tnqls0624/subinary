@@ -1,0 +1,29 @@
+{
+  "name": "@family/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Family Memory AI — Capacitor 네이티브 셸(iOS/Android)",
+  "scripts": {
+    "build:web": "pnpm --filter @family/web build:mobile",
+    "sync": "pnpm build:web && cap sync",
+    "copy": "pnpm build:web && cap copy",
+    "add:ios": "cap add ios",
+    "add:android": "cap add android",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "ios": "pnpm sync && cap open ios",
+    "android": "pnpm sync && cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/ios": "^8.4.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2"
+  }
+}

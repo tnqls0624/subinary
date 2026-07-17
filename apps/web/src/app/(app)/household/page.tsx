@@ -221,9 +221,10 @@ export default function HouseholdPage() {
   }
 
   function inviteLink(c: InvitationCreated): string {
+    const path = `/join?token=${encodeURIComponent(c.token)}`;
     return typeof window !== "undefined"
-      ? `${window.location.origin}/join/${c.token}`
-      : `/join/${c.token}`;
+      ? `${window.location.origin}${path}`
+      : path;
   }
 
   async function copyLink() {

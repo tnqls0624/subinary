@@ -146,14 +146,30 @@ async function bootstrap(): Promise<void> {
 
   // web(3000)→api(3001)는 cross-origin. refresh 쿠키를 주고받기 위해
   // credentials 허용 + 명시적 origin(와일드카드 금지). listen 이전에 등록.
+  //
+  // Capacitor 네이티브 앱은 WebView origin이 capacitor://localhost(iOS) /
+  // http://localhost(Android)라 정적 셸에서 원격 API를 호출할 때 CORS가 적용된다.
+  // 이 origin들도 허용해야 preflight를 통과한다. 네이티브는 쿠키 대신 바디 토큰을
+  // 쓰므로 refresh 토큰을 헤더로 실어보낸다 → X-Client-Platform/X-Refresh-Token 허용.
   const webConfig = configService.get<AppConfig['web']>('web');
   app.enableCors({
-    origin: webConfig?.corsOrigin ?? 'http://localhost:3000',
+    origin: [
+      webConfig?.corsOrigin ?? 'http://localhost:3000',
+      'capacitor://localhost',
+      'http://localhost',
+      'https://localhost',
+      'ionic://localhost',
+    ],
     credentials: true,
     // 프리플라이트 Access-Control-Allow-Methods에 전체 메서드를 명시한다.
     // 미지정 시 기본값이 좁아 DELETE/PATCH/PUT 요청이 preflight에서 차단된다.
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Client-Platform',
+      'X-Refresh-Token',
+    ],
   });
 
   // Graceful shutdown: `nest start --watch`(SWC)는 파일 변경 시 이전 프로세스의

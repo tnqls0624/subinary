@@ -27,6 +27,11 @@ import type {
 } from "@family/contracts";
 
 import { ApiError, api, type AccessToken } from "./api-client";
+import {
+  clearStoredRefreshToken,
+  getStoredRefreshToken,
+  persistRefreshToken,
+} from "./native";
 
 /** 인증 부트스트랩/세션 상태. */
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -87,9 +92,12 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
         if (!(error instanceof ApiError) || error.status !== 401) {
           throw error;
         }
-        // 401 → refresh 1회 재시도.
+        // 401 → refresh 1회 재시도. 네이티브는 저장된 토큰을 싣고, 로테이션된
+        // 새 토큰을 다시 저장한다(웹은 두 헬퍼 모두 no-op → 쿠키 흐름 그대로).
         try {
-          const refreshed = await api.auth.refresh();
+          const stored = await getStoredRefreshToken();
+          const refreshed = await api.auth.refresh(stored ?? undefined);
+          await persistRefreshToken(refreshed.refreshToken);
           setAccessToken(refreshed.tokens.accessToken);
           setUser(refreshed.user);
           setStatus("authenticated");
@@ -112,6 +120,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   const login = useCallback(
     async (input: LoginRequest) => {
       const result = await api.auth.login(input);
+      await persistRefreshToken(result.refreshToken);
       setAccessToken(result.tokens.accessToken);
       setUser(result.user);
       const me = await api.auth.me(result.tokens.accessToken);
@@ -124,6 +133,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   const register = useCallback(
     async (input: RegisterRequest) => {
       const result = await api.auth.register(input);
+      await persistRefreshToken(result.refreshToken);
       setAccessToken(result.tokens.accessToken);
       setUser(result.user);
       const me = await api.auth.me(result.tokens.accessToken);
@@ -135,9 +145,13 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
 
   const logout = useCallback(async () => {
     try {
-      await api.auth.logout();
+      const stored = await getStoredRefreshToken();
+      await api.auth.logout(stored ?? undefined);
     } catch {
       // 서버 실패와 무관하게 로컬 세션은 반드시 정리한다.
+    } finally {
+      // 네이티브 보안 저장의 refresh 토큰도 반드시 제거(웹은 no-op).
+      await clearStoredRefreshToken();
     }
     clearSession();
   }, [clearSession]);
@@ -147,8 +161,10 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     let cancelled = false;
     void (async () => {
       try {
-        const refreshed = await api.auth.refresh();
+        const stored = await getStoredRefreshToken();
+        const refreshed = await api.auth.refresh(stored ?? undefined);
         if (cancelled) return;
+        await persistRefreshToken(refreshed.refreshToken);
         setAccessToken(refreshed.tokens.accessToken);
         setUser(refreshed.user);
         const me = await api.auth.me(refreshed.tokens.accessToken);

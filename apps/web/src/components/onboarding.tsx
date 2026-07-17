@@ -49,7 +49,9 @@ import { useAuth } from "@/lib/auth-context";
 function extractToken(raw: string): string | null {
   const input = raw.trim();
   if (!input) return null;
-  // /join/<token>
+  // /join?token=<token> (현행) 또는 /join/<token> (구형 링크) 모두 허용.
+  const query = input.match(/[?&]token=([^&#\s]+)/);
+  if (query) return decodeURIComponent(query[1]);
   const join = input.match(/\/join\/([^/?#\s]+)/);
   if (join) return decodeURIComponent(join[1]);
   // API 경로: /v1/household-invitations/<token>/accept
@@ -139,7 +141,7 @@ export function Onboarding() {
       setInviteError("초대 링크 또는 토큰을 입력해 주세요.");
       return;
     }
-    router.push(`/join/${encodeURIComponent(token)}`);
+    router.push(`/join?token=${encodeURIComponent(token)}`);
   }
 
   return (

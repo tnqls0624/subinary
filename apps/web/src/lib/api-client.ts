@@ -48,6 +48,8 @@ import type {
   MonthlyInsightsResponse,
 } from "@family/contracts";
 
+import { isNative } from "./native";
+
 /** API 베이스 URL. 환경변수 우선, 로컬 개발 기본값 fallback. */
 const API =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -73,6 +75,11 @@ interface ApiFetchOptions {
   body?: unknown;
   accessToken?: AccessToken;
   signal?: AbortSignal;
+  /**
+   * 네이티브 전용: refresh 토큰을 X-Refresh-Token 헤더로 실어 보낸다(쿠키 대체).
+   * 웹에서는 사용하지 않는다(HttpOnly 쿠키가 자동 전송됨).
+   */
+  refreshToken?: string;
 }
 
 /** 서버 에러 본문(`{ statusCode, message, error }`)에서 사람이 읽을 메시지를 추출한다. */
@@ -97,11 +104,15 @@ export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {},
 ): Promise<T> {
-  const { method = "GET", body, accessToken, signal } = options;
+  const { method = "GET", body, accessToken, signal, refreshToken } = options;
 
   const headers: Record<string, string> = { accept: "application/json" };
   if (body !== undefined) headers["content-type"] = "application/json";
   if (accessToken) headers["authorization"] = `Bearer ${accessToken}`;
+  // 네이티브: 서버가 바디로 refresh 토큰을 내려주도록 플랫폼을 알리고, refresh/logout
+  // 호출 시 저장해둔 토큰을 헤더로 재전송한다(cross-site 쿠키 미사용).
+  if (isNative()) headers["x-client-platform"] = "capacitor";
+  if (refreshToken) headers["x-refresh-token"] = refreshToken;
 
   const response = await fetch(`${API}${path}`, {
     method,
@@ -197,9 +208,15 @@ export const api = {
       apiFetch<AuthResult>("/v1/auth/register", { method: "POST", body }),
     login: (body: LoginRequest) =>
       apiFetch<AuthResult>("/v1/auth/login", { method: "POST", body }),
-    refresh: () => apiFetch<AuthResult>("/v1/auth/refresh", { method: "POST" }),
-    logout: () =>
-      apiFetch<{ success: true }>("/v1/auth/logout", { method: "POST" }),
+    // refreshToken: 네이티브에서만 전달(웹은 쿠키). refresh는 토큰을 로테이션하므로
+    // 호출부(auth-context)가 응답의 refreshToken을 다시 저장해야 한다.
+    refresh: (refreshToken?: string) =>
+      apiFetch<AuthResult>("/v1/auth/refresh", { method: "POST", refreshToken }),
+    logout: (refreshToken?: string) =>
+      apiFetch<{ success: true }>("/v1/auth/logout", {
+        method: "POST",
+        refreshToken,
+      }),
     me: (accessToken: AccessToken) =>
       apiFetch<MeResponse>("/v1/auth/me", { accessToken }),
   },
