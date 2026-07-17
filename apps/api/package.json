@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch --preserveWatchOutput -b swc",
+    "dev": "nest build -b swc && concurrently -k -n build,run -c blue,green \"nest build -b swc --watch --preserveWatchOutput\" \"nodemon\"",
     "build": "nest build -b swc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
@@ -15,6 +15,7 @@
     "@family/config": "workspace:*",
     "@family/contracts": "workspace:*",
     "@family/database": "workspace:*",
+    "@family/rag": "workspace:^",
     "@family/shared": "workspace:*",
     "@fastify/cookie": "^11",
     "@fastify/multipart": "^10.1.0",
@@ -27,6 +28,7 @@
     "@node-rs/argon2": "^2",
     "bullmq": "^5.34.0",
     "drizzle-orm": "^0.45.2",
+    "fastify": "^5.10.0",
     "ioredis": "^5.4.2",
     "nestjs-zod": "^5.4.0",
     "postgres": "^3.4.5",
@@ -39,6 +41,8 @@
     "@swc/cli": "^0.8.1",
     "@swc/core": "^1.10.1",
     "@types/node": "^22.10.2",
+    "concurrently": "^10.0.3",
+    "nodemon": "^3.1.14",
     "typescript": "^5.9.3"
   }
 }

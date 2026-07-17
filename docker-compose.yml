@@ -103,6 +103,13 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.dev
     image: family-memory-ai/dev:local
     command: pnpm --filter @family/api dev
+    # dev 실행 체인이 pnpm→sh→concurrently→nodemon→node 라 SIGTERM이 node까지
+    # 전파되지 않는다(pnpm/sh 모두 시그널 미중계) → graceful shutdown 코드는
+    # nodemon 재시작 경로에서만 동작. compose stop은 grace 만료 후 SIGKILL이
+    # 유일한 종료 수단이므로, init(좀비 회수)과 짧은 grace(기본 10s→3s)로 stop
+    # 지연을 줄인다. 잡/쓰기는 전부 멱등(+BullMQ attempts=3)이라 강제 종료 안전.
+    init: true
+    stop_grace_period: 3s
     env_file: .env
     ports:
       - "3001:3001"
@@ -131,6 +138,10 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.dev
     image: family-memory-ai/dev:local
     command: pnpm --filter @family/worker dev
+    # api와 동일한 시그널 미전파 사유(주석 참조). BullMQ 잡은 stalled 복구 +
+    # attempts=3 재시도로 강제 종료에 안전.
+    init: true
+    stop_grace_period: 3s
     env_file: .env
     ports:
       - "3002:3002"
@@ -159,6 +170,9 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.dev
     image: family-memory-ai/dev:local
     command: pnpm --filter @family/web dev
+    # api와 동일한 시그널 미전파 사유(주석 참조).
+    init: true
+    stop_grace_period: 3s
     env_file: .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}

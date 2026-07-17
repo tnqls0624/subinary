@@ -1,12 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "commonjs",
-    "moduleResolution": "node",
+    // module/moduleResolution은 base(NodeNext) 상속 — package.json에 type 필드가
+    // 없어 CJS로 판정되므로 NestJS(CJS)와 정합하고, 구식 node10/baseUrl 조합의
+    // TS 6/7 deprecation 경고를 원천 제거한다. 실제 빌드는 swc(nest -b swc)라
+    // 이 파일은 typecheck/IDE 전용이다.
+    "rootDir": "src",
     "outDir": "dist",
-    "baseUrl": ".",
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/nodemon.json",
+  "//": "nest build -b swc --watch가 dist를 갱신하면 nodemon이 실행 프로세스를 재시작한다. nest watch의 SWC 재시작 버그(이전 프로세스를 죽이기 전 새 프로세스 spawn → EADDRINUSE)를 우회하기 위해 실행 재시작을 nodemon에 위임한다.",
+  "watch": ["dist"],
+  "ext": "js",
+  "script": "dist/main.js",
+  "signal": "SIGTERM",
+  "delay": 400,
+  "legacyWatch": true,
+  "pollingInterval": 300
+}

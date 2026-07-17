@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Build outputs
 dist/
@@ -33,3 +34,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.tsbuildinfo
+.claude/scheduled_tasks.lock

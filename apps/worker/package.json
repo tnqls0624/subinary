@@ -4,7 +4,7 @@
   "private": true,
   "description": "Family Memory AI — BullMQ worker service (NestJS 11 + Fastify 5, port 3002)",
   "scripts": {
-    "dev": "nest start --watch --preserveWatchOutput -b swc",
+    "dev": "nest build -b swc && concurrently -k -n build,run -c blue,green \"nest build -b swc --watch --preserveWatchOutput\" \"nodemon\"",
     "build": "nest build -b swc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
@@ -37,6 +37,8 @@
     "@swc/cli": "^0.8.1",
     "@swc/core": "^1.10.4",
     "@types/node": "^22.10.5",
+    "concurrently": "^10.0.3",
+    "nodemon": "^3.1.14",
     "typescript": "^5.9.3"
   }
 }
