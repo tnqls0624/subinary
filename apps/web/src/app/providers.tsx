@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 import { QueryClient } from "@tanstack/react-query";
 
 import { AuthProvider } from "@/lib/auth-context";
+import { PointerCaptureGuard } from "@/components/pointer-capture-guard";
 import { Toaster } from "@/components/ui/sonner";
 
 /**
@@ -39,6 +40,7 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       disableTransitionOnChange
     >
       <QueryClientProvider client={queryClient}>
+        <PointerCaptureGuard />
         <AuthProvider>{children}</AuthProvider>
         <Toaster />
       </QueryClientProvider>
