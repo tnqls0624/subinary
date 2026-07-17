@@ -21,12 +21,21 @@ const cardSmsProcessingStatusSchema = z.enum(['queued', 'duplicate']);
 /**
  * `POST /v1/mobile-events/card-sms` — submit a raw card SMS for parsing (PRD §10.3).
  * HMAC-guarded; the device principal supplies household/member scope.
+ *
+ * `receivedAt` is optional: automation tools that cannot easily format a UTC
+ * ISO-8601 timestamp (e.g. Android MacroDroid, whose date variables are local
+ * time) may omit it entirely — the server stamps `now()` on ingest. When
+ * present it must be UTC (`Z` suffix). The parsed transaction time comes from
+ * the SMS body (`MM/DD HH:mm`, no year) with the year resolved *relative to
+ * receivedAt* — so a server-stamped `now()` is accurate for live forwarding,
+ * but backfilling messages older than ~1 year without an explicit receivedAt
+ * will resolve the wrong year. Supply receivedAt when replaying old archives.
  */
 export const cardSmsIngestRequestSchema = z.object({
   eventId: z.string().min(1).max(200),
   sender: z.string().min(1).max(100),
   content: z.string().min(1).max(4000),
-  receivedAt: z.string().datetime(),
+  receivedAt: z.string().datetime().optional(),
 });
 export type CardSmsIngestRequest = z.infer<typeof cardSmsIngestRequestSchema>;
 

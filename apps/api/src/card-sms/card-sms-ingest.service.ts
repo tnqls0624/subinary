@@ -60,9 +60,11 @@ export class CardSmsIngestService {
     device: DeviceContext,
     input: CardSmsIngestRequest,
   ): Promise<CardSmsIngestResponse> {
+    // receivedAt is optional (automation tools like MacroDroid can't easily
+    // format UTC) — fall back to the ingest instant.
+    const receivedAt = input.receivedAt ? new Date(input.receivedAt) : new Date();
     const contentHash = this.hashContent(input);
     const objectKey = `card-sms/${device.householdId}/${input.eventId}.txt`;
-    const receivedAt = new Date(input.receivedAt);
     const sizeBytes = Buffer.byteLength(input.content, 'utf8');
 
     // Fast path: an existing (deviceId, eventId) event is an idempotent hit —
@@ -181,10 +183,16 @@ export class CardSmsIngestService {
     };
   }
 
-  /** `sha256(sender + "\n" + content + "\n" + receivedAtISO)` as lowercase hex. */
+  /**
+   * `sha256(sender + "\n" + content)` as lowercase hex. Deliberately excludes
+   * receivedAt: the hash's purpose is "same raw message" correlation/audit, and
+   * receivedAt may be server-stamped (optional field) which would make the hash
+   * of identical content non-deterministic across transmissions. The receive
+   * time lives in its own column; it does not belong in the content identity.
+   */
   private hashContent(input: CardSmsIngestRequest): string {
     return createHash('sha256')
-      .update(`${input.sender}\n${input.content}\n${input.receivedAt}`, 'utf8')
+      .update(`${input.sender}\n${input.content}`, 'utf8')
       .digest('hex');
   }
 
