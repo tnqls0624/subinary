@@ -1,88 +1,141 @@
 "use client";
 /* ---------------------------------------------------------------------------
- * Family Memory AI — web · 로그인 (Phase 5 §6.1)
- * 이메일/비밀번호 → useAuth().login → 성공 시 /dashboard. 에러 표시.
+ * Family Memory AI — web · 로그인 (오늘의집 톤)
+ * loginRequestSchema로 클라 검증 → useAuth().login → /dashboard.
+ * 카드 없는 화이트 베이스 센터 컬럼: 브랜드 마크 + 큰 제목 + 필드 + 풀폭 CTA.
  * ------------------------------------------------------------------------- */
+import { zodResolver } from "@hookform/resolvers/zod";
+import { CreditCard, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
 
-import { Button, Field } from "@/components";
+import { loginRequestSchema, type LoginRequest } from "@family/contracts";
+
+import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
   const router = useRouter();
   const { login, status } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  // 이미 로그인된 상태면 대시보드로.
+  const form = useForm<LoginRequest>({
+    resolver: zodResolver(loginRequestSchema),
+    defaultValues: { email: "", password: "" },
+  });
+
   useEffect(() => {
     if (status === "authenticated") router.replace("/dashboard");
   }, [status, router]);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSubmitting(true);
+  async function onSubmit(values: LoginRequest) {
     try {
-      await login({ email, password });
+      await login(values);
       router.replace("/dashboard");
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
-      setError(message);
-      setSubmitting(false);
+      form.setError("password", {
+        message:
+          err instanceof ApiError
+            ? err.message
+            : "로그인하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      });
     }
   }
 
   return (
-    <main className="auth-screen">
-      <div className="auth-card">
-        <header className="auth-head">
-          <h1>Family Memory AI</h1>
-          <p>가족 금융 대시보드에 로그인하세요.</p>
-        </header>
-        <form className="auth-form" onSubmit={onSubmit} noValidate>
-          <Field
-            label="이메일"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Field
-            label="비밀번호"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {error ? (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={submitting}
-            className="auth-submit"
+    <main className="bg-background flex min-h-dvh items-center justify-center p-6">
+      <div className="flex w-full max-w-sm flex-col gap-8">
+        {/* 브랜드 마크 + 큰 제목 */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <span className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-xl">
+            <CreditCard className="size-6" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight">
+            다시 만나서 반가워요
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            가족의 소비와 예산, 이어서 함께 관리해요.
+          </p>
+        </div>
+
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="flex flex-col gap-4"
+            noValidate
           >
-            {submitting ? "로그인 중…" : "로그인"}
-          </Button>
-        </form>
-        <p className="auth-alt">
-          계정이 없으신가요? <Link href="/register">회원가입</Link>
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>이메일</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>비밀번호</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder="비밀번호를 입력해 주세요"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <Button
+              type="submit"
+              size="lg"
+              className="mt-2 h-12 w-full"
+              disabled={form.formState.isSubmitting}
+            >
+              {form.formState.isSubmitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> 로그인하고 있어요…
+                </>
+              ) : (
+                "로그인하기"
+              )}
+            </Button>
+          </form>
+        </Form>
+
+        <p className="text-muted-foreground text-center text-sm">
+          아직 계정이 없나요?{" "}
+          <Link
+            href="/register"
+            className="text-accent-foreground font-medium hover:underline"
+          >
+            회원가입하기
+          </Link>
         </p>
       </div>
     </main>

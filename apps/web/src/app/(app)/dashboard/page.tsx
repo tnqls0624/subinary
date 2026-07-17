@@ -1,20 +1,27 @@
 "use client";
 /* ---------------------------------------------------------------------------
- * Family Memory AI — web · 대시보드 (Phase 5 §6.2 · P6)
+ * Family Memory AI — web · 홈(대시보드) — 오늘의집 톤 카드 스택
  *
- * 활성 가족(household-context)의 이번 달 재무 현황을 한눈에 보여준다.
- *  - 순지출 StatCard + 전월 대비 delta(analytics.monthly)
- *  - 구성원/카드/카테고리별 지출 BarList(analytics.members/cards/categories)
- *  - 예산 사용률 상위(budgets.list)
- *  - 최근 거래 10건 Table(transactions.list)
- *  - 처리 대기 알림: 확인필요(pending_review + duplicate_suspected → /transactions),
- *    파싱실패(card-sms-events?status=parse_failed)
+ * 활성 가족(household-context)의 이번 달 재무 현황을 단일 컬럼 카드 스택
+ * (max-w-2xl)으로 보여준다.
+ *  - 히어로: "이번 달 소비" 총액 큰 타이포 + 전월 대비 해요체 문장(analytics.monthly)
+ *  - 확인 필요: 확인필요·중복의심 거래(→ /transactions) / 파싱 실패 문자 백로그
+ *  - 예산: UsageBar 상위 5개(budgets.list), 초과 시 "예산을 넘었어요" 카피
+ *  - "어디에 많이 썼나요?" 카테고리 BarList / 구성원·카드는 ListRow(analytics.*)
+ *  - 최근 거래: ListRow 5건(transactions.list limit 10 중 상위 5) + 전체 보기 링크
  *
  * 모든 집계는 서버(SQL)에서 끝났다고 가정하며 여기서는 표시만 한다(합산/계산 금지).
- * 데이터는 React Query 훅(P5 queries.ts) + authedFetch(401→refresh)로 가져온다.
+ * 데이터는 React Query 훅(queries.ts) + authedFetch(401→refresh)로 가져온다.
  * ------------------------------------------------------------------------- */
+import {
+  CircleAlert,
+  CreditCard,
+  MailWarning,
+  Receipt,
+  RotateCcw,
+} from "lucide-react";
 import Link from "next/link";
-import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -24,24 +31,30 @@ import type {
   TransactionSummary,
 } from "@family/contracts";
 
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   BarList,
+  ListRow,
   Money,
-  StatCard,
   StatusBadge,
-  Table,
   UsageBar,
   type BarListItem,
-  type TableColumn,
-  type TrendDirection,
-} from "@/components";
+} from "@/components/widgets";
 import { ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
   currentMonth,
   formatDate,
-  formatKRW,
   formatMonth,
+  formatWon,
   percent,
 } from "@/lib/format";
 import { useHousehold } from "@/lib/household-context";
@@ -53,6 +66,7 @@ import {
   useMonthly,
   useTransactions,
 } from "@/lib/queries";
+import { cn } from "@/lib/utils";
 
 /** 처리 대기 건수 집계 시 한 번에 가져올 상한(초과 시 'N+' 표기). */
 const REVIEW_SCAN_LIMIT = 100;
@@ -63,19 +77,15 @@ const BREAKDOWN_TOP_N = 6;
 /** 예산 사용률 패널에 노출할 상위 예산 개수. */
 const BUDGET_TOP_N = 5;
 
+/** 최근 거래 홈 노출 개수(쿼리는 10건 유지, 표시만 5건). */
+const RECENT_DISPLAY_N = 5;
+
 /** 예산 스코프 → 한국어 보조 라벨(UsageBar meta). */
 const SCOPE_LABEL: Record<BudgetScopeType, string> = {
   household: "가족 전체",
   member: "구성원",
   category: "카테고리",
   card: "카드",
-};
-
-/** BarList 3분할 반응형 그리드(전용 CSS 없이 인라인). */
-const BREAKDOWN_GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: 14,
 };
 
 // --- 페이지 -----------------------------------------------------------------
@@ -171,7 +181,7 @@ export default function DashboardPage() {
     [budgetsQuery.data],
   );
 
-  // 최근 거래 테이블의 구성원명 매핑(analytics.members 결과 재활용).
+  // 최근 거래 리스트의 구성원명 매핑(analytics.members 결과 재활용).
   const memberNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of membersQuery.data?.items ?? []) map.set(m.memberId, m.name);
@@ -195,244 +205,410 @@ export default function DashboardPage() {
   const parseFailedMore = parseFailedCount >= REVIEW_SCAN_LIMIT;
 
   const monthly = monthlyQuery.data;
+  const delta = monthly
+    ? deltaSentence(monthly.deltaNet, monthly.deltaRate, monthly.previousNet)
+    : null;
 
   // --- 렌더 -----------------------------------------------------------------
 
-  const recentColumns: ReadonlyArray<TableColumn<TransactionSummary>> = [
-    {
-      key: "approvedAt",
-      header: "일시",
-      render: (t) => formatDate(t.approvedAt),
-    },
-    {
-      key: "merchant",
-      header: "가맹점",
-      render: (t) => merchantLabel(t),
-    },
-    {
-      key: "member",
-      header: "구성원",
-      render: (t) => memberNameById.get(t.memberId) ?? "—",
-    },
-    {
-      key: "amount",
-      header: "금액",
-      align: "right",
-      render: (t) => {
-        const signed =
-          t.transactionType === "cancellation" ? -t.amount : t.netAmount;
-        return (
-          <Money amount={signed} muted={t.transactionType === "cancellation"} />
-        );
-      },
-    },
-    {
-      key: "status",
-      header: "상태",
-      align: "center",
-      render: (t) =>
-        t.transactionType === "cancellation" ? (
-          <StatusBadge status="cancelled" label="취소" />
-        ) : (
-          <StatusBadge status={t.status} />
-        ),
-    },
-  ];
-
   return (
-    <div className="stack">
-      <div
-        className="row"
-        style={{ justifyContent: "space-between", alignItems: "baseline" }}
-      >
-        <h1 className="section-title" style={{ marginBottom: 0 }}>
-          대시보드
-        </h1>
-        <span className="text-muted">{formatMonth(month)}</span>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-xl font-bold tracking-tight">홈</h1>
+        <span className="text-muted-foreground text-[13px]">
+          {formatMonth(month)}
+        </span>
       </div>
 
-      {/* 핵심 지표 */}
-      <section className="stack">
-        {monthlyQuery.isLoading || monthlyQuery.isError ? (
-          <StateNote
-            loading={monthlyQuery.isLoading}
-            error={monthlyQuery.error}
-          />
-        ) : monthly ? (
-          <>
-            <div className="grid-cards">
-              <StatCard
-                label="이번 달 순지출"
-                value={formatKRW(monthly.totalNet)}
-                trend={buildTrend(monthly.deltaNet, monthly.deltaRate)}
-                sub={
-                  monthly.previousNet === 0
-                    ? "전월 지출 없음"
-                    : `전월 ${formatKRW(monthly.previousNet)}`
-                }
-              />
-              <StatCard
-                label="승인 총액"
-                value={formatKRW(monthly.totalApproved)}
-              />
-              <StatCard
-                label="취소 총액"
-                value={formatKRW(monthly.totalCancelled)}
-              />
-              <StatCard
-                label="거래 건수"
-                value={`${monthly.transactionCount.toLocaleString("ko-KR")}건`}
-              />
-            </div>
-            {monthly.meta.excludedByPermission > 0 ? (
-              <p className="text-subtle" style={{ fontSize: "0.8rem", margin: 0 }}>
-                공개범위 설정으로 {monthly.meta.excludedByPermission}건이 합계에서
-                제외되었습니다.
-              </p>
-            ) : null}
-          </>
-        ) : null}
-
-        {/* 처리 대기 알림 */}
-        <div className="grid-cards">
-          <AlertTile
-            label="확인 필요"
-            hint="확인필요 · 중복의심"
-            count={reviewCount}
-            plus={reviewMore}
-            tone="warning"
-            href="/transactions"
-            loading={reviewLoading}
-            error={reviewError}
-          />
-          <AlertTile
-            label="파싱 실패"
-            hint="문자 파싱 실패 이벤트"
-            count={parseFailedCount}
-            plus={parseFailedMore}
-            tone="danger"
-            loading={parseFailedQuery.isLoading}
-            error={parseFailedQuery.isError}
-          />
-        </div>
-      </section>
-
-      {/* 지출 분해(구성원/카드/카테고리) */}
-      <div style={BREAKDOWN_GRID}>
-        <Panel title="구성원별 지출">
-          {membersQuery.isLoading || membersQuery.isError ? (
+      {/* 히어로 — 이번 달 소비 */}
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          {monthlyQuery.isLoading || monthlyQuery.isError ? (
             <StateNote
-              loading={membersQuery.isLoading}
-              error={membersQuery.error}
+              loading={monthlyQuery.isLoading}
+              error={monthlyQuery.error}
+            />
+          ) : monthly && delta ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-muted-foreground text-sm">
+                  이번 달 소비
+                </span>
+                <span className="text-3xl font-bold tracking-tight tabular-nums">
+                  {formatWon(monthly.totalNet)}
+                </span>
+                <p className={cn("text-sm font-medium", delta.className)}>
+                  {delta.text}
+                </p>
+                {monthly.previousNet !== 0 ? (
+                  <p className="text-muted-foreground text-xs">
+                    지난달에는 {formatWon(monthly.previousNet)} 썼어요
+                  </p>
+                ) : null}
+              </div>
+
+              <dl className="bg-muted grid grid-cols-3 divide-x rounded-lg py-3 text-center">
+                <div className="flex flex-col gap-0.5 px-2">
+                  <dt className="text-muted-foreground text-xs">승인</dt>
+                  <dd className="text-sm font-semibold tabular-nums">
+                    {formatWon(monthly.totalApproved)}
+                  </dd>
+                </div>
+                <div className="flex flex-col gap-0.5 px-2">
+                  <dt className="text-muted-foreground text-xs">취소</dt>
+                  <dd className="text-sm font-semibold tabular-nums">
+                    {formatWon(monthly.totalCancelled)}
+                  </dd>
+                </div>
+                <div className="flex flex-col gap-0.5 px-2">
+                  <dt className="text-muted-foreground text-xs">거래</dt>
+                  <dd className="text-sm font-semibold tabular-nums">
+                    {monthly.transactionCount.toLocaleString("ko-KR")}건
+                  </dd>
+                </div>
+              </dl>
+
+              {monthly.meta.excludedByPermission > 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  공개범위 설정으로 {monthly.meta.excludedByPermission}건은
+                  합계에서 제외했어요.
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* 확인 필요 — 처리 대기 백로그 */}
+      <Card className="gap-0 py-2">
+        <CardContent className="px-3">
+          <Link href="/transactions" className="block">
+            <ListRow
+              className="hover:bg-muted/70 transition-colors"
+              icon={<CircleAlert />}
+              iconClassName="bg-warning/15 text-warning"
+              title="확인이 필요한 거래"
+              subtitle={
+                reviewError
+                  ? "건수를 불러오지 못했어요"
+                  : "확인필요 · 중복의심 거래를 모아뒀어요"
+              }
+              value={
+                <span
+                  className={
+                    !reviewLoading && !reviewError && reviewCount > 0
+                      ? "text-warning"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {pendingCountText(
+                    reviewLoading,
+                    reviewError,
+                    reviewCount,
+                    reviewMore,
+                  )}
+                </span>
+              }
+              chevron
+            />
+          </Link>
+          <ListRow
+            icon={<MailWarning />}
+            iconClassName="bg-warning/15 text-warning"
+            title="읽지 못한 문자"
+            subtitle={
+              parseFailedQuery.isError
+                ? "건수를 불러오지 못했어요"
+                : "파싱에 실패한 카드 문자예요"
+            }
+            value={
+              <span
+                className={
+                  !parseFailedQuery.isLoading &&
+                  !parseFailedQuery.isError &&
+                  parseFailedCount > 0
+                    ? "text-warning"
+                    : "text-muted-foreground"
+                }
+              >
+                {pendingCountText(
+                  parseFailedQuery.isLoading,
+                  parseFailedQuery.isError,
+                  parseFailedCount,
+                  parseFailedMore,
+                )}
+              </span>
+            }
+          />
+        </CardContent>
+      </Card>
+
+      {/* 예산 요약 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>이번 달 예산</CardTitle>
+          <CardDescription>사용률이 높은 예산부터 보여드려요</CardDescription>
+          <CardAction>
+            <SeeAllLink href="/budgets" />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {budgetsQuery.isLoading || budgetsQuery.isError ? (
+            <StateNote
+              loading={budgetsQuery.isLoading}
+              error={budgetsQuery.error}
+            />
+          ) : topBudgets.length === 0 ? (
+            <EmptyState
+              emoji="🎯"
+              title="아직 예산이 없어요"
+              description="예산을 만들면 이번 달 사용률을 한눈에 알려드려요"
+              action={
+                <Button asChild variant="tint" className="w-full">
+                  <Link href="/budgets">예산 만들기</Link>
+                </Button>
+              }
             />
           ) : (
-            <BarList items={memberItems} formatValue={formatKRW} />
+            <div className="flex flex-col gap-5">
+              {topBudgets.map((b) => (
+                <UsageBar
+                  key={b.id}
+                  label={b.name ?? b.scopeLabel}
+                  meta={
+                    b.usageRate >= 1 ? (
+                      <span className="text-destructive font-semibold">
+                        {SCOPE_LABEL[b.scopeType]} · 예산을 넘었어요
+                      </span>
+                    ) : (
+                      SCOPE_LABEL[b.scopeType]
+                    )
+                  }
+                  spent={b.spent}
+                  amount={b.amount}
+                  usageRate={b.usageRate}
+                />
+              ))}
+            </div>
           )}
-        </Panel>
+        </CardContent>
+      </Card>
 
-        <Panel title="카드별 지출">
-          {cardsQuery.isLoading || cardsQuery.isError ? (
-            <StateNote loading={cardsQuery.isLoading} error={cardsQuery.error} />
-          ) : (
-            <BarList items={cardItems} formatValue={formatKRW} />
-          )}
-        </Panel>
-
-        <Panel title="카테고리별 지출">
+      {/* 카테고리별 지출 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>어디에 많이 썼나요?</CardTitle>
+          <CardDescription>이번 달 카테고리별 지출이에요</CardDescription>
+        </CardHeader>
+        <CardContent>
           {categoriesQuery.isLoading || categoriesQuery.isError ? (
             <StateNote
               loading={categoriesQuery.isLoading}
               error={categoriesQuery.error}
             />
           ) : (
-            <BarList items={categoryItems} formatValue={formatKRW} />
+            <BarList
+              items={categoryItems}
+              formatValue={formatWon}
+              emptyLabel="아직 지출 내역이 없어요"
+            />
           )}
-        </Panel>
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* 예산 사용률 */}
-      <Panel
-        title="예산 사용률"
-        action={
-          <Link href="/budgets" className="text-muted" style={{ fontSize: "0.85rem" }}>
-            전체 보기
-          </Link>
-        }
-      >
-        {budgetsQuery.isLoading || budgetsQuery.isError ? (
-          <StateNote
-            loading={budgetsQuery.isLoading}
-            error={budgetsQuery.error}
-          />
-        ) : topBudgets.length === 0 ? (
-          <p className="empty">
-            설정된 예산이 없습니다.{" "}
-            <Link href="/budgets">예산 만들기</Link>
-          </p>
-        ) : (
-          <div>
-            {topBudgets.map((b) => (
-              <UsageBar
-                key={b.id}
-                label={b.name ?? b.scopeLabel}
-                meta={SCOPE_LABEL[b.scopeType]}
-                spent={b.spent}
-                amount={b.amount}
-                usageRate={b.usageRate}
+      {/* 구성원 · 카드별 지출 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>누가, 어떤 카드로 썼나요?</CardTitle>
+          <CardDescription>구성원과 카드별로 모아봤어요</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          <section className="flex flex-col gap-1">
+            <h3 className="text-muted-foreground text-[13px] font-semibold">
+              구성원
+            </h3>
+            {membersQuery.isLoading || membersQuery.isError ? (
+              <StateNote
+                loading={membersQuery.isLoading}
+                error={membersQuery.error}
               />
-            ))}
-          </div>
-        )}
-      </Panel>
+            ) : memberItems.length === 0 ? (
+              <p className="text-muted-foreground py-4 text-center text-[13px]">
+                아직 구성원 지출이 없어요
+              </p>
+            ) : (
+              <div className="-mx-2 flex flex-col">
+                {memberItems.map((item) => (
+                  <ListRow
+                    key={item.key}
+                    icon={
+                      <span className="text-sm font-semibold">
+                        {initialOf(item.label)}
+                      </span>
+                    }
+                    title={item.label}
+                    subtitle={`전체의 ${percent(item.ratio)}`}
+                    value={<Money amount={item.value} />}
+                    valueSub={item.meta}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="flex flex-col gap-1">
+            <h3 className="text-muted-foreground text-[13px] font-semibold">
+              카드
+            </h3>
+            {cardsQuery.isLoading || cardsQuery.isError ? (
+              <StateNote
+                loading={cardsQuery.isLoading}
+                error={cardsQuery.error}
+              />
+            ) : cardItems.length === 0 ? (
+              <p className="text-muted-foreground py-4 text-center text-[13px]">
+                아직 카드 지출이 없어요
+              </p>
+            ) : (
+              <div className="-mx-2 flex flex-col">
+                {cardItems.map((item) => (
+                  <ListRow
+                    key={item.key}
+                    icon={<CreditCard />}
+                    title={item.label}
+                    subtitle={`전체의 ${percent(item.ratio)}`}
+                    value={<Money amount={item.value} />}
+                    valueSub={item.meta}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </CardContent>
+      </Card>
 
       {/* 최근 거래 */}
-      <Panel
-        title="최근 거래"
-        action={
-          <Link
-            href="/transactions"
-            className="text-muted"
-            style={{ fontSize: "0.85rem" }}
-          >
-            전체 거래
-          </Link>
-        }
-      >
-        {recentQuery.isLoading || recentQuery.isError ? (
-          <StateNote loading={recentQuery.isLoading} error={recentQuery.error} />
-        ) : (
-          <Table
-            columns={recentColumns}
-            rows={recentRows}
-            rowKey={(t) => t.id}
-            emptyLabel="거래 내역이 없습니다"
-          />
-        )}
-      </Panel>
+      <Card>
+        <CardHeader>
+          <CardTitle>최근 거래</CardTitle>
+          <CardDescription>가장 최근에 기록된 거래예요</CardDescription>
+          <CardAction>
+            <SeeAllLink href="/transactions" />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {recentQuery.isLoading || recentQuery.isError ? (
+            <StateNote
+              loading={recentQuery.isLoading}
+              error={recentQuery.error}
+            />
+          ) : recentRows.length === 0 ? (
+            <EmptyState
+              emoji="🧾"
+              title="아직 거래가 없어요"
+              description="카드 문자 수집을 시작하면 거래가 여기에 쌓여요"
+            />
+          ) : (
+            <div className="-mx-2 flex flex-col">
+              {recentRows
+                .slice(0, RECENT_DISPLAY_N)
+                .map((t: TransactionSummary) => {
+                  const cancelled = t.transactionType === "cancellation";
+                  const signed = cancelled ? -t.amount : t.netAmount;
+                  const who = memberNameById.get(t.memberId);
+                  return (
+                    <ListRow
+                      key={t.id}
+                      icon={cancelled ? <RotateCcw /> : <Receipt />}
+                      iconClassName={
+                        cancelled
+                          ? "bg-muted text-muted-foreground"
+                          : undefined
+                      }
+                      title={merchantLabel(t)}
+                      subtitle={
+                        who
+                          ? `${formatDate(t.approvedAt)} · ${who}`
+                          : formatDate(t.approvedAt)
+                      }
+                      value={<Money amount={signed} muted={cancelled} />}
+                      valueSub={
+                        cancelled ? (
+                          <StatusBadge status="cancelled" label="취소" />
+                        ) : (
+                          <StatusBadge status={t.status} />
+                        )
+                      }
+                    />
+                  );
+                })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
 // --- 로컬 헬퍼 --------------------------------------------------------------
 
-/** 순지출 delta → StatCard trend(지출 증가=up/붉은색, 감소=down/초록색). */
-function buildTrend(
+/**
+ * 순지출 delta → 히어로 해요체 문장.
+ * 증가 = text-destructive, 감소 = text-accent-foreground(오늘의집 민트).
+ */
+function deltaSentence(
   deltaNet: number,
   deltaRate: number | null,
-): { direction: TrendDirection; label: ReactNode } {
-  const direction: TrendDirection =
-    deltaNet > 0 ? "up" : deltaNet < 0 ? "down" : "flat";
-  const rate = deltaRate != null ? ` · ${percent(Math.abs(deltaRate))}` : "";
+  previousNet: number,
+): { text: string; className: string } {
+  if (previousNet === 0) {
+    return {
+      text: "지난달 기록이 없어요. 이번 달부터 차곡차곡 모아봐요",
+      className: "text-muted-foreground",
+    };
+  }
+  if (deltaNet === 0) {
+    return {
+      text: "지난달과 똑같이 썼어요",
+      className: "text-muted-foreground",
+    };
+  }
+  const rate = deltaRate != null ? ` (${percent(Math.abs(deltaRate))})` : "";
+  if (deltaNet > 0) {
+    return {
+      text: `지난달보다 ${formatWon(deltaNet)} 더 썼어요${rate}`,
+      className: "text-destructive",
+    };
+  }
   return {
-    direction,
-    label: `${formatKRW(Math.abs(deltaNet))}${rate}`,
+    text: `지난달보다 ${formatWon(Math.abs(deltaNet))} 덜 썼어요${rate}`,
+    className: "text-accent-foreground",
   };
+}
+
+/** 처리 대기 건수 표기(로딩 … / 에러 — / 'N건' 또는 'N+건'). */
+function pendingCountText(
+  loading: boolean,
+  error: boolean,
+  count: number,
+  plus: boolean,
+): string {
+  if (loading) return "…";
+  if (error) return "—";
+  return `${count.toLocaleString("ko-KR")}${plus ? "+" : ""}건`;
 }
 
 /** 마스킹/미확인을 고려한 가맹점 표시명. */
 function merchantLabel(t: TransactionSummary): string {
   if (t.masked) return "(비공개)";
   return t.merchantNormalized ?? t.merchantRaw ?? "미확인 가맹점";
+}
+
+/** 구성원 아바타용 첫 글자(라벨이 문자열일 때만). */
+function initialOf(label: ReactNode): string {
+  return typeof label === "string" && label.length > 0
+    ? label.slice(0, 1)
+    : "?";
 }
 
 /** 섹션 로딩/에러 표기. 둘 다 아니면 아무것도 렌더하지 않는다. */
@@ -442,19 +618,18 @@ function StateNote({
 }: Readonly<{ loading: boolean; error: unknown }>) {
   if (loading) {
     return (
-      <div className="loader" role="status" aria-live="polite">
-        <span className="spinner" aria-hidden="true" />
-        <span>불러오는 중…</span>
-      </div>
+      <p className="text-muted-foreground py-6 text-center text-sm">
+        불러오고 있어요…
+      </p>
     );
   }
   if (error) {
     const message =
       error instanceof ApiError
         ? error.message
-        : "데이터를 불러오지 못했습니다.";
+        : "데이터를 불러오지 못했어요.";
     return (
-      <p className="form-error" role="alert">
+      <p className="text-destructive text-sm" role="alert">
         {message}
       </p>
     );
@@ -462,79 +637,41 @@ function StateNote({
   return null;
 }
 
-/** 패널(제목 + 선택적 우측 액션 + 본문). */
-function Panel({
-  title,
-  action,
-  children,
-}: Readonly<{ title: string; action?: ReactNode; children: ReactNode }>) {
-  return (
-    <section className="panel">
-      <div
-        className="row"
-        style={{ justifyContent: "space-between", marginBottom: 14 }}
-      >
-        <h2 className="panel-title" style={{ marginBottom: 0 }}>
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** 처리 대기 알림 타일. count>0이면 tone 색으로 강조, href 지정 시 링크. */
-function AlertTile({
-  label,
-  hint,
-  count,
-  plus,
-  tone,
+/** 섹션 우측 "전체 보기" 텍스트 링크(오늘의집 톤). */
+function SeeAllLink({
   href,
-  loading,
-  error,
-}: Readonly<{
-  label: string;
-  hint: string;
-  count: number;
-  plus: boolean;
-  tone: "warning" | "danger";
-  href?: string;
-  loading: boolean;
-  error: boolean;
-}>) {
-  const active = count > 0;
-  const accent =
-    tone === "danger" ? "var(--danger)" : "var(--warning)";
-  const valueColor = active ? accent : "var(--text-subtle)";
-
-  const valueText = loading
-    ? "…"
-    : error
-      ? "—"
-      : `${count.toLocaleString("ko-KR")}${plus ? "+" : ""}건`;
-
-  const body = (
-    <div
-      className="stat-card"
-      style={active ? { borderColor: accent } : undefined}
-    >
-      <span className="stat-label">{label}</span>
-      <span className="stat-value" style={{ color: valueColor }}>
-        {valueText}
-      </span>
-      <span className="stat-sub">{error ? "불러오지 못함" : hint}</span>
-    </div>
-  );
-
-  if (!href) return body;
+  label = "전체 보기",
+}: Readonly<{ href: string; label?: string }>) {
   return (
     <Link
       href={href}
-      style={{ textDecoration: "none", color: "inherit", display: "block" }}
+      className="text-accent-foreground text-[13px] font-medium hover:underline"
     >
-      {body}
+      {label}
     </Link>
+  );
+}
+
+/** 빈 상태(이모지 + 해요체 안내 + 선택 CTA 1개). */
+function EmptyState({
+  emoji,
+  title,
+  description,
+  action,
+}: Readonly<{
+  emoji: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}>) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 py-8 text-center">
+      <span className="text-3xl" aria-hidden="true">
+        {emoji}
+      </span>
+      <p className="mt-1 text-[15px] font-semibold">{title}</p>
+      <p className="text-muted-foreground text-[13px]">{description}</p>
+      {action ? <div className="mt-3 w-full max-w-60">{action}</div> : null}
+    </div>
   );
 }

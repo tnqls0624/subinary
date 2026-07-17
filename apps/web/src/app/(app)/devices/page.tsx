@@ -1,15 +1,23 @@
 "use client";
 /* ---------------------------------------------------------------------------
- * Family Memory AI — web · 장치 관리 (Phase 5 §6.2 P8)
+ * Family Memory AI — web · 장치 (오늘의집 톤)
  *
- * - 장치 목록: 이름 / 플랫폼 / 마지막 수신(lastSeenAt) / 상태.
- * - 등록 폼: 이름 + 플랫폼 → secret 1회 모달(서명 레시피 안내 포함).
- * - 회전(rotate-secret): secret 재발급 후 동일 모달로 재표시.
- * - 폐기(revoke): HMAC 인증 차단.
- * secret은 register/rotate 응답에서 단 한 번만 노출되며 이후 다시 볼 수 없다.
+ * - 장치 = ListRow(플랫폼 아이콘 · 이름 · 플랫폼/마지막 수신 subtitle · 상태 배지)
+ *   + 행 우측 ⋯ DropdownMenu(secret 재발급 / 폐기 — AlertDialog 확인).
+ * - "장치 등록" 주 CTA → 등록 Dialog(이름 + 플랫폼).
+ * - secret은 register/rotate 응답에서 단 한 번만 노출 → 1회 노출 Dialog + 복사.
+ * 쿼리/뮤테이션/상태/핸들러는 기존 로직 그대로 보존.
  * ------------------------------------------------------------------------- */
-import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Bot,
+  Check,
+  Copy,
+  MoreHorizontal,
+  Plus,
+  Smartphone,
+} from "lucide-react";
+import { useState, type FormEvent } from "react";
 
 import type {
   DevicePlatform,
@@ -19,15 +27,48 @@ import type {
 } from "@family/contracts";
 
 import {
-  Button,
-  Field,
-  Modal,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
   Select,
-  StatusBadge,
-  Table,
-  type SelectOption,
-  type TableColumn,
-} from "@/components";
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ListRow, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -41,9 +82,9 @@ const PLATFORM_LABEL: Record<DevicePlatform, string> = {
   other: "기타",
 };
 
-const PLATFORM_OPTIONS: ReadonlyArray<SelectOption> = (
-  ["ios", "android", "other"] as const
-).map((value) => ({ value, label: PLATFORM_LABEL[value] }));
+const PLATFORM_OPTIONS = (["ios", "android", "other"] as const).map(
+  (value) => ({ value, label: PLATFORM_LABEL[value] }),
+);
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -60,9 +101,18 @@ export default function DevicesPage() {
   const [platform, setPlatform] = useState<DevicePlatform>("ios");
   const [formError, setFormError] = useState<string | null>(null);
 
-  // register/rotate 공용: secret 1회 노출 모달.
+  // "장치 등록" 주 CTA → 등록 Dialog.
+  const [registerOpen, setRegisterOpen] = useState(false);
+
+  // register/rotate 공용: secret 1회 노출 Dialog.
   const [secret, setSecret] = useState<DeviceSecretResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+
+  // 파괴적 동작 확인 (재발급/폐기).
+  const [confirm, setConfirm] = useState<
+    { type: "rotate" | "revoke"; device: DeviceSummary } | null
+  >(null);
 
   const invalidateDevices = () =>
     queryClient.invalidateQueries({ queryKey: ["devices", householdId] });
@@ -76,6 +126,8 @@ export default function DevicesPage() {
       setPlatform("ios");
       setFormError(null);
       setCopied(false);
+      setTokenCopied(false);
+      setRegisterOpen(false);
       setSecret(result);
     },
   });
@@ -86,6 +138,7 @@ export default function DevicesPage() {
     onSuccess: (result) => {
       void invalidateDevices();
       setCopied(false);
+      setTokenCopied(false);
       setSecret(result);
     },
   });
@@ -101,7 +154,7 @@ export default function DevicesPage() {
     setFormError(null);
     if (!householdId) return;
     if (name.trim() === "") {
-      setFormError("장치 이름을 입력하세요.");
+      setFormError("장치 이름을 입력해 주세요.");
       return;
     }
     registerMutation.mutate({
@@ -111,24 +164,14 @@ export default function DevicesPage() {
     });
   }
 
-  function onRotate(device: DeviceSummary) {
-    if (
-      !window.confirm(
-        `'${device.name}' 장치의 secret을 재발급할까요? 이전 secret은 즉시 무효화됩니다.`,
-      )
-    )
-      return;
-    rotateMutation.mutate(device.id);
-  }
-
-  function onRevoke(device: DeviceSummary) {
-    if (
-      !window.confirm(
-        `'${device.name}' 장치를 폐기할까요? 이후 해당 장치의 문자 수신이 차단됩니다.`,
-      )
-    )
-      return;
-    revokeMutation.mutate(device.id);
+  function runConfirm() {
+    if (!confirm) return;
+    if (confirm.type === "rotate") {
+      rotateMutation.mutate(confirm.device.id);
+    } else {
+      revokeMutation.mutate(confirm.device.id);
+    }
+    setConfirm(null);
   }
 
   async function copySecret() {
@@ -141,195 +184,382 @@ export default function DevicesPage() {
     }
   }
 
-  const devices = devicesQuery.data ?? [];
+  async function copyCollectToken() {
+    if (!secret) return;
+    try {
+      await navigator.clipboard.writeText(secret.collectToken);
+      setTokenCopied(true);
+    } catch {
+      setTokenCopied(false);
+    }
+  }
 
-  const columns: ReadonlyArray<TableColumn<DeviceSummary>> = [
-    {
-      key: "name",
-      header: "이름",
-      render: (d) => d.name,
-    },
-    {
-      key: "platform",
-      header: "플랫폼",
-      render: (d) => PLATFORM_LABEL[d.platform],
-    },
-    {
-      key: "lastSeenAt",
-      header: "마지막 수신",
-      render: (d) =>
-        d.lastSeenAt ? (
-          formatDate(d.lastSeenAt)
-        ) : (
-          <span className="text-subtle">수신 없음</span>
-        ),
-    },
-    {
-      key: "status",
-      header: "상태",
-      render: (d) => <StatusBadge status={d.status} />,
-    },
-    {
-      key: "actions",
-      header: "",
-      align: "right",
-      render: (d) =>
-        d.status === "active" ? (
-          <span className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => onRotate(d)}
-              disabled={rotateMutation.isPending}
-            >
-              secret 재발급
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger btn-sm"
-              onClick={() => onRevoke(d)}
-              disabled={revokeMutation.isPending}
-            >
-              폐기
-            </button>
-          </span>
-        ) : (
-          <span className="text-subtle">—</span>
-        ),
-    },
-  ];
+  /**
+   * 1회 노출 다이얼로그 닫기. raw secret/collectToken이 mutation cache
+   * (registerMutation.data / rotateMutation.data)에 남지 않도록 reset까지 수행
+   * — '지금만 볼 수 있어요' 계약을 메모리 상태에도 동일하게 적용한다.
+   */
+  function closeSecretDialog() {
+    setSecret(null);
+    registerMutation.reset();
+    rotateMutation.reset();
+  }
+
+  const devices = devicesQuery.data ?? [];
+  const isEmpty =
+    !devicesQuery.isLoading && !devicesQuery.isError && devices.length === 0;
 
   return (
-    <div className="stack">
-      <h1 className="section-title">장치</h1>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">장치</h1>
+        <p className="text-muted-foreground text-sm">
+          휴대폰을 등록하면 카드 문자를 자동으로 모아요.
+        </p>
+      </div>
 
-      {/* 목록 ------------------------------------------------------------- */}
-      <section className="panel">
-        <div className="panel-title">등록된 장치</div>
-        {devicesQuery.isLoading ? (
-          <p className="empty">불러오는 중…</p>
-        ) : devicesQuery.isError ? (
-          <p className="form-error" role="alert">
-            {errorMessage(devicesQuery.error, "장치를 불러오지 못했습니다.")}
-          </p>
-        ) : (
-          <Table
-            columns={columns}
-            rows={devices}
-            rowKey={(d) => d.id}
-            emptyLabel="등록된 장치가 없습니다"
-          />
-        )}
-        {revokeMutation.isError ? (
-          <p className="form-error" role="alert" style={{ marginTop: 12 }}>
-            {errorMessage(revokeMutation.error, "폐기에 실패했습니다.")}
-          </p>
-        ) : null}
-        {rotateMutation.isError ? (
-          <p className="form-error" role="alert" style={{ marginTop: 12 }}>
-            {errorMessage(rotateMutation.error, "secret 재발급에 실패했습니다.")}
-          </p>
-        ) : null}
-      </section>
+      {/* 장치 목록 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>등록된 장치</CardTitle>
+          <CardDescription>
+            플랫폼과 마지막 수신 상태를 한눈에 볼 수 있어요.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {devicesQuery.isLoading ? (
+            <div className="flex flex-col gap-3 py-2">
+              <Skeleton className="h-14 w-full rounded-lg" />
+              <Skeleton className="h-14 w-full rounded-lg" />
+            </div>
+          ) : devicesQuery.isError ? (
+            <p className="text-destructive text-sm" role="alert">
+              {errorMessage(devicesQuery.error, "장치를 불러오지 못했어요.")}
+            </p>
+          ) : devices.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <span className="bg-muted flex size-12 items-center justify-center rounded-full">
+                <Smartphone
+                  className="text-muted-foreground size-6"
+                  aria-hidden="true"
+                />
+              </span>
+              <div className="flex flex-col gap-1">
+                <p className="text-[15px] font-semibold">
+                  아직 등록된 장치가 없어요
+                </p>
+                <p className="text-muted-foreground text-[13px]">
+                  휴대폰을 등록하면 카드 문자를 자동으로 모아요
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="mt-1"
+                onClick={() => setRegisterOpen(true)}
+              >
+                <Plus /> 장치 등록하기
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {devices.map((d) => (
+                <div key={d.id} className="flex items-center gap-1">
+                  <ListRow
+                    className="min-w-0 flex-1"
+                    icon={d.platform === "other" ? <Bot /> : <Smartphone />}
+                    title={d.name}
+                    subtitle={`${PLATFORM_LABEL[d.platform]} · ${
+                      d.lastSeenAt
+                        ? `마지막 수신 ${formatDate(d.lastSeenAt)}`
+                        : "아직 수신이 없어요"
+                    }`}
+                    valueSub={<StatusBadge status={d.status} />}
+                  />
+                  {d.status === "active" ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0"
+                          aria-label={`${d.name} 관리 메뉴`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={rotateMutation.isPending}
+                          onSelect={() =>
+                            setConfirm({ type: "rotate", device: d })
+                          }
+                        >
+                          secret·수집 토큰 재발급
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={revokeMutation.isPending}
+                          onSelect={() =>
+                            setConfirm({ type: "revoke", device: d })
+                          }
+                        >
+                          장치 폐기
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+          {revokeMutation.isError ? (
+            <p className="text-destructive mt-3 text-sm" role="alert">
+              {errorMessage(revokeMutation.error, "폐기하지 못했어요.")}
+            </p>
+          ) : null}
+          {rotateMutation.isError ? (
+            <p className="text-destructive mt-3 text-sm" role="alert">
+              {errorMessage(
+                rotateMutation.error,
+                "secret을 재발급하지 못했어요.",
+              )}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
 
-      {/* 등록 폼 ---------------------------------------------------------- */}
-      <section className="panel">
-        <div className="panel-title">장치 등록</div>
-        <form className="stack" onSubmit={onRegister} noValidate>
-          <div className="row" style={{ alignItems: "flex-end", gap: 12 }}>
-            <Field
-              label="장치 이름"
-              name="device-name"
-              type="text"
-              placeholder="예: 엄마 아이폰"
-              maxLength={100}
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <label className="field">
-              <span className="field-label">플랫폼</span>
-              <Select
-                options={PLATFORM_OPTIONS}
-                value={platform}
-                onChange={(e) => setPlatform(e.target.value as DevicePlatform)}
+      {/* 주 CTA — 빈 상태에서는 빈 상태 안의 CTA 하나만 노출 */}
+      {!isEmpty ? (
+        <Button
+          type="button"
+          size="lg"
+          className="w-full"
+          onClick={() => setRegisterOpen(true)}
+        >
+          <Plus /> 장치 등록
+        </Button>
+      ) : null}
+
+      {/* 등록 Dialog */}
+      <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>장치 등록</DialogTitle>
+            <DialogDescription>
+              등록하면 secret이 딱 한 번 표시돼요. 장치 앱에 안전하게 저장해
+              주세요.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={onRegister} className="flex flex-col gap-4" noValidate>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="device-name">장치 이름</Label>
+              <Input
+                id="device-name"
+                type="text"
+                placeholder="예: 엄마 아이폰"
+                maxLength={100}
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
               />
-            </label>
-          </div>
-          {formError ? (
-            <p className="form-error" role="alert">
-              {formError}
-            </p>
-          ) : null}
-          {registerMutation.isError ? (
-            <p className="form-error" role="alert">
-              {errorMessage(registerMutation.error, "장치 등록에 실패했습니다.")}
-            </p>
-          ) : null}
-          <div>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={registerMutation.isPending}
-            >
-              {registerMutation.isPending ? "등록 중…" : "장치 등록"}
-            </Button>
-          </div>
-        </form>
-      </section>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="device-platform">플랫폼</Label>
+              <Select
+                value={platform}
+                onValueChange={(value) => setPlatform(value as DevicePlatform)}
+              >
+                <SelectTrigger id="device-platform" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLATFORM_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {formError ? (
+              <p className="text-destructive text-sm" role="alert">
+                {formError}
+              </p>
+            ) : null}
+            {registerMutation.isError ? (
+              <p className="text-destructive text-sm" role="alert">
+                {errorMessage(
+                  registerMutation.error,
+                  "장치를 등록하지 못했어요.",
+                )}
+              </p>
+            ) : null}
+            <DialogFooter className="flex-col sm:flex-col">
+              <Button
+                type="submit"
+                className="h-11 w-full"
+                disabled={registerMutation.isPending}
+              >
+                {registerMutation.isPending ? "등록하고 있어요…" : "등록하기"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-11 w-full"
+                onClick={() => setRegisterOpen(false)}
+              >
+                다음에 할게요
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {/* secret 1회 노출 모달 --------------------------------------------- */}
-      <Modal
+      {/* secret 1회 노출 Dialog */}
+      <Dialog
         open={secret !== null}
-        title="장치 secret (1회만 표시)"
-        onClose={() => setSecret(null)}
-        footer={
-          <Button variant="primary" onClick={() => setSecret(null)}>
-            확인
-          </Button>
-        }
+        onOpenChange={(o) => !o && closeSecretDialog()}
       >
-        {secret ? (
-          <div className="stack">
-            <p className="form-error" role="alert" style={{ margin: 0 }}>
-              이 secret은 지금만 확인할 수 있습니다. 장치 앱에 안전하게 저장하세요.
-            </p>
-            <div>
-              <span className="field-label">장치</span>
-              <p style={{ margin: "4px 0 0" }}>{secret.device.name}</p>
-            </div>
-            <div>
-              <span className="field-label">deviceId</span>
-              <p style={{ margin: "4px 0 0" }}>
-                <code>{secret.deviceId}</code>
-              </p>
-            </div>
-            <div>
-              <span className="field-label">secret</span>
-              <p style={{ margin: "4px 0 0", wordBreak: "break-all" }}>
-                <code>{secret.secret}</code>
-              </p>
-              <div style={{ marginTop: 8 }}>
-                <Button size="sm" variant="secondary" onClick={copySecret}>
-                  {copied ? "복사됨" : "secret 복사"}
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>장치 secret이 발급됐어요</DialogTitle>
+            <DialogDescription>
+              <span className="text-destructive font-semibold">
+                지금만 볼 수 있어요.
+              </span>{" "}
+              창을 닫으면 다시 확인할 수 없으니 장치 앱에 안전하게 저장해
+              주세요.
+            </DialogDescription>
+          </DialogHeader>
+          {secret ? (
+            <div className="flex flex-col gap-4 text-sm">
+              <div className="bg-muted flex flex-col gap-3 rounded-lg p-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted-foreground text-xs">장치</span>
+                  <span className="font-medium">{secret.device.name}</span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted-foreground text-xs">
+                    deviceId
+                  </span>
+                  <code className="font-mono text-xs break-all">
+                    {secret.deviceId}
+                  </code>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted-foreground text-xs">secret</span>
+                  <code className="font-mono text-xs break-all">
+                    {secret.secret}
+                  </code>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="tint"
+                className="w-full"
+                onClick={copySecret}
+              >
+                {copied ? (
+                  <>
+                    <Check /> 복사했어요
+                  </>
+                ) : (
+                  <>
+                    <Copy /> secret 복사하기
+                  </>
+                )}
+              </Button>
+              <div className="flex flex-col gap-1">
+                <span className="text-muted-foreground text-xs">서명 방식</span>
+                <span className="text-muted-foreground">
+                  {secret.algorithm}
+                </span>
+                <span className="text-muted-foreground text-xs whitespace-pre-wrap">
+                  {secret.signingRecipe}
+                </span>
+              </div>
+
+              <div className="border-border flex flex-col gap-3 border-t pt-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-semibold">
+                    간편 수집 토큰(단축어·MacroDroid용)
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    서명 계산이 어려운 자동화 앱은 이 토큰을{" "}
+                    <code className="bg-muted rounded px-1 py-0.5">
+                      Authorization: Bearer
+                    </code>{" "}
+                    헤더로 보내면 돼요. secret과 별개로 동작해요.
+                  </span>
+                </div>
+                <div className="bg-muted flex flex-col gap-1 rounded-lg p-3">
+                  <code className="font-mono text-xs break-all">
+                    {secret.collectToken}
+                  </code>
+                </div>
+                <Button
+                  type="button"
+                  variant="tint"
+                  className="w-full"
+                  onClick={copyCollectToken}
+                >
+                  {tokenCopied ? (
+                    <>
+                      <Check /> 복사했어요
+                    </>
+                  ) : (
+                    <>
+                      <Copy /> 수집 토큰 복사하기
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
-            <div>
-              <span className="field-label">서명 방식</span>
-              <p style={{ margin: "4px 0 0" }} className="text-muted">
-                {secret.algorithm}
-              </p>
-              <p
-                style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}
-                className="text-muted"
-              >
-                {secret.signingRecipe}
-              </p>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
+          ) : null}
+          <DialogFooter className="flex-col sm:flex-col">
+            <Button className="h-11 w-full" onClick={closeSecretDialog}>
+              안전하게 저장했어요
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 파괴적 동작 확인 */}
+      <AlertDialog
+        open={confirm !== null}
+        onOpenChange={(o) => !o && setConfirm(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirm?.type === "rotate"
+                ? "secret과 수집 토큰을 재발급할까요?"
+                : "이 장치를 폐기할까요?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm?.type === "rotate"
+                ? `'${confirm.device.name}' 장치의 secret과 간편 수집 토큰을 모두 새로 발급해요. 이전 값들은 바로 사용할 수 없게 되니, 단축어·MacroDroid에 새 수집 토큰을 다시 넣어 주세요.`
+                : confirm
+                  ? `'${confirm.device.name}' 장치를 폐기하면 더 이상 이 장치의 카드 문자를 받아오지 않아요.`
+                  : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={runConfirm}
+              className={
+                confirm?.type === "revoke"
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : undefined
+              }
+            >
+              {confirm?.type === "revoke" ? "폐기하기" : "재발급하기"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

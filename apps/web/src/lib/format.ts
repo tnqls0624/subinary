@@ -48,6 +48,18 @@ export function formatKRW(amount: number): string {
   return krwFormatter.format(safe);
 }
 
+/** 천단위 구분 숫자 포맷터(원 접미사용). */
+const numberFormatter = new Intl.NumberFormat("ko-KR");
+
+/**
+ * KRW 정수 금액을 `12,500원` 으로 포맷한다(₩ 기호 대신 '원' 접미사).
+ * 화면 표기는 이 함수를 기본으로 사용한다.
+ */
+export function formatWon(amount: number): string {
+  const safe = Number.isFinite(amount) ? Math.round(amount) : 0;
+  return `${numberFormatter.format(safe)}원`;
+}
+
 /**
  * ISO 문자열을 Asia/Seoul 기준으로 포맷한다.
  * `dateOnly`면 연월일만, 아니면 분까지. null/무효값은 대시(`—`)로 표기.

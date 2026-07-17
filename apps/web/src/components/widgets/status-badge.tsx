@@ -1,20 +1,31 @@
 import type { ReactNode } from "react";
 
+import { Badge } from "@/components/ui/badge";
+
 export type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 
-/** 상태값 → 색조 매핑(거래/카드/장치/초대/멤버 상태 공용). */
+/** tone → shadcn Badge variant 매핑. */
+const TONE_VARIANT: Record<
+  BadgeTone,
+  "default" | "secondary" | "destructive" | "success" | "warning"
+> = {
+  neutral: "secondary",
+  success: "success",
+  warning: "warning",
+  danger: "destructive",
+  info: "default",
+};
+
+/** 상태값 → 색조(거래/카드/장치/초대/멤버 상태 공용). */
 const STATUS_TONES: Record<string, BadgeTone> = {
-  // 거래 상태
   approved: "success",
   partially_cancelled: "warning",
   cancelled: "neutral",
   pending_review: "warning",
   duplicate_suspected: "danger",
-  // 카드/장치 상태
   active: "success",
   inactive: "neutral",
   revoked: "danger",
-  // 멤버/초대 상태
   removed: "neutral",
   pending: "info",
   accepted: "success",
@@ -49,7 +60,5 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, label, tone }: StatusBadgeProps) {
   const resolvedTone = tone ?? STATUS_TONES[status] ?? "neutral";
   const resolvedLabel = label ?? STATUS_LABELS[status] ?? status;
-  return (
-    <span className={`status-badge tone-${resolvedTone}`}>{resolvedLabel}</span>
-  );
+  return <Badge variant={TONE_VARIANT[resolvedTone]}>{resolvedLabel}</Badge>;
 }

@@ -4,6 +4,7 @@
  * 인증 상태에 따라 /dashboard 또는 /login으로 리다이렉트한다.
  * (Phase 0 health 대시보드는 GET /api/health route.ts 로 대체 유지.)
  * ------------------------------------------------------------------------- */
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
@@ -22,9 +23,13 @@ export default function RootPage() {
   }, [status, router]);
 
   return (
-    <main className="centered-screen">
-      <div className="loader" role="status" aria-live="polite">
-        <span className="spinner" aria-hidden="true" />
+    <main className="flex min-h-dvh items-center justify-center">
+      <div
+        className="text-muted-foreground flex items-center gap-2 text-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
         <span>불러오는 중…</span>
       </div>
     </main>
