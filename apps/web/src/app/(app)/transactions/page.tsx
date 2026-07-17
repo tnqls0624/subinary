@@ -95,6 +95,8 @@ const PAGE_SIZE = 20;
 
 /** 전체(필터 없음) sentinel — SelectItem은 빈 문자열 value 금지. */
 const ALL = "all";
+/** 상세에서 카드 연결을 해제('카드 미연결')하기 위한 Select sentinel(빈 값 금지). */
+const CARD_NONE = "__none__";
 
 /** 거래 유형 라벨(승인/취소). */
 const TYPE_LABELS: Readonly<Record<string, string>> = {
@@ -474,6 +476,19 @@ export default function TransactionsPage() {
     });
   };
 
+  // 카드 수동 연결/재지정. 서버는 cardId 설정 시 카드 visibility를 재상속하고,
+  // null이면 'household'로 되돌린다(자동연결 미매칭·모호(pending_review) 거래를
+  // 사람이 직접 해소하는 경로). 승격의 소급 미적용을 보완한다.
+  const changeCard = (txn: TransactionSummary, next: string) => {
+    const nextCardId = next === CARD_NONE ? null : next;
+    if (nextCardId === (txn.cardId ?? null)) return;
+    mutation.mutate({
+      kind: "update",
+      id: txn.id,
+      body: { cardId: nextCardId },
+    });
+  };
+
   const saveMemo = (txn: TransactionSummary, memo: string) => {
     mutation.mutate(
       { kind: "update", id: txn.id, body: { memo } },
@@ -834,9 +849,11 @@ export default function TransactionsPage() {
           busy={mutation.isPending}
           cardLabel={cardLabelOf(detailTxn)}
           memberName={memberNameOf(detailTxn)}
+          cardOptions={cardOptions}
           categoryOptions={categoryFilterOptions}
           applyRule={applyRule}
           onApplyRuleChange={setApplyRule}
+          onChangeCard={(v) => changeCard(detailTxn, v)}
           onChangeCategory={(v) => changeCategory(detailTxn, v)}
           onChangeVisibility={(v) => changeVisibility(detailTxn, v)}
           onOpenMemo={() => setMemoTarget(detailTxn)}
@@ -888,9 +905,11 @@ function TransactionDetailDialog({
   busy,
   cardLabel,
   memberName,
+  cardOptions,
   categoryOptions,
   applyRule,
   onApplyRuleChange,
+  onChangeCard,
   onChangeCategory,
   onChangeVisibility,
   onOpenMemo,
@@ -904,9 +923,11 @@ function TransactionDetailDialog({
   busy: boolean;
   cardLabel: string;
   memberName: string;
+  cardOptions: ReadonlyArray<Option>;
   categoryOptions: ReadonlyArray<Option>;
   applyRule: boolean;
   onApplyRuleChange: (value: boolean) => void;
+  onChangeCard: (cardId: string) => void;
   onChangeCategory: (categoryId: string) => void;
   onChangeVisibility: (visibility: string) => void;
   onOpenMemo: () => void;
@@ -978,6 +999,33 @@ function TransactionDetailDialog({
         </div>
 
         <div className="flex flex-col gap-4">
+          {/* 카드 연결/재지정 — 미연결·모호(pending_review) 거래 해소 경로 */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="detail-card">카드</Label>
+            <Select
+              value={txn.cardId ?? CARD_NONE}
+              disabled={busy}
+              onValueChange={onChangeCard}
+            >
+              <SelectTrigger id="detail-card" className="w-full">
+                <SelectValue placeholder="카드 미연결" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={CARD_NONE}>카드 미연결</SelectItem>
+                {cardOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {txn.cardId == null || txn.status === "pending_review" ? (
+              <p className="text-muted-foreground text-[13px]">
+                카드에 연결하면 공개 범위가 카드 설정을 따라가요.
+              </p>
+            ) : null}
+          </div>
+
           {/* 카테고리 변경(+applyRule) */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="detail-category">카테고리</Label>
