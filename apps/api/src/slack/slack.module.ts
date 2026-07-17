@@ -14,7 +14,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { StorageModule } from '../storage/storage.module';
 import { SlackController } from './slack.controller';
@@ -23,7 +23,10 @@ import { SlackService } from './slack.service';
 @Module({
   imports: [
     StorageModule,
-    BullModule.registerQueue({ name: QUEUE_NAMES.SLACK_IMPORT }),
+    BullModule.registerQueue({
+    name: QUEUE_NAMES.SLACK_IMPORT,
+    defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS,
+  }),
   ],
   controllers: [SlackController],
   providers: [SlackService],

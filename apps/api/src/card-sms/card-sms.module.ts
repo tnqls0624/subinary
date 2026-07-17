@@ -15,7 +15,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { DevicesModule } from '../devices/devices.module';
 import { StorageModule } from '../storage/storage.module';
@@ -28,7 +28,10 @@ import { CardSmsController } from './card-sms.controller';
   imports: [
     DevicesModule,
     StorageModule,
-    BullModule.registerQueue({ name: QUEUE_NAMES.CARD_SMS_PARSE }),
+    BullModule.registerQueue({
+    name: QUEUE_NAMES.CARD_SMS_PARSE,
+    defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS,
+  }),
   ],
   controllers: [CardSmsController, CardSmsEventsController],
   providers: [CardSmsIngestService, CardSmsQueryService],

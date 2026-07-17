@@ -12,13 +12,16 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { GraphController } from './graph.controller';
 import { GraphService } from './graph.service';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_NAMES.GRAPH_EXTRACT })],
+  imports: [BullModule.registerQueue({
+    name: QUEUE_NAMES.GRAPH_EXTRACT,
+    defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS,
+  })],
   controllers: [GraphController],
   providers: [GraphService],
 })

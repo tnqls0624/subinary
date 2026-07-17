@@ -5,7 +5,11 @@ export {
   normalizeMerchant,
 } from './categorization.js';
 export type { CategoryDef, CategoryKeywordRule } from './categorization.js';
-export { DEFAULT_TIMEZONE, QUEUE_NAMES } from './constants.js';
+export {
+  DEFAULT_TIMEZONE,
+  QUEUE_DEFAULT_JOB_OPTIONS,
+  QUEUE_NAMES,
+} from './constants.js';
 export { createLogger } from './logger.js';
 export type { CreateLoggerOptions, Logger } from './logger.js';
 export { assertKrwInteger, sumKrw } from './money.js';

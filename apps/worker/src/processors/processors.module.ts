@@ -1,6 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { StorageModule } from '../storage/storage.module';
@@ -19,13 +19,15 @@ import { TestProcessor } from './test.processor';
     // 성공 후 이 큐에 add하므로(생산자) 함께 등록한다(스펙 §5).
     // MEMORY_EXTRACT는 MemoryExtractProcessor가 소비한다(api가 생산, Phase 8 §5).
     // GRAPH_EXTRACT는 GraphExtractProcessor가 소비한다(api가 생산, Phase 9 §5).
+    // defaultJobOptions(attempts+backoff)는 SlackImportProcessor가 RAG_INDEX에
+    // add하는 producer 경로에 적용된다(소비 동작에는 영향 없음).
     BullModule.registerQueue(
-      { name: QUEUE_NAMES.TEST },
-      { name: QUEUE_NAMES.CARD_SMS_PARSE },
-      { name: QUEUE_NAMES.SLACK_IMPORT },
-      { name: QUEUE_NAMES.RAG_INDEX },
-      { name: QUEUE_NAMES.MEMORY_EXTRACT },
-      { name: QUEUE_NAMES.GRAPH_EXTRACT },
+      { name: QUEUE_NAMES.TEST, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
+      { name: QUEUE_NAMES.CARD_SMS_PARSE, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
+      { name: QUEUE_NAMES.SLACK_IMPORT, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
+      { name: QUEUE_NAMES.RAG_INDEX, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
+      { name: QUEUE_NAMES.MEMORY_EXTRACT, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
+      { name: QUEUE_NAMES.GRAPH_EXTRACT, defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS },
     ),
     // Slack import 프로세서가 MinIO에서 원문 번들을 읽기 위한 경량 스토리지.
     StorageModule,

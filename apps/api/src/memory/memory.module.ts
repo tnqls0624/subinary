@@ -12,13 +12,16 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { MemoryController } from './memory.controller';
 import { MemoryService } from './memory.service';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_NAMES.MEMORY_EXTRACT })],
+  imports: [BullModule.registerQueue({
+    name: QUEUE_NAMES.MEMORY_EXTRACT,
+    defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS,
+  })],
   controllers: [MemoryController],
   providers: [MemoryService],
 })

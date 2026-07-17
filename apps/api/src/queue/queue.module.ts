@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { AppConfig } from '@family/config';
-import { QUEUE_NAMES } from '@family/shared';
+import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { QueueService } from './queue.service';
 
@@ -23,7 +23,10 @@ import { QueueService } from './queue.service';
         };
       },
     }),
-    BullModule.registerQueue({ name: QUEUE_NAMES.TEST }),
+    BullModule.registerQueue({
+    name: QUEUE_NAMES.TEST,
+    defaultJobOptions: QUEUE_DEFAULT_JOB_OPTIONS,
+  }),
   ],
   providers: [QueueService],
   exports: [QueueService],
