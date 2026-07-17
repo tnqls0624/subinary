@@ -183,7 +183,12 @@ export class DeviceService {
     return this.buildSecretResponse(device, rawSecret, rawCollectToken);
   }
 
-  /** Lists every device in the caller's household (any active member). */
+  /**
+   * Lists the caller's household devices (any active member). Revoked devices
+   * are excluded — revoke is a soft delete (the row stays for audit/history and
+   * to keep nonce/credential FKs intact), but a polished list only shows active
+   * ones. To surface revoked devices later, add an explicit `?includeRevoked`.
+   */
   async listDevices(
     userId: string,
     householdId: string,
@@ -193,7 +198,12 @@ export class DeviceService {
     const rows = await this.db
       .select()
       .from(schema.registeredDevices)
-      .where(eq(schema.registeredDevices.householdId, householdId))
+      .where(
+        and(
+          eq(schema.registeredDevices.householdId, householdId),
+          eq(schema.registeredDevices.status, 'active'),
+        ),
+      )
       .orderBy(schema.registeredDevices.createdAt);
 
     return rows.map(toDeviceSummary);
