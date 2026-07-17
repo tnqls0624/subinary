@@ -35,6 +35,9 @@ export type DeviceSummary = z.infer<typeof deviceSummarySchema>;
 /**
  * Register / rotate-secret response — the raw `secret` is exposed exactly once.
  * `signingRecipe` documents how the client must derive `X-Signature`.
+ * `collectToken` is the raw device collect token (Bearer) for the low-friction
+ * Shortcuts/MacroDroid ingest path; like `secret`, it is exposed exactly once on
+ * register/rotate and only its sha256 hash is persisted.
  */
 export const deviceSecretResponseSchema = z.object({
   device: deviceSummarySchema,
@@ -42,6 +45,7 @@ export const deviceSecretResponseSchema = z.object({
   secret: z.string(),
   algorithm: z.literal('HMAC-SHA256'),
   signingRecipe: z.string(),
+  collectToken: z.string(),
 });
 export type DeviceSecretResponse = z.infer<typeof deviceSecretResponseSchema>;
 
