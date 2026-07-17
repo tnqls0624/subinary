@@ -14,9 +14,13 @@
  *   `payment_cards.maskedNumber` 뒤 4자리(스펙 §1.5). 매칭 없으면 cardId=null,
  *   visibility='household'.
  * - 카테고리: merchant_category_rules(household, merchantNormalized) →
- *   키워드(categorizeByKeyword → slug → 시스템 expense_categories) → null (스펙 §1.3).
+ *   키워드(categorizeByKeyword → slug → 시스템 expense_categories) →
+ *   LLM 제안(category-suggest 큐, 비동기 자가학습) → null (스펙 §1.3).
+ *   LLM tier 는 여기서 동기 분류하지 않는다 — 미분류(null)로 승격을 완료하고
+ *   가맹점 단위 1회 category-suggest 잡만 enqueue 한다(승격 지연/실패 없음).
  * - 로그는 식별자/거래유형/상태만(금액·가맹점·PII 미기록, 스펙 §6/§1.1).
  */
+import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '@family/config';
@@ -26,8 +30,11 @@ import {
   categorizeByKeyword,
   createLogger,
   normalizeMerchant,
+  QUEUE_NAMES,
 } from '@family/shared';
+import type { Queue } from 'bullmq';
 import { and, desc, eq, gte, inArray, isNull, lt, lte, type SQL } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 
 import { DB } from '../database/database.module';
 
@@ -70,6 +77,9 @@ export class TransactionPromotionService {
 
   constructor(
     @Inject(DB) private readonly db: Db,
+    // 미분류 승격 시 LLM 카테고리 제안을 트리거하는 category-suggest 큐(생산자).
+    @InjectQueue(QUEUE_NAMES.CATEGORY_SUGGEST)
+    private readonly categorySuggestQueue: Queue,
     configService: ConfigService,
   ) {
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -167,6 +177,10 @@ export class TransactionPromotionService {
         { cardSmsEventId, transactionType, status },
         'promotion completed',
       );
+      // 새로 승격됐고 미분류면 LLM 카테고리 제안을 enqueue(가맹점 단위 dedupe).
+      if (status !== 'already_promoted' && categoryId === null) {
+        await this.enqueueCategorySuggestion(event, merchantNormalized);
+      }
       return;
     }
 
@@ -186,6 +200,9 @@ export class TransactionPromotionService {
       },
       outcome.skipped ? 'promotion skipped: already promoted' : 'promotion completed',
     );
+    if (!outcome.skipped && categoryId === null) {
+      await this.enqueueCategorySuggestion(event, merchantNormalized);
+    }
   }
 
   /* ---------------------------------------------------------------------- */
@@ -501,6 +518,49 @@ export class TransactionPromotionService {
     }
 
     return null;
+  }
+
+  /**
+   * 미분류(categoryId=null)로 승격된 거래의 가맹점에 대해 LLM 카테고리 제안 잡을
+   * enqueue 한다(카테고리 우선순위의 LLM tier — 가맹점 단위 1회, 비동기 자가학습).
+   *
+   * - jobId = `catsug_${householdId}_${md5(merchantNormalized)}` — BullMQ 커스텀
+   *   jobId 에는 ':' 를 쓸 수 없어 밑줄을 사용하고, 같은 가맹점의 반복 승격이
+   *   만드는 중복 enqueue 를 흡수한다(dedupe). removeOnComplete 로 완료 잡을
+   *   제거해 이후 재제안(예: 규칙 삭제 후 재수집)이 가능하다.
+   * - merchant 가 없으면 enqueue 하지 않는다(제안 대상 없음).
+   * - enqueue 실패는 승격을 실패시키지 않는다(best-effort 부가 기능). 잡 재시도
+   *   시 이미 승격된 이벤트는 조기 반환되어 재-enqueue 기회가 없으므로, 예외를
+   *   전파해도 제안만 잃는다 — warn 로그 후 흡수한다.
+   */
+  private async enqueueCategorySuggestion(
+    event: schema.CardSmsEvent,
+    merchantNormalized: string | null,
+  ): Promise<void> {
+    if (!merchantNormalized) {
+      return;
+    }
+    const merchantHash = createHash('md5').update(merchantNormalized).digest('hex');
+    try {
+      await this.categorySuggestQueue.add(
+        'suggest',
+        {
+          householdId: event.householdId,
+          merchantNormalized,
+          merchantRaw: event.merchantRaw ?? merchantNormalized,
+        },
+        {
+          jobId: `catsug_${event.householdId}_${merchantHash}`,
+          removeOnComplete: true,
+        },
+      );
+    } catch {
+      // 로그는 식별자/해시 일부만(가맹점 원문·PII 미기록).
+      this.logger.warn(
+        { cardSmsEventId: event.id, merchantHash: merchantHash.slice(0, 12) },
+        'category-suggest enqueue failed; transaction stays unclassified',
+      );
+    }
   }
 }
 

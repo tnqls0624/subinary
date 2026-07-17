@@ -18,6 +18,12 @@ export const DEFAULT_TIMEZONE = 'Asia/Seoul';
  *   rule-based extraction of entities/relationships from a workspace's chunks
  *   (api enqueues, worker consumes; jobId keyed by workspace to collapse
  *   re-enqueues).
+ * - `category-suggest`: LLM merchant-category suggestion queue — the worker
+ *   promotion pipeline enqueues one job per unclassified merchant
+ *   (jobId `catsug_${householdId}_${md5(merchantNormalized)}`, no colons),
+ *   the worker consumes it, asks the LLM for a category slug and self-learns
+ *   via `merchant_category_rules`. LLM failure/invalid output falls back to
+ *   leaving the transaction unclassified (deterministic fallback, mock-safe).
  */
 export const QUEUE_NAMES = {
   TEST: 'test',
@@ -26,6 +32,7 @@ export const QUEUE_NAMES = {
   RAG_INDEX: 'rag-index',
   MEMORY_EXTRACT: 'memory-extract',
   GRAPH_EXTRACT: 'graph-extract',
+  CATEGORY_SUGGEST: 'category-suggest',
 } as const;
 
 /**

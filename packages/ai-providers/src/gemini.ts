@@ -14,12 +14,21 @@ import type { GenerateRequest, GenerateResponse, LlmProvider } from './types.js'
 export interface GeminiLlmOptions {
   /** Gemini API 키 (필수). 로그로 출력하지 않는다. */
   apiKey: string;
-  /** 모델명 (기본: 'gemini-2.0-flash' — 분류/추출 용도에 충분하고 저렴). */
+  /** 모델명 (기본: 'gemini-2.5-flash' — 분류/추출/질의 용도에 충분하고 저렴). */
   model?: string;
   /** API base URL (기본: Google Generative Language API v1beta). */
   baseUrl?: string;
   /** 요청 타임아웃 ms (기본 30_000). */
   timeoutMs?: number;
+  /**
+   * 사고(thinking) 토큰 예산 (기본 0 = 비활성).
+   *
+   * Gemini 2.5 계열은 기본적으로 thinking이 켜져 있어 `maxOutputTokens`를 사고에
+   * 소진한다 — 분류/추출/짧은 답변에서 작은 maxTokens와 조합되면 실제 출력이
+   * 잘려(MAX_TOKENS) JSON이 깨진다. 분류·추출 용도엔 사고가 불필요하므로 기본
+   * 0으로 끈다(빠르고 저렴·결정적). 필요 시 양수로 올릴 수 있다.
+   */
+  thinkingBudget?: number;
 }
 
 /** generateContent 응답에서 사용하는 최소 형태. */
@@ -68,15 +77,17 @@ export class GeminiLlmProvider implements LlmProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly thinkingBudget: number;
 
   constructor(options: GeminiLlmOptions) {
     if (!options || typeof options.apiKey !== 'string' || options.apiKey.length === 0) {
       throw new Error('[@family/ai-providers] GeminiLlmProvider requires an apiKey');
     }
     this.apiKey = options.apiKey;
-    this.model = options.model ?? 'gemini-2.0-flash';
+    this.model = options.model ?? 'gemini-2.5-flash';
     this.baseUrl = options.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.thinkingBudget = options.thinkingBudget ?? 0;
   }
 
   async generate(req: GenerateRequest): Promise<GenerateResponse> {
@@ -85,10 +96,22 @@ export class GeminiLlmProvider implements LlmProvider {
       throw new Error('[@family/ai-providers] GenerateRequest has no prompt/question');
     }
 
+    // maxTokens는 출력 상한이다. 2.5 계열은 thinking을 끄지 않으면 사고가 이 예산을
+    // 잠식하므로, thinkingBudget=0일 때는 호출부의 작은 maxTokens에 사고 여유분을
+    // 더해 실제 출력이 잘리지 않게 한다(출력 자체는 여전히 짧게 생성됨).
+    const maxOutputTokens =
+      req.maxTokens !== undefined
+        ? this.thinkingBudget > 0
+          ? req.maxTokens + this.thinkingBudget
+          : req.maxTokens
+        : undefined;
+
     const body: Record<string, unknown> = {
       contents: [{ role: 'user', parts: [{ text: userText }] }],
       generationConfig: {
-        ...(req.maxTokens !== undefined ? { maxOutputTokens: req.maxTokens } : {}),
+        // thinking 비활성(기본) — 분류/추출/짧은 답변에 사고 불필요, 토큰 잠식 방지.
+        thinkingConfig: { thinkingBudget: this.thinkingBudget },
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
         ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       },
     };
