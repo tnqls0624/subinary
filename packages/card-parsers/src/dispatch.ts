@@ -1,3 +1,4 @@
+import { GenericCardParser } from './parsers/generic.parser.js';
 import { KookminCardParser } from './parsers/kookmin.parser.js';
 import { ShinhanCardParser } from './parsers/shinhan.parser.js';
 
@@ -5,9 +6,15 @@ import type { CardSmsInput, CardSmsParseResult, CardSmsParser } from './types.js
 
 /**
  * Registered parsers, tried in order. The first whose `supports()` returns true
- * handles the message.
+ * handles the message. Issuer-specific parsers (신한/KB) come first for precise
+ * labels; the {@link GenericCardParser} fallback is LAST and catches every other
+ * issuer (삼성/현대/롯데/하나/… ) so unknown cards still parse instead of failing.
  */
-const PARSERS: readonly CardSmsParser[] = [new ShinhanCardParser(), new KookminCardParser()];
+const PARSERS: readonly CardSmsParser[] = [
+  new ShinhanCardParser(),
+  new KookminCardParser(),
+  new GenericCardParser(),
+];
 
 /**
  * Payment aggregators (PRD §15). When one of these is the only identifiable
