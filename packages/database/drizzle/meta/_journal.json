@@ -71,6 +71,13 @@
       "when": 1784206681508,
       "tag": "0009_curved_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784254358981,
+      "tag": "0010_easy_jack_power",
+      "breakpoints": true
     }
   ]
 }

@@ -253,6 +253,11 @@ export const deviceCredentialStatus = pgEnum('device_credential_status', [
 /**
  * 등록된 스마트폰 장치. 장치는 `householdId`+`memberId`가 소유하며,
  * `createdBy`는 등록을 수행한 사용자다. 폐기 시 status='revoked' + revokedAt.
+ *
+ * `collectTokenHash`는 단축어(iOS)/MacroDroid(Android) 등 저마찰 자동화 도구용
+ * 수집 토큰(Bearer)의 sha256(hex)다. 원문 토큰은 저장하지 않고(등록/회전 시 raw를
+ * 1회만 응답) 해시만 보관하며, 값 자체를 로그에 남기지 않는다. 토큰 미발급 장치는
+ * null이므로 UNIQUE는 다수 null을 허용한다.
  */
 export const registeredDevices = pgTable(
   'registered_devices',
@@ -268,6 +273,7 @@ export const registeredDevices = pgTable(
     platform: devicePlatform('platform').notNull(),
     status: deviceStatus('status').notNull().default('active'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    collectTokenHash: text('collect_token_hash'),
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id),
@@ -276,6 +282,9 @@ export const registeredDevices = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (table) => [
+    unique('registered_devices_collect_token_hash_unique').on(
+      table.collectTokenHash,
+    ),
     index('registered_devices_household_id_idx').on(table.householdId),
     index('registered_devices_member_id_idx').on(table.memberId),
   ],

@@ -1,0 +1,2 @@
+ALTER TABLE "registered_devices" ADD COLUMN "collect_token_hash" text;--> statement-breakpoint
+ALTER TABLE "registered_devices" ADD CONSTRAINT "registered_devices_collect_token_hash_unique" UNIQUE("collect_token_hash");
