@@ -9,8 +9,14 @@
  * Secret hygiene: raw device secrets are generated locally, returned exactly
  * once (on register/rotate), and only their AES-256-GCM ciphertext is
  * persisted. Neither the raw secret nor the ciphertext is ever logged.
+ *
+ * Collect-token hygiene (addendum — Shortcuts/MacroDroid token ingest): a raw
+ * collect token is generated locally, returned exactly once alongside the
+ * secret, and only its sha256 hash is persisted on `registered_devices`. The
+ * raw token and its hash are never logged. `DeviceTokenGuard` authenticates the
+ * low-friction `POST /v1/mobile-events/card-sms-token` path against that hash.
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import {
   ForbiddenException,
@@ -33,6 +39,17 @@ import { DeviceSecretCipher } from './device-secret.cipher';
 
 /** Length of the raw device secret in bytes (hex-encoded → 64 chars). */
 const SECRET_BYTES = 32;
+
+/** Length of the raw collect token in bytes (256-bit → 64 hex chars). */
+const COLLECT_TOKEN_BYTES = 32;
+
+/**
+ * sha256(token) as lowercase hex. Only this hash of a collect token is ever
+ * persisted; the raw token is never stored and never logged.
+ */
+function hashCollectToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
 
 /** HMAC algorithm advertised to clients (matches the guard's verification). */
 const SIGNING_ALGORITHM = 'HMAC-SHA256' as const;
@@ -120,7 +137,7 @@ export class DeviceService {
 
   /**
    * Registers a smartphone under the caller's household and issues its first
-   * secret. The raw secret is returned exactly once.
+   * secret and collect token. Both raw credentials are returned exactly once.
    */
   async registerDevice(
     userId: string,
@@ -131,6 +148,9 @@ export class DeviceService {
     const rawSecret = randomBytes(SECRET_BYTES).toString('hex');
     const encrypted = this.cipher.encrypt(rawSecret);
 
+    const rawCollectToken = randomBytes(COLLECT_TOKEN_BYTES).toString('hex');
+    const collectTokenHash = hashCollectToken(rawCollectToken);
+
     const device = await this.db.transaction(async (tx) => {
       const [created] = await tx
         .insert(schema.registeredDevices)
@@ -140,6 +160,7 @@ export class DeviceService {
           name: input.name,
           platform: input.platform,
           status: 'active',
+          collectTokenHash,
           createdBy: userId,
         })
         .returning();
@@ -159,7 +180,7 @@ export class DeviceService {
       return created;
     });
 
-    return this.buildSecretResponse(device, rawSecret);
+    return this.buildSecretResponse(device, rawSecret, rawCollectToken);
   }
 
   /** Lists every device in the caller's household (any active member). */
@@ -179,8 +200,10 @@ export class DeviceService {
   }
 
   /**
-   * Rotates a device secret: the current active credential is revoked and a new
-   * active credential is issued. The new raw secret is returned exactly once.
+   * Rotates a device's credentials: the current active secret credential is
+   * revoked and a new active credential is issued, and the collect token is
+   * re-minted (its stored hash replaced). The new raw secret and collect token
+   * are returned exactly once; the previous collect token stops authenticating.
    */
   async rotateSecret(
     userId: string,
@@ -190,6 +213,9 @@ export class DeviceService {
 
     const rawSecret = randomBytes(SECRET_BYTES).toString('hex');
     const encrypted = this.cipher.encrypt(rawSecret);
+
+    const rawCollectToken = randomBytes(COLLECT_TOKEN_BYTES).toString('hex');
+    const collectTokenHash = hashCollectToken(rawCollectToken);
     const now = new Date();
 
     await this.db.transaction(async (tx) => {
@@ -211,9 +237,14 @@ export class DeviceService {
         keyVersion: encrypted.keyVersion,
         status: 'active',
       });
+
+      await tx
+        .update(schema.registeredDevices)
+        .set({ collectTokenHash, updatedAt: now })
+        .where(eq(schema.registeredDevices.id, deviceId));
     });
 
-    return this.buildSecretResponse(device, rawSecret);
+    return this.buildSecretResponse(device, rawSecret, rawCollectToken);
   }
 
   /**
@@ -299,6 +330,7 @@ export class DeviceService {
   private buildSecretResponse(
     device: schema.RegisteredDevice,
     rawSecret: string,
+    rawCollectToken: string,
   ): DeviceSecretResponse {
     return {
       device: toDeviceSummary(device),
@@ -306,6 +338,7 @@ export class DeviceService {
       secret: rawSecret,
       algorithm: SIGNING_ALGORITHM,
       signingRecipe: SIGNING_RECIPE,
+      collectToken: rawCollectToken,
     };
   }
 }

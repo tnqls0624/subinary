@@ -8,6 +8,12 @@
  * so this controller lives alongside Phase 2's `MobileEventsController` rather
  * than being merged into it.
  *
+ * `POST /v1/mobile-events/card-sms-token` (addendum) is the low-friction path
+ * for automation tools that cannot compute an HMAC signature (iOS Shortcuts /
+ * Android MacroDroid): it is authenticated by {@link DeviceTokenGuard} against a
+ * per-device Bearer collect token, then delegates to the *same*
+ * `CardSmsIngestService.ingest`, so idempotency and parsing behave identically.
+ *
  * The authenticated device principal is read via `@Device()`; the request body
  * is validated by the global `ZodValidationPipe` against the contract DTO. A
  * successful ingest replies `200 OK` (idempotent — a duplicate is still a 200).
@@ -29,6 +35,7 @@ import {
 
 import { Public } from '../auth/decorators/public.decorator';
 import { DeviceHmacGuard } from '../devices/device-hmac.guard';
+import { DeviceTokenGuard } from '../devices/device-token.guard';
 import { Device, type DeviceContext } from '../devices/decorators/device.decorator';
 import { CardSmsIngestService } from './card-sms-ingest.service';
 
@@ -44,6 +51,23 @@ export class CardSmsController {
   @Post('card-sms')
   @HttpCode(HttpStatus.OK)
   ingest(
+    @Device() device: DeviceContext,
+    @Body() dto: CardSmsIngestDto,
+  ): Promise<CardSmsIngestResponse> {
+    return this.ingestService.ingest(device, dto);
+  }
+
+  /**
+   * POST /v1/mobile-events/card-sms-token — collect-token (Bearer) card-SMS
+   * ingest for Shortcuts/MacroDroid. Reuses `CardSmsIngestService.ingest`, so
+   * idempotency (`UNIQUE(device_id, event_id)`) and parsing are identical to
+   * the HMAC path.
+   */
+  @Public()
+  @UseGuards(DeviceTokenGuard)
+  @Post('card-sms-token')
+  @HttpCode(HttpStatus.OK)
+  ingestWithToken(
     @Device() device: DeviceContext,
     @Body() dto: CardSmsIngestDto,
   ): Promise<CardSmsIngestResponse> {
