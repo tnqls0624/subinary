@@ -34,6 +34,27 @@ describe('KookminCardParser', () => {
     expect(result.occurredAt).toBeInstanceOf(Date);
     expect(seoul(result.occurredAt as Date)).toBe('2026-07-15 12:05');
     expect(result.confidence).toBeGreaterThanOrEqual(90);
+    // KB standard layout omits the card number → no tail to recover (unlinked).
+    expect(result.maskedCardNumber).toBeUndefined();
+  });
+
+  it('recovers an asterisk-masked tail', () => {
+    const content = ['[Web발신]', 'KB국민카드', '승인 8,900원 일시불', '****1234', '07/15 12:05', 'GS25역삼'].join('\n');
+    const receivedAt = new Date('2026-07-15T12:06:00+09:00');
+    const result = parser.parse({ sender: '15881688', content, receivedAt });
+
+    expect(result.maskedCardNumber).toBe('****1234');
+    // The masked tail line must not be mistaken for the merchant.
+    expect(result.merchantRaw).toBe('GS25역삼');
+  });
+
+  it('recovers a line-isolated tail', () => {
+    const content = ['국민카드 승인', '9,900원 일시불', '07/15 15:00', '무신사', '1234'].join('\n');
+    const receivedAt = new Date('2026-07-15T15:01:00+09:00');
+    const result = parser.parse({ sender: '15881688', content, receivedAt });
+
+    expect(result.maskedCardNumber).toBe('****1234');
+    expect(result.merchantRaw).toBe('무신사');
   });
 
   it('parses a cancellation', () => {

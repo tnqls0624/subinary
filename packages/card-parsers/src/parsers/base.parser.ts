@@ -25,8 +25,19 @@ const AMOUNT_RE = /([\d,]+)\s*원/;
 const DATETIME_RE = /(\d{1,2})[./-](\d{1,2})\s+(\d{1,2}):(\d{2})/;
 /** A line that is only a date/time, used to reject it as a merchant candidate. */
 const DATE_ONLY_RE = /^\s*\d{1,2}[./-]\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*$/;
-/** Masked card tail, e.g. `신한카드(1234)` -> `1234`. */
-const MASKED_RE = /\((\d{4})\)/;
+/**
+ * Masked card-tail probes, in priority order. Korean issuers place the trailing
+ * 4 digits differently — Shinhan parenthesizes `(1234)`, others asterisk-mask
+ * (`****1234`) or drop the tail onto its own line. Only explicit-masking or
+ * line-isolated forms are matched; a bare 4-digit run embedded in an amount,
+ * time, or date is never treated as a card number (avoids false links).
+ */
+/** `신한카드(1234)` -> `1234`. */
+const MASKED_PAREN_RE = /\((\d{4})\)/;
+/** Asterisk-masked tail anywhere: `****1234`, `*1234`, `1234**`. */
+const MASKED_STAR_RE = /\*+\s*(\d{4})(?!\d)|(?<!\d)(\d{4})(?!\d)\s*\*+/;
+/** A line that is *only* an (optionally asterisk-masked) 4-digit tail. */
+const MASKED_LINE_RE = /^[ \t]*\*{0,4}(\d{4})[ \t]*$/m;
 /** Installment term, e.g. `3개월`. */
 const INSTALLMENT_MONTHS_RE = /(\d{1,2})\s*개월/;
 /** Cancellation keywords are checked before approval (`승인취소` contains both). */
@@ -103,10 +114,20 @@ export function parseOccurredAt(
   return { occurredAt };
 }
 
-/** Masked card number as `****NNNN`, or undefined when no parenthesized tail exists. */
+/**
+ * Masked card number as `****NNNN`, or undefined when the message carries no
+ * recoverable tail (e.g. the KB standard layout omits the card number entirely —
+ * such transactions promote unlinked and are resolved via manual card
+ * assignment). Probes parenthesized, asterisk-masked, then line-isolated forms.
+ */
 export function parseMaskedCardNumber(content: string): string | undefined {
-  const match = content.match(MASKED_RE);
-  return match ? `****${match[1]}` : undefined;
+  const paren = content.match(MASKED_PAREN_RE);
+  if (paren) return `****${paren[1]}`;
+  const star = content.match(MASKED_STAR_RE);
+  if (star) return `****${star[1] ?? star[2]}`;
+  const line = content.match(MASKED_LINE_RE);
+  if (line) return `****${line[1]}`;
+  return undefined;
 }
 
 /** Installment months: `1` for `일시불`, `N` for `N개월`, undefined otherwise. */

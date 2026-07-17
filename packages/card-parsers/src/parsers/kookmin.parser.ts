@@ -16,6 +16,12 @@ import type { CardSmsInput } from '../types.js';
  * 07/15 12:05
  * GS25역삼
  * ```
+ *
+ * The card tail: KB layouts vary — some omit the card number entirely (the
+ * example above), some carry a masked/line-isolated tail (`****1234` or a lone
+ * `1234` line), which {@link parseMaskedCardNumber} now recovers. When the tail
+ * is genuinely absent the transaction promotes unlinked (`cardId=null`) and is
+ * resolved by assigning a card manually in the transaction detail.
  */
 export class KookminCardParser extends BaseCardParser {
   readonly issuer = 'KB국민카드';
