@@ -43,6 +43,9 @@ import type {
   BudgetListResponse,
   BudgetSummary,
   BudgetUpdateRequest,
+  FinanceQueryRequest,
+  FinanceQueryResponse,
+  MonthlyInsightsResponse,
 } from "@family/contracts";
 
 /** API 베이스 URL. 환경변수 우선, 로컬 개발 기본값 fallback. */
@@ -410,5 +413,27 @@ export const api = {
         method: "DELETE",
         accessToken,
       }),
+  },
+
+  ai: {
+    /** 자연어 가계부 질의 — 근거(SQL 집계) 기반 해요체 답변. */
+    financeQuery: (
+      accessToken: AccessToken,
+      body: FinanceQueryRequest,
+    ) =>
+      apiFetch<FinanceQueryResponse>("/v1/ai/finance-query", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    /** 월간 인사이트 — 서버 계산 사실 + LLM 문구 다듬기. */
+    monthlyInsights: (
+      accessToken: AccessToken,
+      params: { householdId: string; month?: string },
+    ) =>
+      apiFetch<MonthlyInsightsResponse>(
+        `/v1/ai/monthly-insights${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
   },
 } as const;

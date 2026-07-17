@@ -48,6 +48,8 @@ import {
   UsageBar,
   type BarListItem,
 } from "@/components/widgets";
+import { FinanceQueryCard } from "@/components/finance-query-card";
+import { MonthlyInsightsCard } from "@/components/monthly-insights-card";
 import { ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -278,6 +280,10 @@ export default function DashboardPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* AI 인사이트(있을 때만 렌더) + 자연어 질의 */}
+      <MonthlyInsightsCard month={month} />
+      <FinanceQueryCard />
 
       {/* 확인 필요 — 처리 대기 백로그 */}
       <Card className="gap-0 py-2">

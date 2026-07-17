@@ -4,9 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { createProviders } from '@family/ai-providers';
 import type { AppConfig } from '@family/config';
 
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { RetrievalModule } from '../retrieval/retrieval.module';
 import { AiQueryController } from './ai-query.controller';
 import { AiQueryService } from './ai-query.service';
+import { FinanceAiController } from './finance-ai.controller';
+import { FinanceAiService } from './finance-ai.service';
 import { AI_PROVIDERS } from './ai.constants';
 
 /**
@@ -26,8 +29,10 @@ import { AI_PROVIDERS } from './ai.constants';
  */
 @Global()
 @Module({
-  imports: [RetrievalModule],
-  controllers: [AiQueryController],
+  // AnalyticsModule: FinanceAiService가 권한 검증된 SQL 집계(AnalyticsService)를
+  // 재사용한다(금액은 LLM이 아닌 집계에서만 온다).
+  imports: [RetrievalModule, AnalyticsModule],
+  controllers: [AiQueryController, FinanceAiController],
   providers: [
     {
       provide: AI_PROVIDERS,
@@ -43,6 +48,7 @@ import { AI_PROVIDERS } from './ai.constants';
       },
     },
     AiQueryService,
+    FinanceAiService,
   ],
   exports: [AI_PROVIDERS],
 })
