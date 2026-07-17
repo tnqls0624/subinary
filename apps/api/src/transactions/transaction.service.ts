@@ -31,6 +31,7 @@ import {
   eq,
   gte,
   inArray,
+  isNull,
   lt,
   lte,
   or,
@@ -272,6 +273,8 @@ export class TransactionService {
     const conditions: SQL[] = [
       eq(schema.cardTransactions.householdId, householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
+      // '중복이라 제외' 확정 거래는 요약 합계에서도 뺀다(analytics/budgets와 동일).
+      isNull(schema.cardTransactions.excludedAt),
       this.visibilityScope(actor.memberId),
       gte(schema.cardTransactions.approvedAt, from),
       lt(schema.cardTransactions.approvedAt, to),
@@ -533,6 +536,44 @@ export class TransactionService {
       .update(schema.cardTransactions)
       .set({ status, netAmount, updatedAt: new Date() })
       .where(eq(schema.cardTransactions.id, id));
+
+    const row = await this.loadSummaryRow(id);
+    return buildSummary(row.txn, row.categorySlug, false);
+  }
+
+  /**
+   * Excludes a transaction from every total/budget (사용자가 '중복이라 제외' 확정).
+   * Sets `excludedAt=now` — a flag orthogonal to `status` so the row keeps its
+   * kind/amounts for history while dropping out of aggregations. Idempotent.
+   */
+  async exclude(userId: string, id: string): Promise<TransactionSummary> {
+    const current = await this.loadTransaction(id);
+    const actor = await this.requireMembership(current.householdId, userId);
+    this.assertCanMutate(actor, current.memberId);
+
+    if (current.excludedAt === null) {
+      await this.db
+        .update(schema.cardTransactions)
+        .set({ excludedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.cardTransactions.id, id));
+    }
+
+    const row = await this.loadSummaryRow(id);
+    return buildSummary(row.txn, row.categorySlug, false);
+  }
+
+  /** Undoes {@link exclude}: `excludedAt=null` so the row counts again. Idempotent. */
+  async include(userId: string, id: string): Promise<TransactionSummary> {
+    const current = await this.loadTransaction(id);
+    const actor = await this.requireMembership(current.householdId, userId);
+    this.assertCanMutate(actor, current.memberId);
+
+    if (current.excludedAt !== null) {
+      await this.db
+        .update(schema.cardTransactions)
+        .set({ excludedAt: null, updatedAt: new Date() })
+        .where(eq(schema.cardTransactions.id, id));
+    }
 
     const row = await this.loadSummaryRow(id);
     return buildSummary(row.txn, row.categorySlug, false);
@@ -832,6 +873,7 @@ function buildSummary(
     visibility: txn.visibility,
     memo: masked ? null : txn.memo,
     masked,
+    excludedAt: txn.excludedAt ? txn.excludedAt.toISOString() : null,
     createdAt: txn.createdAt.toISOString(),
   };
 }

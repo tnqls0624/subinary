@@ -355,6 +355,18 @@ export const api = {
         method: "POST",
         accessToken,
       }),
+    /** 합계/예산에서 제외(중복 확정 등). 이력은 남는다. */
+    exclude: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}/exclude`, {
+        method: "POST",
+        accessToken,
+      }),
+    /** 제외 취소(다시 합계에 포함). */
+    include: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionSummary>(`/v1/transactions/${id}/include`, {
+        method: "POST",
+        accessToken,
+      }),
     summary: (accessToken: AccessToken, params: TransactionSummaryParams) =>
       apiFetch<TransactionSummaryResponse>(
         `/v1/transactions/summary${buildQuery({ ...params })}`,

@@ -27,7 +27,7 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 
 import type {
   CardBreakdown,
@@ -420,6 +420,8 @@ export class AnalyticsService {
     return [
       eq(schema.cardTransactions.householdId, householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
+      // 사용자가 '중복이라 제외' 확정한 거래는 모든 합계/브레이크다운에서 뺀다.
+      isNull(schema.cardTransactions.excludedAt),
       this.visibilityScope(actorMemberId),
       gte(schema.cardTransactions.approvedAt, from),
       lt(schema.cardTransactions.approvedAt, to),

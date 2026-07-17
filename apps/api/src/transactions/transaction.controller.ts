@@ -149,4 +149,27 @@ export class TransactionController {
   ): Promise<TransactionSummary> {
     return this.transactionService.markValid(user.userId, id);
   }
+
+  /**
+   * POST /v1/transactions/:id/exclude — 중복 확정 등으로 합계/예산에서 제외한다
+   * (excludedAt=now). 거래 종류/금액은 이력용으로 남는다.
+   */
+  @Post(':id/exclude')
+  @HttpCode(HttpStatus.OK)
+  exclude(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<TransactionSummary> {
+    return this.transactionService.exclude(user.userId, id);
+  }
+
+  /** POST /v1/transactions/:id/include — 제외 취소(다시 합계에 포함). */
+  @Post(':id/include')
+  @HttpCode(HttpStatus.OK)
+  include(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<TransactionSummary> {
+    return this.transactionService.include(user.userId, id);
+  }
 }

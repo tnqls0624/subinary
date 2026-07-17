@@ -228,6 +228,8 @@ export class BudgetService {
     const conditions: SQL[] = [
       eq(schema.cardTransactions.householdId, budget.householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
+      // '중복이라 제외' 확정 거래는 예산 사용률에서도 뺀다(analytics와 동일 규칙).
+      isNull(schema.cardTransactions.excludedAt),
       gte(schema.cardTransactions.approvedAt, period.from),
       lt(schema.cardTransactions.approvedAt, period.to),
       this.visibilityScope(actorMemberId),

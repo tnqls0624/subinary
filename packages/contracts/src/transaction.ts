@@ -77,6 +77,8 @@ export const transactionSummarySchema = z.object({
   visibility: cardVisibilitySchema,
   memo: z.string().nullable(),
   masked: z.boolean(),
+  // 합계/예산에서 제외된 시각(사용자가 '중복이라 제외' 확정). null이면 집계 포함.
+  excludedAt: z.string().nullable(),
   createdAt: z.string(),
 });
 export type TransactionSummary = z.infer<typeof transactionSummarySchema>;

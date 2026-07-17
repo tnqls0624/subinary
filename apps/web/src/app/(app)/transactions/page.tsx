@@ -155,6 +155,8 @@ type RowAction =
   | { kind: "update"; id: string; body: TransactionUpdateRequest }
   | { kind: "markDuplicate"; id: string }
   | { kind: "markValid"; id: string }
+  | { kind: "exclude"; id: string }
+  | { kind: "include"; id: string }
   | { kind: "linkCancellation"; id: string; approvalTransactionId: string };
 
 /* -------------------------------------------------------------------------- */
@@ -425,6 +427,10 @@ export default function TransactionsPage() {
             return api.transactions.markDuplicate(token, action.id);
           case "markValid":
             return api.transactions.markValid(token, action.id);
+          case "exclude":
+            return api.transactions.exclude(token, action.id);
+          case "include":
+            return api.transactions.include(token, action.id);
           case "linkCancellation":
             return api.transactions.linkCancellation(token, action.id, {
               approvalTransactionId: action.approvalTransactionId,
@@ -438,6 +444,9 @@ export default function TransactionsPage() {
     onSuccess: () => {
       setActionError(null);
       void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      // 제외/포함·정상확인은 집계(대시보드/월간)와 예산 사용률에도 영향을 준다.
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      void queryClient.invalidateQueries({ queryKey: ["budgets"] });
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
@@ -726,12 +735,13 @@ export default function TransactionsPage() {
                       const Icon = categoryIcon(categoryNameOf(txn));
                       const isCancellation =
                         txn.transactionType === "cancellation";
+                      const excluded = txn.excludedAt != null;
                       return (
                         <ListRow
                           key={txn.id}
                           icon={<Icon />}
                           iconClassName={
-                            txn.masked
+                            txn.masked || excluded
                               ? "bg-muted text-muted-foreground"
                               : undefined
                           }
@@ -746,11 +756,13 @@ export default function TransactionsPage() {
                           }
                           subtitle={subtitleOf(txn)}
                           value={
-                            isCancellation ? (
-                              <Money amount={-txn.amount} muted />
-                            ) : (
-                              <Money amount={txn.netAmount} />
-                            )
+                            <span className={cn(excluded && "line-through opacity-60")}>
+                              {isCancellation ? (
+                                <Money amount={-txn.amount} muted />
+                              ) : (
+                                <Money amount={txn.netAmount} />
+                              )}
+                            </span>
                           }
                           valueSub={
                             <span className="flex items-center justify-end gap-1.5">
@@ -759,7 +771,13 @@ export default function TransactionsPage() {
                                   {TYPE_LABELS[txn.transactionType]}
                                 </span>
                               ) : null}
-                              <StatusBadge status={txn.status} />
+                              {excluded ? (
+                                <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
+                                  제외됨
+                                </span>
+                              ) : (
+                                <StatusBadge status={txn.status} />
+                              )}
                             </span>
                           }
                           onClick={
@@ -826,8 +844,11 @@ export default function TransactionsPage() {
           onMarkValid={() =>
             mutation.mutate({ kind: "markValid", id: detailTxn.id })
           }
-          onMarkDuplicate={() =>
-            mutation.mutate({ kind: "markDuplicate", id: detailTxn.id })
+          onExclude={() =>
+            mutation.mutate({ kind: "exclude", id: detailTxn.id })
+          }
+          onInclude={() =>
+            mutation.mutate({ kind: "include", id: detailTxn.id })
           }
           onClose={() => setDetailId(null)}
         />
@@ -875,7 +896,8 @@ function TransactionDetailDialog({
   onOpenMemo,
   onOpenLink,
   onMarkValid,
-  onMarkDuplicate,
+  onExclude,
+  onInclude,
   onClose,
 }: Readonly<{
   txn: TransactionSummary;
@@ -890,12 +912,16 @@ function TransactionDetailDialog({
   onOpenMemo: () => void;
   onOpenLink: () => void;
   onMarkValid: () => void;
-  onMarkDuplicate: () => void;
+  onExclude: () => void;
+  onInclude: () => void;
   onClose: () => void;
 }>) {
   const isCancellation = txn.transactionType === "cancellation";
+  const excluded = txn.excludedAt != null;
   const isPending =
-    txn.status === "pending_review" || txn.status === "duplicate_suspected";
+    !excluded &&
+    (txn.status === "pending_review" ||
+      txn.status === "duplicate_suspected");
   const canLink = isCancellation && txn.parentTransactionId == null;
 
   return (
@@ -913,13 +939,23 @@ function TransactionDetailDialog({
           <span className="text-muted-foreground text-[13px]">
             {isCancellation ? "취소 금액" : "결제 금액"}
           </span>
-          <span className="text-2xl font-bold tabular-nums">
+          <span
+            className={cn(
+              "text-2xl font-bold tabular-nums",
+              excluded && "text-muted-foreground line-through",
+            )}
+          >
             {isCancellation ? (
               <Money amount={-txn.amount} />
             ) : (
               <Money amount={txn.netAmount} />
             )}
           </span>
+          {excluded ? (
+            <span className="bg-background text-muted-foreground mt-1 rounded-full px-2 py-0.5 text-xs font-medium">
+              합계에서 제외됨
+            </span>
+          ) : null}
           {!isCancellation && txn.netAmount !== txn.amount ? (
             <span className="text-muted-foreground text-[13px]">
               원래 {formatWon(txn.amount)}에서 취소{" "}
@@ -1019,30 +1055,39 @@ function TransactionDetailDialog({
           </div>
 
           {/* 보조 액션 */}
-          {canLink || txn.status !== "duplicate_suspected" ? (
-            <div className="flex flex-col gap-2">
-              {canLink ? (
-                <Button
-                  variant="tint"
-                  className="h-11 w-full"
-                  disabled={busy}
-                  onClick={onOpenLink}
-                >
-                  원래 결제와 연결하기
-                </Button>
-              ) : null}
-              {txn.status !== "duplicate_suspected" ? (
-                <Button
-                  variant="ghost"
-                  className="text-muted-foreground h-11 w-full"
-                  disabled={busy}
-                  onClick={onMarkDuplicate}
-                >
-                  중복 거래로 표시하기
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="flex flex-col gap-2">
+            {canLink ? (
+              <Button
+                variant="tint"
+                className="h-11 w-full"
+                disabled={busy}
+                onClick={onOpenLink}
+              >
+                원래 결제와 연결하기
+              </Button>
+            ) : null}
+            {/* 승인 거래만 제외/포함 대상(취소 행은 합계에 순액이 없음). */}
+            {!isCancellation && excluded ? (
+              <Button
+                variant="tint"
+                className="h-11 w-full"
+                disabled={busy}
+                onClick={onInclude}
+              >
+                다시 합계에 포함하기
+              </Button>
+            ) : null}
+            {!isCancellation && !excluded ? (
+              <Button
+                variant="ghost"
+                className="text-muted-foreground h-11 w-full"
+                disabled={busy}
+                onClick={onExclude}
+              >
+                중복이에요 · 합계에서 빼기
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <DialogFooter className="flex-col gap-2 sm:flex-col">

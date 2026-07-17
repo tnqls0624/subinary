@@ -684,6 +684,9 @@ export const cardTransactions = pgTable(
     ),
     visibility: cardVisibility('visibility').notNull().default('household'),
     memo: text('memo'),
+    // 합계/예산에서 제외된 시각(사용자가 '중복이라 제외' 확정). null이면 집계 포함.
+    // status와 직교하는 플래그: 거래 종류는 그대로 두고 "카운트 여부"만 토글한다.
+    excludedAt: timestamp('excluded_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
