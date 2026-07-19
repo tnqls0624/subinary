@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "build:mobile": "BUILD_TARGET=mobile next build",
+    "build:mobile": "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://app.subinary.cloud} BUILD_TARGET=mobile next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
     "lint": "next lint || echo noop"
