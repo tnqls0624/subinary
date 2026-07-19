@@ -10,6 +10,8 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "ops:infra:bootstrap": "sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh",
+    "ops:infra:verify": "sh scripts/ops/verify-ai-pipeline-infrastructure.sh",
     "ops:backup": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml run --rm backup once",
     "ops:backup:verify": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml --profile ops run --rm backup-verify",
     "ops:backup:replica:init": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml --profile offsite-backup run --rm backup-replica replica-init",

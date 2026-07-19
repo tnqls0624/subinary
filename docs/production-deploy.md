@@ -66,12 +66,16 @@ Cloudflare Zero Trust 대시보드 → **Networks → Tunnels → Create tunnel*
 ## 3. 전환(cutover)
 
 ```bash
-# 1) dev 스택 내리기(데이터 볼륨은 유지됨)
-docker compose down
+# 이미지 빌드, 저장소/버킷 준비, migration, 운영 서비스 기동과 검증을 한 번에 수행
+sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh
 
-# 2) 프로덕션 스택 빌드 + 기동
-docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml up -d --build
+# 이미지가 이미 검증된 동일 빌드라면 재빌드 없이 복구·검증
+sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh --skip-build
 ```
+
+bootstrap은 기존 PostgreSQL/Redis/MinIO 볼륨을 삭제하거나 초기화하지 않는다. `minio-setup`과
+`migrate`는 멱등 실행하고, API·Worker·Web이 동일 이미지인지와 상태 저장소 포트가 호스트에 공개되지
+않았는지까지 검증한다. 기존 수동 `docker compose ... up`은 장애 분석용으로만 사용한다.
 
 `PUBLIC_BASE_URL`이 web 이미지에 인라인되므로, 도메인을 바꾸면 **web을 재빌드**해야 한다:
 ```bash
@@ -81,16 +85,12 @@ docker compose --env-file .env --env-file .env.production -f docker-compose.prod
 ## 4. 검증
 
 ```bash
-docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml ps        # 모두 healthy 확인
-# 외부에서:
-curl -sS https://app.subinary.cloud/api/health      # {"status":"ok",...}
-curl -sS https://app.subinary.cloud/v1/health/live  # api liveness
+sh scripts/ops/verify-ai-pipeline-infrastructure.sh
 ```
-포트가 안 열렸는지 확인(로컬):
-```bash
-docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml ps --format '{{.Service}} {{.Ports}}'
-# postgres/redis/minio에 0.0.0.0:... 매핑이 없어야 정상
-```
+
+검증 명령은 컨테이너 health, migration/MinIO setup 완료, PostgreSQL 확장 3개, AI 파이프라인 제어
+테이블 11개, Redis, 애플리케이션 이미지 일치, 내부 전용 포트, Cloudflare 공개 경로와 학습 준비도를
+원문·시크릿 없이 확인한다. 외부 경보 웹훅과 오프호스트 Restic 저장소는 미설정이어도 경고만 출력한다.
 
 ## 5. 맥 서버 하드닝
 
