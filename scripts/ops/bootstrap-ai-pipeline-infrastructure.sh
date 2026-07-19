@@ -43,6 +43,25 @@ compose() {
 compose config --quiet
 
 if [ "$skip_build" = false ]; then
+  minimum_free_disk_gb="${INFRA_MINIMUM_FREE_DISK_GB:-40}"
+  case "$minimum_free_disk_gb" in
+    ''|*[!0-9]*)
+      echo "AI pipeline infrastructure bootstrap failed: INFRA_MINIMUM_FREE_DISK_GB must be a non-negative integer" >&2
+      exit 64
+      ;;
+  esac
+
+  available_disk_kb="$(df -Pk "$repository_root" | awk 'NR == 2 { print $4 }')"
+  required_disk_kb=$((minimum_free_disk_gb * 1024 * 1024))
+  if [ "$available_disk_kb" -lt "$required_disk_kb" ]; then
+    available_disk_gb=$((available_disk_kb / 1024 / 1024))
+    echo "AI pipeline infrastructure bootstrap failed: ${available_disk_gb}GB free, ${minimum_free_disk_gb}GB required for image build" >&2
+    echo "Inspect with 'docker system df'; remove only confirmed unused build cache/images before retrying." >&2
+    echo "Use --skip-build only when restoring the already verified image." >&2
+    exit 1
+  fi
+  echo "[infra] build_disk_free=$((available_disk_kb / 1024 / 1024))GB minimum=${minimum_free_disk_gb}GB"
+
   echo "[infra] building production application and backup images"
   compose build api backup
 fi

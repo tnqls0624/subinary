@@ -75,7 +75,9 @@ sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh --skip-build
 
 bootstrap은 기존 PostgreSQL/Redis/MinIO 볼륨을 삭제하거나 초기화하지 않는다. `minio-setup`과
 `migrate`는 멱등 실행하고, API·Worker·Web이 동일 이미지인지와 상태 저장소 포트가 호스트에 공개되지
-않았는지까지 검증한다. 기존 수동 `docker compose ... up`은 장애 분석용으로만 사용한다.
+않았는지까지 검증한다. 이미지 빌드는 기본 40GB의 호스트 여유 공간을 요구하며, 필요한 경우
+`INFRA_MINIMUM_FREE_DISK_GB`로 기준을 높일 수 있다. 기존 수동 `docker compose ... up`은 장애
+분석용으로만 사용한다.
 
 `PUBLIC_BASE_URL`이 web 이미지에 인라인되므로, 도메인을 바꾸면 **web을 재빌드**해야 한다:
 ```bash
@@ -102,6 +104,26 @@ sh scripts/ops/verify-ai-pipeline-infrastructure.sh
 - **전원 복구 후 자동 부팅**: 시스템 설정 → 에너지(또는 `sudo pmset -a autorestart 1`; Mac mini/데스크톱만 지원).
 - **Docker Desktop 자동 실행**: Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*. + 맥 자동 로그인 설정(재부팅 시 무인 기동).
 - compose는 `restart: unless-stopped`라 Docker만 뜨면 컨테이너는 자동 복구.
+
+### 5.1 Docker 디스크 유지보수
+
+배포 전 `docker system df`와 `df -h /System/Volumes/Data`를 확인한다. BuildKit 캐시가 비정상적으로
+누적되면 Docker VM이 중단되어 Cloudflare가 530을 반환할 수 있다. 아래 정리는 운영 컨테이너와 볼륨을
+건드리지 않지만, 다음 빌드에서 일부 레이어를 다시 생성하게 된다.
+
+```bash
+# 현재 사용량 확인
+docker system df
+
+# 최근 빌드 캐시 10GB는 보존하고 나머지 미사용 캐시 정리
+docker builder prune --all --force --reserved-space 10GB
+
+# 컨테이너가 사용하지 않는 태그 없는 중간 이미지만 정리(-a 사용 금지)
+docker image prune --force
+```
+
+운영 Mac에서는 최소 40GB, 권장 80GB 이상의 호스트 여유 공간을 유지한다. `docker system prune -a`와
+`docker volume prune`은 운영 데이터나 롤백 이미지를 제거할 수 있으므로 이 절차에서 사용하지 않는다.
 
 ## 6. 자동 백업과 복구 검증 (가계부 데이터 — 필수)
 
