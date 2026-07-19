@@ -104,6 +104,7 @@ export type EntitySummary = z.infer<typeof entitySummarySchema>;
  * the future (spec §1.3). `supersedesRelationshipId` is the replaced relationship
  * when this one was created via supersede. `sourceRefId` links to the originating
  * chunk (null for explicitly superseding relationships without an origin ref).
+ * 자동 추출 행은 source chunk/revision과 extractor version도 함께 노출한다.
  */
 export const relationshipSummarySchema = z.object({
   id: z.string(),
@@ -116,6 +117,9 @@ export const relationshipSummarySchema = z.object({
   validUntil: z.string().nullable(),
   supersedesRelationshipId: z.string().nullable(),
   isCurrent: z.boolean(),
+  sourceChunkId: z.string().nullable(),
+  sourceChunkRevisionId: z.string().nullable(),
+  extractorVersion: z.string(),
   sourceRefId: z.string().nullable(),
   confidence: z.number().int(),
 });

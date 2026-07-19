@@ -3,25 +3,47 @@ import { householdMembershipSummarySchema } from './household.js';
 
 // --- Requests ---
 
+const emailInputSchema = z
+  .string({ error: '이메일을 입력해 주세요.' })
+  .trim()
+  .min(1, { error: '이메일을 입력해 주세요.' })
+  .pipe(z.email({ error: '올바른 이메일 주소를 입력해 주세요.' }));
+
+const requiredPasswordSchema = z
+  .string({ error: '비밀번호를 입력해 주세요.' })
+  .min(1, { error: '비밀번호를 입력해 주세요.' })
+  .max(200, { error: '비밀번호는 200자 이하로 입력해 주세요.' });
+
+const newPasswordSchema = z
+  .string({ error: '비밀번호를 입력해 주세요.' })
+  .min(8, { error: '비밀번호는 8자 이상 입력해 주세요.' })
+  .max(200, { error: '비밀번호는 200자 이하로 입력해 주세요.' });
+
+const userNameInputSchema = z
+  .string({ error: '이름을 입력해 주세요.' })
+  .trim()
+  .min(1, { error: '이름을 입력해 주세요.' })
+  .max(100, { error: '이름은 100자 이하로 입력해 주세요.' });
+
 /** `POST /v1/auth/register` — create an account. */
 export const registerRequestSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(200),
-  name: z.string().min(1).max(100),
+  email: emailInputSchema,
+  password: newPasswordSchema,
+  name: userNameInputSchema,
 });
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 
 /** `POST /v1/auth/login` — authenticate with email + password. */
 export const loginRequestSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: emailInputSchema,
+  password: requiredPasswordSchema,
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 /** `POST /v1/auth/change-password` — rotate password; revokes all sessions. */
 export const changePasswordRequestSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(200),
+  currentPassword: requiredPasswordSchema,
+  newPassword: newPasswordSchema,
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 

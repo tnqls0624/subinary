@@ -484,6 +484,9 @@ export class AnalyticsService {
         and(
           eq(schema.cardTransactions.householdId, householdId),
           eq(schema.cardTransactions.transactionType, 'approval'),
+          // 이미 '중복 제외'된 행은 합계에 애초에 없으므로 '권한으로 제외된 건수'에서도
+          // 빼야 이중 집계가 안 된다(다른 집계의 isNull(excludedAt)와 정렬).
+          isNull(schema.cardTransactions.excludedAt),
           gte(schema.cardTransactions.approvedAt, period.from),
           lt(schema.cardTransactions.approvedAt, period.to),
           ne(schema.cardTransactions.memberId, actorMemberId),

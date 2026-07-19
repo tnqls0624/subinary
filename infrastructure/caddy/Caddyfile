@@ -11,7 +11,7 @@
 # prod에서는 localhost 대신 실제 도메인을 지정하면 Caddy가 Let's Encrypt로
 # HTTPS 인증서를 자동 발급/갱신한다. 예:
 #
-#   family.example.com {
+#   app.subinary.cloud {
 #       handle /v1/* {
 #           reverse_proxy api:3001
 #       }

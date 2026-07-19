@@ -3,13 +3,18 @@ import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { parseCardSms } from '@family/card-parsers';
 import type { AppConfig } from '@family/config';
-import { schema, type Db } from '@family/database';
+import {
+  schema,
+  trackPipelineExecution,
+  type Db,
+} from '@family/database';
 import { createLogger, QUEUE_NAMES } from '@family/shared';
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
+import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
 /**
  * 워커가 기록하는 card_sms_events.parseStatus(cardSmsParseStatus enum) 부분집합.
@@ -37,6 +42,7 @@ export class CardSmsParseProcessor extends WorkerHost {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly promotionService: TransactionPromotionService,
+    private readonly realtimePublisher: RealtimePublisherService,
     configService: ConfigService,
   ) {
     super();
@@ -47,6 +53,42 @@ export class CardSmsParseProcessor extends WorkerHost {
   }
 
   async process(job: Job<CardSmsParseJobData>): Promise<CardSmsParseJobResult> {
+    return trackPipelineExecution(
+      this.db,
+      {
+        pipelineName: 'card-sms-parse',
+        pipelineVersion: 'card-sms-parse-v2',
+        stepName: 'parse-and-promote',
+        stepVersion: 'card-parser-v1',
+        trigger: 'bullmq',
+        scopeType: 'card-sms-event',
+        scopeId: job.data.cardSmsEventId || 'missing',
+        externalRunId: String(job.id ?? 'unknown'),
+        attempt: job.attemptsMade + 1,
+        maximumAttempts: job.opts?.attempts ?? 1,
+        summarize: (result) =>
+          'skipped' in result
+            ? {
+                inputCount: 0,
+                outputCount: 0,
+                rejectedCount: 0,
+                metrics: { skipped: true },
+              }
+            : {
+                inputCount: 1,
+                outputCount: result.parseStatus === 'parse_failed' ? 0 : 1,
+                rejectedCount: result.parseStatus === 'parse_failed' ? 1 : 0,
+                metrics: { parseStatus: result.parseStatus },
+              },
+      },
+      () => this.processTracked(job),
+    );
+  }
+
+  /** 실제 카드 문자 파싱/승격. 바깥 wrapper가 실행 상태를 기록한다. */
+  private async processTracked(
+    job: Job<CardSmsParseJobData>,
+  ): Promise<CardSmsParseJobResult> {
     const { cardSmsEventId } = job.data;
 
     if (!cardSmsEventId) {
@@ -139,6 +181,11 @@ export class CardSmsParseProcessor extends WorkerHost {
     if (parseStatus === 'parsed' || parseStatus === 'pending_review') {
       await this.promotionService.promote(cardSmsEventId);
     }
+
+    // 실시간 무효화 힌트(best-effort, fire-and-forget) — parse_failed도 대시보드
+    // 패널 대상이라 상태 불문 발행한다. publish는 내부에서 실패를 흡수하므로
+    // await 하지 않는다(Redis 부분 장애가 잡 처리량을 깎지 않게).
+    void this.realtimePublisher.publish(event.householdId);
 
     return { cardSmsEventId, parseStatus };
   }

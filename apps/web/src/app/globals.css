@@ -153,6 +153,50 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* --- 앱 셸 기하 토큰 -------------------------------------------------------- */
+/* (app)/layout.tsx의 헤더(h-14 + safe-area-top)·하단 탭바(h-20 + safe-area-bottom)와
+ * 단일 출처. 셸 치수를 바꾸면 여기만 고치면 AI 채팅 패널 등 파생 레이아웃이 따라온다.
+ * --kb-inset: 키보드가 레이아웃 뷰포트를 줄여주지 않는 브라우저(iOS 사파리 웹)용
+ * 폴백 — native.ts의 visualViewport 리스너가 주입한다. 그 외 환경에선 항상 0. */
+:root {
+  /* safe-area 합성: Capacitor 8 SystemBars는 구형 Android WebView(<140)에서
+   * env(safe-area-inset-*) 대신 --safe-area-inset-* 커스텀 프로퍼티를 주입한다.
+   * 두 소스를 max()로 합쳐 어느 환경이든 흡수(양쪽 다 없으면 0). */
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --safe-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--safe-area-inset-bottom, 0px)
+  );
+
+  /* border 1px 포함 — 누락하면 파생 레이아웃(AI 채팅 패널)이 1px 어긋나
+   * 페이지 전체가 1px 스크롤되는 회귀가 있었다. */
+  --app-header-h: calc(3.5rem + 1px + var(--safe-top));
+  --app-tabbar-h: calc(5rem + 1px + var(--safe-bottom));
+  --kb-inset: 0px;
+}
+
+/* iOS WebKit(iPhone)은 16px 미만 입력 필드 포커스 시 페이지를 자동 줌한다.
+ * shadcn Input의 md:text-sm(14px)이 대형 폰 가로모드(≥768px)에서 살아나는
+ * 엣지케이스 방어. 의도적으로 @layer 밖(unlayered) — utilities 레이어의
+ * md:text-sm보다 캐스케이드에서 이겨야 하기 때문. 터치 기기에서만 적용. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, 1em);
+  }
+}
+
+/* 키보드 표시 중(kb-open, native.ts가 토글): 탭바를 숨겨 입력바가 키보드에 밀착.
+ * 웹뷰 리사이즈(iOS resize:native / Android adjustResize / Chrome resizes-content)로
+ * 뷰포트가 이미 줄어 있으므로 탭바 높이만 0으로 접으면 나머지는 수식이 처리한다. */
+html.kb-open {
+  --app-tabbar-h: 0px;
+}
+html.kb-open [data-bottom-nav] {
+  display: none;
+}
+
 /* --- base ----------------------------------------------------------------- */
 @layer base {
   * {
@@ -160,6 +204,9 @@
   }
   html {
     color-scheme: light dark;
+    /* 스크롤 끝 바운스가 앱 셸(헤더·탭바)까지 흔드는 것 방지 — 채팅 등
+     * 내부 스크롤러가 끝에 닿았을 때 바디로 체이닝되는 것도 함께 차단. */
+    overscroll-behavior-y: none;
   }
   body {
     @apply bg-background text-foreground;

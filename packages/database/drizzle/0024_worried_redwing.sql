@@ -1,0 +1,4 @@
+ALTER TABLE "dataset_snapshot_items" ADD COLUMN "split_group_hash" text;--> statement-breakpoint
+ALTER TABLE "dataset_snapshot_items" ADD COLUMN "occurred_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "dataset_snapshot_items_split_group_idx" ON "dataset_snapshot_items" USING btree ("dataset_snapshot_id","split_group_hash","split");--> statement-breakpoint
+ALTER TABLE "dataset_snapshot_items" ADD CONSTRAINT "dataset_snapshot_items_split_audit_check" CHECK (num_nonnulls("dataset_snapshot_items"."split_group_hash", "dataset_snapshot_items"."occurred_at") in (0, 2) and ("dataset_snapshot_items"."split_group_hash" is null or "dataset_snapshot_items"."split_group_hash" ~ '^[a-f0-9]{64}$'));

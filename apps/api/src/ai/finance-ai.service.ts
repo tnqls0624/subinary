@@ -23,7 +23,18 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { ProviderSet } from '@family/ai-providers';
@@ -288,6 +299,10 @@ export class FinanceAiService {
       prompt: question,
       temperature: 0,
       maxTokens: 256,
+      metadata: {
+        task: 'finance-intent',
+        promptVersion: 'finance-intent-v1',
+      },
     });
 
     const parsed = intentOutputSchema.parse(extractJson(generated.text));
@@ -477,6 +492,10 @@ export class FinanceAiService {
       context: [{ id: 'aggregate-summary', text: JSON.stringify(data) }],
       temperature: 0,
       maxTokens: 512,
+      metadata: {
+        task: 'finance-answer',
+        promptVersion: 'finance-answer-v1',
+      },
     });
 
     return answerOutputSchema.parse(extractJson(generated.text)).answer;
@@ -550,22 +569,26 @@ export class FinanceAiService {
       else ${schema.cardTransactions.merchantNormalized}
     end`;
 
+    // netAmount(취소 반영 순액)로 최고액을 뽑고 isNull(excludedAt)로 '제외' 거래를
+    // 배제한다 — 평균(totalNet/count)도 net·제외반영 기준이므로 분자/분모를 정렬해
+    // 전액취소(net≈0)나 사용자가 제외한 거래가 이상지출로 되살아나지 않게 한다.
     const [top] = await this.db
       .select({
         merchant: merchantLabel,
-        amount: schema.cardTransactions.amount,
+        amount: schema.cardTransactions.netAmount,
       })
       .from(schema.cardTransactions)
       .where(
         and(
           eq(schema.cardTransactions.householdId, householdId),
           eq(schema.cardTransactions.transactionType, 'approval'),
+          isNull(schema.cardTransactions.excludedAt),
           this.visibilityScope(actorMemberId),
           gte(schema.cardTransactions.approvedAt, from),
           lt(schema.cardTransactions.approvedAt, to),
         ),
       )
-      .orderBy(desc(schema.cardTransactions.amount))
+      .orderBy(desc(schema.cardTransactions.netAmount))
       .limit(1);
 
     if (!top) return null;
@@ -697,6 +720,10 @@ export class FinanceAiService {
       prompt: JSON.stringify(facts),
       temperature: 0,
       maxTokens: 1024,
+      metadata: {
+        task: 'finance-insight-polish',
+        promptVersion: 'finance-insight-v1',
+      },
     });
 
     const polished = polishedInsightsSchema.parse(extractJson(generated.text));

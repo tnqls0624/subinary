@@ -1,11 +1,136 @@
-export { healthCheckItemSchema, livezResponseSchema, readyzResponseSchema } from './health.js';
-export type { HealthCheckItem, LivezResponse, ReadyzResponse } from './health.js';
+export {
+  healthCheckItemSchema,
+  livezResponseSchema,
+  readyzResponseSchema,
+} from './health.js';
+export type {
+  HealthCheckItem,
+  LivezResponse,
+  ReadyzResponse,
+} from './health.js';
+export {
+  learningDatasetTaskSchema,
+  datasetSnapshotStatusSchema,
+  datasetSplitStrategySchema,
+  memoryCandidateDatasetCreateRequestSchema,
+  merchantCategoryDatasetCreateRequestSchema,
+  ragRetrievalFeedbackCreateRequestSchema,
+  ragRetrievalFeedbackResponseSchema,
+  ragEmbeddingDatasetCreateRequestSchema,
+  datasetSplitCountsSchema,
+  datasetSnapshotSummarySchema,
+  datasetSnapshotListResponseSchema,
+  datasetSnapshotApprovalResponseSchema,
+  datasetSnapshotRevokeRequestSchema,
+  datasetSnapshotRevokeResponseSchema,
+  learningScopeSchema,
+  learningModelTaskSchema,
+  modelRegistryStatusSchema,
+  modelRegistryCreateRequestSchema,
+  modelRegistrySummarySchema,
+  modelRegistryListQuerySchema,
+  modelRegistryListResponseSchema,
+  trainingRunStatusSchema,
+  trainingRunCreateRequestSchema,
+  trainingEnvironmentSummarySchema,
+  trainingMetricsSummarySchema,
+  trainingRunSummarySchema,
+  trainingRunListQuerySchema,
+  trainingRunListResponseSchema,
+  modelMetricSetSchema,
+  modelSliceMetricSetSchema,
+  modelGateCriterionSchema,
+  modelGateCriterionResultSchema,
+  evaluationRunCreateRequestSchema,
+  evaluationGateResultSchema,
+  evaluationRunSummarySchema,
+  modelApprovalRequestSchema,
+  modelCanaryPolicyRequestSchema,
+  modelPromotionRequestSchema,
+  modelAliasRollbackRequestSchema,
+  modelTrafficPolicyCreateRequestSchema,
+  modelTrafficPolicyPauseRequestSchema,
+  modelTrafficPolicySummarySchema,
+  modelCanaryEvaluateRequestSchema,
+  modelCanaryDecisionReasonSchema,
+  modelCanaryEvaluationTriggerSchema,
+  modelCanaryEvaluationSummarySchema,
+  modelAliasSummarySchema,
+  sourceTombstoneResponseSchema,
+  quarantinedOutboxListQuerySchema,
+  quarantinedOutboxEventSummarySchema,
+  quarantinedOutboxListResponseSchema,
+  outboxReprocessResponseSchema,
+  learningOperationsMetricsQuerySchema,
+  learningQueueMetricSchema,
+  learningOperationsMetricsResponseSchema,
+} from './learning.js';
+export type {
+  LearningDatasetTask,
+  DatasetSnapshotStatus,
+  DatasetSplitStrategy,
+  MemoryCandidateDatasetCreateRequest,
+  MerchantCategoryDatasetCreateRequest,
+  RagRetrievalFeedbackCreateRequest,
+  RagRetrievalFeedbackResponse,
+  RagEmbeddingDatasetCreateRequest,
+  DatasetSplitCounts,
+  DatasetSnapshotSummary,
+  DatasetSnapshotListResponse,
+  DatasetSnapshotApprovalResponse,
+  DatasetSnapshotRevokeRequest,
+  DatasetSnapshotRevokeResponse,
+  LearningScope,
+  LearningModelTask,
+  ModelRegistryStatus,
+  ModelRegistryCreateRequest,
+  ModelRegistrySummary,
+  ModelRegistryListQuery,
+  ModelRegistryListResponse,
+  TrainingRunStatus,
+  TrainingRunCreateRequest,
+  TrainingEnvironmentSummary,
+  TrainingMetricsSummary,
+  TrainingRunSummary,
+  TrainingRunListQuery,
+  TrainingRunListResponse,
+  ModelMetricSet,
+  ModelSliceMetricSet,
+  ModelGateCriterion,
+  ModelGateCriterionResult,
+  EvaluationRunCreateRequest,
+  EvaluationGateResult,
+  EvaluationRunSummary,
+  ModelApprovalRequest,
+  ModelCanaryPolicyRequest,
+  ModelPromotionRequest,
+  ModelAliasRollbackRequest,
+  ModelTrafficPolicyCreateRequest,
+  ModelTrafficPolicyPauseRequest,
+  ModelTrafficPolicySummary,
+  ModelCanaryEvaluateRequest,
+  ModelCanaryEvaluationTrigger,
+  ModelCanaryEvaluationSummary,
+  ModelAliasSummary,
+  SourceTombstoneResponse,
+  QuarantinedOutboxListQuery,
+  QuarantinedOutboxEventSummary,
+  QuarantinedOutboxListResponse,
+  OutboxReprocessResponse,
+  LearningOperationsMetricsQuery,
+  LearningQueueMetric,
+  LearningOperationsMetricsResponse,
+} from './learning.js';
 export {
   testJobEnqueueResponseSchema,
   testJobStatusResponseSchema,
   storageTestResponseSchema,
 } from './dev.js';
-export type { TestJobEnqueueResponse, TestJobStatusResponse, StorageTestResponse } from './dev.js';
+export type {
+  TestJobEnqueueResponse,
+  TestJobStatusResponse,
+  StorageTestResponse,
+} from './dev.js';
 
 export {
   registerRequestSchema,
@@ -33,6 +158,8 @@ export {
   invitationCreateRequestSchema,
   acceptInvitationRequestSchema,
   memberRoleUpdateRequestSchema,
+  memberColorSchema,
+  memberColorUpdateRequestSchema,
   householdSummarySchema,
   householdMembershipSummarySchema,
   memberSummarySchema,
@@ -46,12 +173,29 @@ export type {
   InvitationCreateRequest,
   AcceptInvitationRequest,
   MemberRoleUpdateRequest,
+  MemberColor,
+  MemberColorUpdateRequest,
   HouseholdSummary,
   HouseholdMembershipSummary,
   MemberSummary,
   InvitationCreated,
   InvitationSummary,
 } from './household.js';
+
+export {
+  pushPlatformSchema,
+  pushSubscriptionRegisterRequestSchema,
+  notificationPreferencesUpdateRequestSchema,
+  pushSubscriptionResponseSchema,
+  notificationPreferencesSchema,
+} from './notification.js';
+export type {
+  PushPlatform,
+  PushSubscriptionRegisterRequest,
+  NotificationPreferencesUpdateRequest,
+  PushSubscriptionResponse,
+  NotificationPreferences,
+} from './notification.js';
 
 export {
   devicePlatformSchema,
@@ -100,8 +244,16 @@ export type {
   CardSummary,
 } from './card.js';
 
-export { categorySummarySchema } from './category.js';
-export type { CategorySummary } from './category.js';
+export {
+  categorySummarySchema,
+  categoryCreateRequestSchema,
+  categoryUpdateRequestSchema,
+} from './category.js';
+export type {
+  CategorySummary,
+  CategoryCreateRequest,
+  CategoryUpdateRequest,
+} from './category.js';
 
 export {
   transactionTypeSchema,
@@ -110,6 +262,10 @@ export {
   linkCancellationRequestSchema,
   transactionSummarySchema,
   transactionListResponseSchema,
+  merchantLabelCandidateSourceSchema,
+  merchantLabelCandidateSchema,
+  merchantLabelTrainingReadinessSchema,
+  merchantLabelCandidateListResponseSchema,
   transactionSummaryResponseSchema,
 } from './transaction.js';
 export type {
@@ -119,6 +275,10 @@ export type {
   LinkCancellationRequest,
   TransactionSummary,
   TransactionListResponse,
+  MerchantLabelCandidateSource,
+  MerchantLabelCandidate,
+  MerchantLabelTrainingReadiness,
+  MerchantLabelCandidateListResponse,
   TransactionSummaryResponse,
 } from './transaction.js';
 
@@ -157,18 +317,24 @@ export type {
 } from './budget.js';
 
 export {
+  slackImportSyncModeSchema,
   slackImportResponseSchema,
   slackWorkspaceSummarySchema,
   slackMessageSummarySchema,
   slackMessageListResponseSchema,
   slackThreadResponseSchema,
+  slackMessageEditRequestSchema,
+  slackMessageChangeResponseSchema,
 } from './slack.js';
 export type {
+  SlackImportSyncMode,
   SlackImportResponse,
   SlackWorkspaceSummary,
   SlackMessageSummary,
   SlackMessageListResponse,
   SlackThreadResponse,
+  SlackMessageEditRequest,
+  SlackMessageChangeResponse,
 } from './slack.js';
 
 export {

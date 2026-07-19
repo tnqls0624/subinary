@@ -1,5 +1,6 @@
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
@@ -87,6 +88,13 @@ export class ObjectStorageService implements OnModuleInit {
     }
     const bytes = await response.Body.transformToByteArray();
     return Buffer.from(bytes);
+  }
+
+  /** 지정 key를 멱등 삭제한다. */
+  async deleteObject(key: string): Promise<void> {
+    await this.s3.send(
+      new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }),
+    );
   }
 
   /** Throws when the bucket is unreachable; used by the readiness check. */

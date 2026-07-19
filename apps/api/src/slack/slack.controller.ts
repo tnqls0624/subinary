@@ -9,22 +9,27 @@
  *
  * `POST /v1/slack/import` is `multipart/form-data`: the bundle arrives as the
  * `file` part alongside optional text fields (`mySlackUserId`, `workspaceName`,
- * `kind`). Multipart bypasses the JSON body DTO pipeline, so the parts are read
- * manually from the Fastify request via `@fastify/multipart` (registered in
- * `main.ts`). The remaining routes are read-only GETs with query parameters
- * only, so no request-body DTO is involved.
+ * `kind`, `syncMode`). Multipart bypasses the JSON body DTO pipeline, so the
+ * parts are read manually from the Fastify request via `@fastify/multipart`
+ * (registered in `main.ts`). Message PATCH/DELETE routes update the current
+ * projection and atomically publish a target RAG event; other routes are GETs.
  */
 import {
   BadRequestException,
+  Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { createZodDto } from 'nestjs-zod';
+import { z } from 'zod';
 import type { FastifyRequest } from 'fastify';
 // Importing a multipart type also loads the `fastify` module augmentation that
 // adds `req.isMultipart()` / `req.parts()` used below.
@@ -32,20 +37,34 @@ import type { MultipartFile } from '@fastify/multipart';
 
 import type {
   SlackImportResponse,
+  SlackMessageChangeResponse,
+  SlackMessageEditRequest,
   SlackMessageListResponse,
   SlackThreadResponse,
   SlackWorkspaceSummary,
 } from '@family/contracts';
+import { slackMessageEditRequestSchema } from '@family/contracts';
 
 import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
+import { SlackMessageMutationService } from './slack-message-mutation.service';
 import { SlackService, type SlackImportFields } from './slack.service';
+
+class SlackMessageParamDto extends createZodDto(
+  z.object({ id: z.string().uuid() }),
+) {}
+class SlackMessageEditDto extends createZodDto(
+  slackMessageEditRequestSchema,
+) {}
 
 @Controller('slack')
 export class SlackController {
-  constructor(private readonly slackService: SlackService) {}
+  constructor(
+    private readonly slackService: SlackService,
+    private readonly messageMutationService: SlackMessageMutationService,
+  ) {}
 
   /**
    * POST /v1/slack/import — upload a Slack export bundle (multipart). Reads the
@@ -84,6 +103,8 @@ export class SlackController {
           fields.workspaceName = value;
         } else if (part.fieldname === 'kind') {
           fields.kind = value;
+        } else if (part.fieldname === 'syncMode') {
+          fields.syncMode = value;
         }
       }
     }
@@ -138,6 +159,31 @@ export class SlackController {
       limit,
       cursor,
     });
+  }
+
+  /** 메시지 current projection을 편집하고 대상 chunk 증분 갱신을 예약한다. */
+  @Patch('messages/:id')
+  editMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: SlackMessageParamDto,
+    @Body() dto: SlackMessageEditDto,
+  ): Promise<SlackMessageChangeResponse> {
+    const input: SlackMessageEditRequest = dto;
+    return this.messageMutationService.editMessage(
+      user.userId,
+      params.id,
+      input,
+    );
+  }
+
+  /** 메시지를 tombstone 처리하고 대상 chunk 증분 삭제를 예약한다. */
+  @Delete('messages/:id')
+  @HttpCode(HttpStatus.OK)
+  deleteMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: SlackMessageParamDto,
+  ): Promise<SlackMessageChangeResponse> {
+    return this.messageMutationService.deleteMessage(user.userId, params.id);
   }
 
   /**

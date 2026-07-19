@@ -32,7 +32,10 @@ const cardSmsProcessingStatusSchema = z.enum(['queued', 'duplicate']);
  * will resolve the wrong year. Supply receivedAt when replaying old archives.
  */
 export const cardSmsIngestRequestSchema = z.object({
-  eventId: z.string().min(1).max(200),
+  // 멱등 키. 비었거나 없으면 서버가 sha256(sender+content[+receivedAt])로 파생한다
+  // (card-sms-text와 동일 규칙) — 단축어/MacroDroid가 고유값을 만들기 어려운 저마찰
+  // 경로를 위해. 명시하면 그 값이 우선(호출자가 멱등을 직접 제어).
+  eventId: z.string().max(200).optional(),
   sender: z.string().min(1).max(100),
   content: z.string().min(1).max(4000),
   receivedAt: z.string().datetime().optional(),

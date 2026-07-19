@@ -11,36 +11,24 @@
  * - 타인 summary_only(masked) 항목은 가맹점을 '(비공개)'로 표기하고 편집을 막는다.
  * - 권한은 서버(서비스 계층)가 강제하며, 실패 시 배너로 메시지를 노출한다.
  * ------------------------------------------------------------------------- */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import {
-  Bus,
-  Clapperboard,
-  Coffee,
-  CreditCard,
-  GraduationCap,
-  HeartPulse,
-  Home,
-  Plane,
-  Repeat,
-  ShoppingBag,
-  Utensils,
-  type LucideIcon,
-} from "lucide-react";
-
 import type {
   CardVisibility,
+  MemberColor,
   TransactionSummary,
   TransactionUpdateRequest,
 } from "@family/contracts";
 import { DEFAULT_TIMEZONE } from "@family/shared";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -62,11 +50,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ListRow, Money, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { categoryIcon } from "@/lib/category-icon";
 import { formatDate, formatMonth, formatWon, currentMonth } from "@/lib/format";
+import { memberColorClass } from "@/lib/member-color";
 import { useHousehold } from "@/lib/household-context";
 import {
+  invalidateTransactionScope,
   useCardList,
   useCategoryList,
+  useCreateCategory,
   useHouseholdMembers,
   useTransactions,
 } from "@/lib/queries";
@@ -131,22 +123,6 @@ const VISIBILITY_OPTIONS: ReadonlyArray<Option> = (
   ["private", "household", "summary_only"] as const
 ).map((v) => ({ value: v, label: VISIBILITY_LABELS[v] }));
 
-/** 카테고리 이름 → lucide 아이콘(부분일치 규칙, 위에서부터 우선). */
-const CATEGORY_ICON_RULES: ReadonlyArray<readonly [string, LucideIcon]> = [
-  ["식비", Utensils],
-  ["카페", Coffee],
-  ["간식", Coffee],
-  ["교통", Bus],
-  ["쇼핑", ShoppingBag],
-  ["생활", Home],
-  ["의료", HeartPulse],
-  ["건강", HeartPulse],
-  ["교육", GraduationCap],
-  ["문화", Clapperboard],
-  ["여가", Clapperboard],
-  ["여행", Plane],
-  ["구독", Repeat],
-];
 
 /* -------------------------------------------------------------------------- */
 /* Row mutation dispatch                                                      */
@@ -214,14 +190,6 @@ function occurredAt(txn: TransactionSummary): string {
   return txn.approvedAt ?? txn.cancelledAt ?? txn.createdAt;
 }
 
-/** 카테고리 이름 → lucide 아이콘(이름 부분일치, 미지정/미매칭 → CreditCard). */
-function categoryIcon(name: string | null | undefined): LucideIcon {
-  if (!name) return CreditCard;
-  for (const [keyword, icon] of CATEGORY_ICON_RULES) {
-    if (name.includes(keyword)) return icon;
-  }
-  return CreditCard;
-}
 
 /** Asia/Seoul 기준 날짜 키(YYYY-MM-DD) 포맷터. */
 const dayKeyFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -326,6 +294,13 @@ export default function TransactionsPage() {
     return map;
   }, [members]);
 
+  // 구성원이 직접 고른 색(memberId → 팔레트 키). 없으면 해시 색 폴백.
+  const memberColorById = useMemo(() => {
+    const map = new Map<string, MemberColor | null>();
+    for (const m of members) map.set(m.memberId, m.color);
+    return map;
+  }, [members]);
+
   const cardById = useMemo(() => {
     const map = new Map<string, { alias: string; issuer: string }>();
     for (const c of cards) map.set(c.id, { alias: c.alias, issuer: c.issuer });
@@ -403,7 +378,11 @@ export default function TransactionsPage() {
         map.set(key, group);
       }
       group.items.push(txn);
-      if (txn.transactionType === "approval") group.total += txn.netAmount;
+      // 합계 제외(excludedAt) 거래는 서버 집계(summary/budget/analytics)와 동일하게
+      // 날짜 소계에서도 뺀다 — 같은 행을 '제외됨'으로 표시하면서 소계엔 더하면 모순.
+      if (txn.transactionType === "approval" && txn.excludedAt == null) {
+        group.total += txn.netAmount;
+      }
     }
     return [...map.values()];
   }, [items]);
@@ -414,9 +393,37 @@ export default function TransactionsPage() {
   const [memoTarget, setMemoTarget] = useState<TransactionSummary | null>(null);
   const [linkTarget, setLinkTarget] = useState<TransactionSummary | null>(null);
 
+  // 푸시 알림 딥링크(?txn=<id>) → 해당 거래 상세 열기. 목록에 없을 수 있어
+  // (다른 월/필터) 단건 조회로 폴백한다. 볼 수 없는 거래(private/masked)는
+  // 403/404가 나므로 조용히 리스트로 남는다. 상세를 연 뒤 URL에서 ?txn을 제거해,
+  // 같은 알림을 다시 탭하면(같은 경로 push) effect가 재실행되어 다시 열리게 한다.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const txnParam = searchParams.get("txn");
+    if (!txnParam) return;
+    setDetailId(txnParam);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [searchParams]);
+
+  const inList = detailId != null && items.some((t) => t.id === detailId);
+  const detailFallbackQuery = useQuery({
+    queryKey: ["transaction-detail", detailId],
+    enabled: detailId != null && !inList,
+    retry: false,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.transactions.get(token, detailId as string),
+      ),
+  });
+
   // 상세 Dialog는 항상 최신 목록의 행을 바라본다(뮤테이션 후 refetch 반영).
+  // 목록에 없으면 단건 조회 결과로 폴백.
   const detailTxn = detailId
-    ? (items.find((t) => t.id === detailId) ?? null)
+    ? (items.find((t) => t.id === detailId) ??
+      detailFallbackQuery.data ??
+      null)
     : null;
 
   const mutation = useMutation({
@@ -445,10 +452,9 @@ export default function TransactionsPage() {
       }),
     onSuccess: () => {
       setActionError(null);
-      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      // 제외/포함·정상확인은 집계(대시보드/월간)와 예산 사용률에도 영향을 준다.
-      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      void queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      // 거래·집계·예산·인사이트·가맹점후보를 단일 헬퍼로 일괄 무효화(실시간 힌트
+      // 경로와 동일 범위 — 조합 불일치/누락 방지).
+      invalidateTransactionScope(queryClient);
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
@@ -462,6 +468,16 @@ export default function TransactionsPage() {
       id: txn.id,
       body: { categoryId: nextCategoryId, applyRule },
     });
+  };
+
+  // 알맞은 카테고리가 없을 때: 새 커스텀 카테고리를 만들고 곧바로 이 거래에 지정한다.
+  const createCategoryMut = useCreateCategory();
+  const handleCreateCategory = async (
+    txn: TransactionSummary,
+    name: string,
+  ): Promise<void> => {
+    const created = await createCategoryMut.mutateAsync(name);
+    changeCategory(txn, created.id);
   };
 
   const changeVisibility = (
@@ -758,7 +774,12 @@ export default function TransactionsPage() {
                           iconClassName={
                             txn.masked || excluded
                               ? "bg-muted text-muted-foreground"
-                              : undefined
+                              : memberColorClass(
+                                  txn.memberId,
+                                  txn.memberId
+                                    ? memberColorById.get(txn.memberId)
+                                    : null,
+                                )
                           }
                           title={
                             txn.masked ? (
@@ -855,6 +876,7 @@ export default function TransactionsPage() {
           onApplyRuleChange={setApplyRule}
           onChangeCard={(v) => changeCard(detailTxn, v)}
           onChangeCategory={(v) => changeCategory(detailTxn, v)}
+          onCreateCategory={(name) => handleCreateCategory(detailTxn, name)}
           onChangeVisibility={(v) => changeVisibility(detailTxn, v)}
           onOpenMemo={() => setMemoTarget(detailTxn)}
           onOpenLink={() => setLinkTarget(detailTxn)}
@@ -911,6 +933,7 @@ function TransactionDetailDialog({
   onApplyRuleChange,
   onChangeCard,
   onChangeCategory,
+  onCreateCategory,
   onChangeVisibility,
   onOpenMemo,
   onOpenLink,
@@ -929,6 +952,7 @@ function TransactionDetailDialog({
   onApplyRuleChange: (value: boolean) => void;
   onChangeCard: (cardId: string) => void;
   onChangeCategory: (categoryId: string) => void;
+  onCreateCategory: (name: string) => Promise<void>;
   onChangeVisibility: (visibility: string) => void;
   onOpenMemo: () => void;
   onOpenLink: () => void;
@@ -944,6 +968,30 @@ function TransactionDetailDialog({
     (txn.status === "pending_review" ||
       txn.status === "duplicate_suspected");
   const canLink = isCancellation && txn.parentTransactionId == null;
+
+  // 인라인 '새 카테고리 만들기' 상태.
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  const submitNewCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name || categorySaving) return;
+    setCategorySaving(true);
+    setCategoryError(null);
+    try {
+      await onCreateCategory(name);
+      setCreatingCategory(false);
+      setNewCategoryName("");
+    } catch (err) {
+      setCategoryError(
+        err instanceof Error ? err.message : "카테고리를 만들지 못했어요.",
+      );
+    } finally {
+      setCategorySaving(false);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -1045,6 +1093,62 @@ function TransactionDetailDialog({
                 ))}
               </SelectContent>
             </Select>
+
+            {/* 알맞은 카테고리가 없으면 여기서 바로 새로 만들어 지정. */}
+            {creatingCategory ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  <Input
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void submitNewCategory();
+                      }
+                    }}
+                    placeholder="새 카테고리 이름"
+                    maxLength={20}
+                    autoFocus
+                    disabled={categorySaving}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void submitNewCategory()}
+                    disabled={categorySaving || newCategoryName.trim() === ""}
+                  >
+                    저장
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setCreatingCategory(false);
+                      setNewCategoryName("");
+                      setCategoryError(null);
+                    }}
+                    disabled={categorySaving}
+                  >
+                    취소
+                  </Button>
+                </div>
+                {categoryError ? (
+                  <p className="text-destructive text-[13px]">{categoryError}</p>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreatingCategory(true)}
+                disabled={busy}
+                className="text-primary w-fit text-[13px] font-medium hover:underline disabled:opacity-50"
+              >
+                + 새 카테고리 만들기
+              </button>
+            )}
+
             <label className="flex w-fit cursor-pointer items-center gap-2">
               <input
                 type="checkbox"

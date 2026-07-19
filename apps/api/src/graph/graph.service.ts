@@ -121,6 +121,9 @@ interface RelationshipSummaryRow {
   validFrom: Date | null;
   validUntil: Date | null;
   supersedesRelationshipId: string | null;
+  sourceChunkId: string | null;
+  sourceChunkRevisionId: string | null;
+  extractorVersion: string;
   sourceRefId: string | null;
   confidence: number;
   sourceName: string;
@@ -148,6 +151,9 @@ const relationshipWithNamesColumns = {
   validFrom: schema.relationships.validFrom,
   validUntil: schema.relationships.validUntil,
   supersedesRelationshipId: schema.relationships.supersedesRelationshipId,
+  sourceChunkId: schema.relationships.sourceChunkId,
+  sourceChunkRevisionId: schema.relationships.sourceChunkRevisionId,
+  extractorVersion: schema.relationships.extractorVersion,
   sourceRefId: schema.relationships.sourceRefId,
   confidence: schema.relationships.confidence,
   sourceName: sourceEntityAlias.name,
@@ -448,10 +454,26 @@ export class GraphService {
           validFrom: now,
           validUntil: null,
           supersedesRelationshipId: relationshipId,
+          extractorVersion: 'human-supersede-v1',
           sourceRefId: input.sourceRefId ?? null,
           confidence: existing.confidence,
         })
         .returning({ id: schema.relationships.id });
+
+      await tx.insert(schema.feedbackEvents).values({
+        workspaceId: existing.workspaceId,
+        targetType: 'graph-relationship',
+        targetId: relationshipId,
+        labelSchemaVersion: 'graph-supersede-v1',
+        label: {
+          decision: 'superseded',
+          replacementId: inserted.id,
+          relationshipType: input.type,
+        },
+        source: 'human_confirmed',
+        actorUserId: userId,
+        occurredAt: now,
+      });
 
       return inserted.id;
     });
@@ -657,6 +679,9 @@ function toRelationshipSummary(
     validUntil: row.validUntil ? row.validUntil.toISOString() : null,
     supersedesRelationshipId: row.supersedesRelationshipId,
     isCurrent,
+    sourceChunkId: row.sourceChunkId,
+    sourceChunkRevisionId: row.sourceChunkRevisionId,
+    extractorVersion: row.extractorVersion,
     sourceRefId: row.sourceRefId,
     confidence: row.confidence,
   };

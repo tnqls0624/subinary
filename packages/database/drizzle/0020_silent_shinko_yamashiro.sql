@@ -1,0 +1,5 @@
+ALTER TABLE "dataset_snapshot_items" ALTER COLUMN "chunk_revision_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "dataset_snapshot_items" ADD COLUMN "merchant_category_rule_id" uuid;--> statement-breakpoint
+ALTER TABLE "dataset_snapshot_items" ADD CONSTRAINT "dataset_snapshot_items_merchant_category_rule_id_merchant_category_rules_id_fk" FOREIGN KEY ("merchant_category_rule_id") REFERENCES "public"."merchant_category_rules"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "dataset_snapshot_items_merchant_rule_id_idx" ON "dataset_snapshot_items" USING btree ("merchant_category_rule_id");--> statement-breakpoint
+ALTER TABLE "dataset_snapshot_items" ADD CONSTRAINT "dataset_snapshot_items_input_check" CHECK (num_nonnulls("dataset_snapshot_items"."chunk_revision_id", "dataset_snapshot_items"."merchant_category_rule_id") = 1);

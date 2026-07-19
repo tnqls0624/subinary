@@ -17,17 +17,18 @@ import {
   CircleAlert,
   CreditCard,
   MailWarning,
-  Receipt,
   RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
 import type {
   BudgetScopeType,
+  CardSmsEventDetail,
   CardSmsEventSummary,
+  MemberColor,
   TransactionSummary,
 } from "@family/contracts";
 
@@ -40,6 +41,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   BarList,
   ListRow,
@@ -58,11 +66,15 @@ import {
   formatWon,
   percent,
 } from "@/lib/format";
+import { categoryIcon } from "@/lib/category-icon";
 import { useHousehold } from "@/lib/household-context";
+import { memberColorClass } from "@/lib/member-color";
 import {
   useBudgets,
   useCards,
   useCategories,
+  useCategoryList,
+  useHouseholdMembers,
   useMembers,
   useMonthly,
   useTransactions,
@@ -81,6 +93,11 @@ const BUDGET_TOP_N = 5;
 /** 최근 거래 홈 노출 개수(쿼리는 10건 유지, 표시만 5건). */
 const RECENT_DISPLAY_N = 5;
 
+/** 실시간 카드문자 반영 폴링 간격(ms). 포커스 상태에서만 동작. */
+// 실시간 반영의 주 채널은 SSE(ActivityProvider) — 폴링은 SSE 불통 시 안전망이라
+// 저빈도(60초)로 둔다. staleTime 30초 + 포커스 리페치가 2차 안전망.
+const REALTIME_POLL_MS = 60_000;
+
 /** 예산 스코프 → 한국어 보조 라벨(UsageBar meta). */
 const SCOPE_LABEL: Record<BudgetScopeType, string> = {
   household: "가족 전체",
@@ -95,31 +112,44 @@ export default function DashboardPage() {
   const month = currentMonth();
   const { householdId } = useHousehold();
   const { authedFetch } = useAuth();
+  const [parseFailedOpen, setParseFailedOpen] = useState(false);
+
+  // 실시간 카드문자가 파싱돼 들어오면 화면에 자동 반영되도록, 문자 유입에 민감한
+  // 쿼리는 폴링한다(포커스 상태에서만 — TanStack 기본이 백그라운드 폴링 정지).
+  const poll = { refetchInterval: REALTIME_POLL_MS };
 
   // 이번 달 집계.
-  const monthlyQuery = useMonthly(month);
+  const monthlyQuery = useMonthly(month, poll);
   const membersQuery = useMembers(month);
+  // 구성원이 직접 고른 색(memberId → 팔레트 키). 없으면 해시 색 폴백.
+  const householdMembersQuery = useHouseholdMembers();
+  const memberColorById = useMemo(() => {
+    const map = new Map<string, MemberColor | null>();
+    for (const m of householdMembersQuery.data ?? []) map.set(m.memberId, m.color);
+    return map;
+  }, [householdMembersQuery.data]);
   const cardsQuery = useCards(month);
   const categoriesQuery = useCategories(month);
   const budgetsQuery = useBudgets(month);
 
   // 최근 거래 10건(기간 무관, 최신순).
-  const recentQuery = useTransactions({ limit: 10 });
+  const recentQuery = useTransactions({ limit: 10 }, poll);
 
   // 처리 대기 백로그(월 무관): 상태별로 스캔해 건수를 센다.
-  const pendingReviewQuery = useTransactions({
-    status: "pending_review",
-    limit: REVIEW_SCAN_LIMIT,
-  });
-  const duplicateQuery = useTransactions({
-    status: "duplicate_suspected",
-    limit: REVIEW_SCAN_LIMIT,
-  });
+  const pendingReviewQuery = useTransactions(
+    { status: "pending_review", limit: REVIEW_SCAN_LIMIT },
+    poll,
+  );
+  const duplicateQuery = useTransactions(
+    { status: "duplicate_suspected", limit: REVIEW_SCAN_LIMIT },
+    poll,
+  );
 
   // 파싱 실패 문자 이벤트(전용 훅/클라이언트 함수가 없어 apiFetch 직접 사용).
   const parseFailedQuery = useQuery({
     queryKey: ["card-sms-events", householdId, "parse_failed"],
     enabled: householdId != null,
+    refetchInterval: REALTIME_POLL_MS,
     queryFn: () =>
       authedFetch((token) =>
         apiFetch<CardSmsEventSummary[]>(
@@ -189,15 +219,26 @@ export default function DashboardPage() {
     return map;
   }, [membersQuery.data]);
 
+  // 카테고리 아이콘 선택용 id→이름 맵(거래 목록과 동일한 카테고리 목록 사용).
+  const categoryListQuery = useCategoryList();
+  const categoryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of categoryListQuery.data ?? []) map.set(c.id, c.name);
+    return map;
+  }, [categoryListQuery.data]);
+
   const recentRows = recentQuery.data?.items ?? [];
 
   // 처리 대기 건수(확인필요 = pending_review + duplicate_suspected).
+  // 이미 '중복이라 제외'(excludedAt)한 거래는 사용자가 처리한 것이므로 대기에서 뺀다.
   const reviewLoading =
     pendingReviewQuery.isLoading || duplicateQuery.isLoading;
   const reviewError = pendingReviewQuery.isError || duplicateQuery.isError;
+  const countPending = (items?: TransactionSummary[]) =>
+    (items ?? []).filter((t) => t.excludedAt == null).length;
   const reviewCount =
-    (pendingReviewQuery.data?.items.length ?? 0) +
-    (duplicateQuery.data?.items.length ?? 0);
+    countPending(pendingReviewQuery.data?.items) +
+    countPending(duplicateQuery.data?.items);
   const reviewMore =
     Boolean(pendingReviewQuery.data?.nextCursor) ||
     Boolean(duplicateQuery.data?.nextCursor);
@@ -317,13 +358,20 @@ export default function DashboardPage() {
             />
           </Link>
           <ListRow
+            className={
+              parseFailedCount > 0
+                ? "hover:bg-muted/70 cursor-pointer transition-colors"
+                : undefined
+            }
             icon={<MailWarning />}
             iconClassName="bg-warning/15 text-warning"
             title="읽지 못한 문자"
             subtitle={
               parseFailedQuery.isError
                 ? "건수를 불러오지 못했어요"
-                : "파싱에 실패한 카드 문자예요"
+                : parseFailedCount > 0
+                  ? "탭하면 어떤 문자가 실패했는지 볼 수 있어요"
+                  : "파싱에 실패한 카드 문자예요"
             }
             value={
               <span
@@ -342,6 +390,10 @@ export default function DashboardPage() {
                   parseFailedMore,
                 )}
               </span>
+            }
+            chevron={parseFailedCount > 0}
+            onClick={
+              parseFailedCount > 0 ? () => setParseFailedOpen(true) : undefined
             }
           />
         </CardContent>
@@ -375,24 +427,32 @@ export default function DashboardPage() {
             />
           ) : (
             <div className="flex flex-col gap-5">
-              {topBudgets.map((b) => (
-                <UsageBar
-                  key={b.id}
-                  label={b.name ?? b.scopeLabel}
-                  meta={
-                    b.usageRate >= 1 ? (
-                      <span className="text-destructive font-semibold">
-                        {SCOPE_LABEL[b.scopeType]} · 예산을 넘었어요
-                      </span>
-                    ) : (
-                      SCOPE_LABEL[b.scopeType]
-                    )
-                  }
-                  spent={b.spent}
-                  amount={b.amount}
-                  usageRate={b.usageRate}
-                />
-              ))}
+              {topBudgets.map((b) => {
+                // 이름이 있으면 대상까지("구성원 · 홍길동") 표시 — 어떤 구성원 예산인지
+                // 대시보드에서도 바로 보이게(/budgets 전체보기와 동일). 이름이 없으면
+                // label에 이미 scopeLabel이 나오므로 meta는 스코프 타입만.
+                const scope = b.name
+                  ? `${SCOPE_LABEL[b.scopeType]} · ${b.scopeLabel}`
+                  : SCOPE_LABEL[b.scopeType];
+                return (
+                  <UsageBar
+                    key={b.id}
+                    label={b.name ?? b.scopeLabel}
+                    meta={
+                      b.usageRate >= 1 ? (
+                        <span className="text-destructive font-semibold">
+                          {scope} · 예산을 넘었어요
+                        </span>
+                      ) : (
+                        scope
+                      )
+                    }
+                    spent={b.spent}
+                    amount={b.amount}
+                    usageRate={b.usageRate}
+                  />
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -450,6 +510,10 @@ export default function DashboardPage() {
                         {initialOf(item.label)}
                       </span>
                     }
+                    iconClassName={memberColorClass(
+                      item.key,
+                      memberColorById.get(item.key),
+                    )}
                     title={item.label}
                     subtitle={`전체의 ${percent(item.ratio)}`}
                     value={<Money amount={item.value} />}
@@ -518,16 +582,30 @@ export default function DashboardPage() {
                 .slice(0, RECENT_DISPLAY_N)
                 .map((t: TransactionSummary) => {
                   const cancelled = t.transactionType === "cancellation";
+                  // 제외(excludedAt)는 status와 직교하는 플래그 — 거래 화면과 동일하게
+                  // status 배지보다 우선해 '제외됨'으로 표기하고 금액을 흐리게 처리한다.
+                  const excluded = t.excludedAt != null;
                   const signed = cancelled ? -t.amount : t.netAmount;
                   const who = memberNameById.get(t.memberId);
+                  // 카테고리 = 아이콘(모양), 구성원 = 배경색 — 거래 목록과 동일 규칙.
+                  const Icon = cancelled
+                    ? RotateCcw
+                    : categoryIcon(
+                        t.categoryId ? categoryNameById.get(t.categoryId) : null,
+                      );
                   return (
                     <ListRow
                       key={t.id}
-                      icon={cancelled ? <RotateCcw /> : <Receipt />}
+                      icon={<Icon />}
                       iconClassName={
-                        cancelled
+                        cancelled || excluded
                           ? "bg-muted text-muted-foreground"
-                          : undefined
+                          : memberColorClass(
+                              t.memberId,
+                              t.memberId
+                                ? memberColorById.get(t.memberId)
+                                : null,
+                            )
                       }
                       title={merchantLabel(t)}
                       subtitle={
@@ -535,10 +613,20 @@ export default function DashboardPage() {
                           ? `${formatDate(t.approvedAt)} · ${who}`
                           : formatDate(t.approvedAt)
                       }
-                      value={<Money amount={signed} muted={cancelled} />}
+                      value={
+                        <span className={cn(excluded && "line-through opacity-60")}>
+                          <Money amount={signed} muted={cancelled} />
+                        </span>
+                      }
                       valueSub={
                         cancelled ? (
                           <StatusBadge status="cancelled" label="취소" />
+                        ) : excluded ? (
+                          <StatusBadge
+                            status="excluded"
+                            label="제외됨"
+                            tone="neutral"
+                          />
                         ) : (
                           <StatusBadge status={t.status} />
                         )
@@ -550,7 +638,91 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 읽지 못한 문자 상세(원문) 다이얼로그 — 네이티브/웹 공통. */}
+      <ParseFailedDialog
+        open={parseFailedOpen}
+        events={parseFailedQuery.data ?? []}
+        onClose={() => setParseFailedOpen(false)}
+      />
     </div>
+  );
+}
+
+/**
+ * 파싱 실패 카드 문자 목록 다이얼로그. 요약 목록엔 원문이 없어 열릴 때 각 이벤트의
+ * 상세(GET /v1/card-sms-events/:id)를 받아 발신자·수신시각·원문·실패사유를 보여준다.
+ * 어떤 문자가 왜 실패했는지 확인하고 수동 대응(재등록/무시)할 수 있게 한다.
+ */
+function ParseFailedDialog({
+  open,
+  events,
+  onClose,
+}: {
+  open: boolean;
+  events: CardSmsEventSummary[];
+  onClose: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const ids = events.map((e) => e.id);
+  const detailsQuery = useQuery({
+    queryKey: ["card-sms-events-detail", ids],
+    enabled: open && ids.length > 0,
+    queryFn: () =>
+      authedFetch((token) =>
+        Promise.all(
+          ids.map((id) =>
+            apiFetch<CardSmsEventDetail>(`/v1/card-sms-events/${id}`, {
+              accessToken: token,
+            }),
+          ),
+        ),
+      ),
+  });
+  const details = detailsQuery.data ?? [];
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>읽지 못한 문자</DialogTitle>
+          <DialogDescription>
+            파싱에 실패한 카드 문자예요. 원문을 확인해 직접 처리하거나, 카드
+            등록·발신번호를 점검해 주세요.
+          </DialogDescription>
+        </DialogHeader>
+        {detailsQuery.isLoading ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            불러오는 중…
+          </p>
+        ) : detailsQuery.isError ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            불러오지 못했어요.
+          </p>
+        ) : (
+          <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+            {details.map((d) => (
+              <div key={d.id} className="bg-muted rounded-lg p-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium">{d.sender}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {formatDate(d.receivedAt)}
+                  </span>
+                </div>
+                <p className="text-foreground/90 text-[13px] break-words whitespace-pre-wrap">
+                  {d.rawContent}
+                </p>
+                {d.parseError ? (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    실패 사유: {d.parseError}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -1,0 +1,16 @@
+# Family Memory AI — 프로덕션 리버스 프록시 (Cloudflare Tunnel 뒤)
+#
+# 공개 TLS는 Cloudflare 엣지가 처리하고, CF↔cloudflared는 암호화 터널이며,
+# cloudflared→caddy는 도커 내부망 HTTP다. 따라서 Caddy는 :80으로만 받고
+# 경로로 라우팅한다(자동 인증서/443 불필요).
+#
+#   /v1/*  → api:3001 (NestJS)
+#   그 외  → web:3000 (Next.js)
+:80 {
+	handle /v1/* {
+		reverse_proxy api:3001
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

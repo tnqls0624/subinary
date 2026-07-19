@@ -13,6 +13,22 @@ const invitableRoleSchema = z.enum(['admin', 'member', 'viewer']);
 /** Membership lifecycle status. */
 const memberStatusSchema = z.enum(['active', 'removed']);
 
+/**
+ * Member accent-color palette keys. The web maps each key to a fixed
+ * light/dark Tailwind class pair; `null` means "auto" (hash-derived).
+ */
+export const memberColorSchema = z.enum([
+  'rose',
+  'orange',
+  'amber',
+  'emerald',
+  'teal',
+  'sky',
+  'violet',
+  'fuchsia',
+]);
+export type MemberColor = z.infer<typeof memberColorSchema>;
+
 /** Invitation lifecycle status. */
 const invitationStatusSchema = z.enum(['pending', 'accepted', 'revoked', 'expired']);
 
@@ -53,6 +69,15 @@ export const memberRoleUpdateRequestSchema = z.object({
 });
 export type MemberRoleUpdateRequest = z.infer<typeof memberRoleUpdateRequestSchema>;
 
+/**
+ * `PATCH /v1/households/:id/members/:memberId/color` — set a member's accent
+ * color. `null` resets to the automatic (hash-derived) color.
+ */
+export const memberColorUpdateRequestSchema = z.object({
+  color: memberColorSchema.nullable(),
+});
+export type MemberColorUpdateRequest = z.infer<typeof memberColorUpdateRequestSchema>;
+
 // --- Responses ---
 
 /** Household summary as seen by the requesting member. */
@@ -81,6 +106,7 @@ export const memberSummarySchema = z.object({
   email: z.string().email(),
   role: householdRoleSchema,
   status: memberStatusSchema,
+  color: memberColorSchema.nullable(),
   joinedAt: z.string(),
 });
 export type MemberSummary = z.infer<typeof memberSummarySchema>;

@@ -32,6 +32,7 @@ import type {
   InvitationCreateRequest,
   InvitationCreated,
   InvitationSummary,
+  MemberColorUpdateRequest,
   MemberRoleUpdateRequest,
   MemberSummary,
 } from '@family/contracts';
@@ -48,6 +49,7 @@ const MEMBER_COLUMNS = {
   email: schema.users.email,
   role: schema.householdMembers.role,
   status: schema.householdMembers.status,
+  color: schema.householdMembers.color,
   joinedAt: schema.householdMembers.joinedAt,
 };
 
@@ -58,6 +60,7 @@ interface MemberRow {
   email: string;
   role: HouseholdRole;
   status: 'active' | 'removed';
+  color: string | null;
   joinedAt: Date;
 }
 
@@ -69,6 +72,8 @@ function toMemberSummary(row: MemberRow): MemberSummary {
     email: row.email,
     role: row.role,
     status: row.status,
+    // DB는 text — 쓰기 경로가 zod(memberColorSchema)로 검증하므로 좁혀도 안전.
+    color: (row.color as MemberSummary['color']) ?? null,
     joinedAt: row.joinedAt.toISOString(),
   };
 }
@@ -249,6 +254,37 @@ export class HouseholdService {
     await this.db
       .update(schema.householdMembers)
       .set({ role: input.role, updatedAt: new Date() })
+      .where(eq(schema.householdMembers.id, targetMemberId));
+
+    return this.loadMemberSummary(targetMemberId);
+  }
+
+  /**
+   * Sets a member's accent color (`null` resets to automatic). Allowed for the
+   * member themselves, or for an owner/admin changing anyone's color — the
+   * color is a shared visual identifier (transactions/cards), not private data.
+   */
+  async updateMemberColor(
+    householdId: string,
+    userId: string,
+    targetMemberId: string,
+    input: MemberColorUpdateRequest,
+  ): Promise<MemberSummary> {
+    const actor = await this.requireMembership(householdId, userId);
+    const target = await this.loadMember(householdId, targetMemberId);
+
+    const isSelf = target.userId === userId;
+    if (!isSelf && actor.role !== 'owner' && actor.role !== 'admin') {
+      throw new ForbiddenException('insufficient role');
+    }
+    // UI(활성 행만 색상 편집 노출)와 정책 일치 — removed 행은 API로도 거부.
+    if (target.status !== 'active') {
+      throw new BadRequestException('cannot set color for a removed member');
+    }
+
+    await this.db
+      .update(schema.householdMembers)
+      .set({ color: input.color, updatedAt: new Date() })
       .where(eq(schema.householdMembers.id, targetMemberId));
 
     return this.loadMemberSummary(targetMemberId);

@@ -17,7 +17,7 @@ Phase 4는 파싱된 카드 문자(`card_sms_events`)를 정규화 거래(`card_
 |---|---|---|---|
 | 카드 | `Controller('cards')` | JWT Access Token | 카드 등록·조회·수정 |
 | 카테고리 | `Controller('categories')` | JWT Access Token | 시스템/가족 카테고리 조회 |
-| 거래 | `Controller('transactions')` | JWT Access Token | 거래 목록·상세·요약·수정·취소연결·중복표시 |
+| 거래 | `Controller('transactions')` | JWT Access Token | 거래 목록·상세·요약·가맹점 라벨 검토·수정·취소연결·중복표시 |
 
 핵심 규약(자세한 근거는 ADR-0009):
 
@@ -110,13 +110,15 @@ Phase 4는 파싱된 카드 문자(`card_sms_events`)를 정규화 거래(`card_
 |---|---|---|
 | `GET /v1/transactions?householdId=…&…` | `200` | 거래 목록(공개범위 필터 적용) |
 | `GET /v1/transactions/summary?householdId=…&from=…&to=…` | `200` | 기간 순지출 요약(검증용) |
+| `GET /v1/transactions/merchant-label-candidates?householdId=…&limit=…` | `200` | 사람 확정이 필요한 가맹점 검토 batch |
 | `GET /v1/transactions/:id` | `200` | 거래 단건(공개범위 적용) |
 | `PATCH /v1/transactions/:id` | `200` | 카테고리/가맹점/카드/멤버/공개범위/메모 수정 |
 | `POST /v1/transactions/:id/link-cancellation` | `200/201` | 취소↔승인 수동 연결 |
 | `POST /v1/transactions/:id/mark-duplicate` | `200/201` | `duplicate_suspected` 표시 |
 | `POST /v1/transactions/:id/mark-valid` | `200/201` | `pending_review`/`duplicate_suspected` → `approved`(net 재계산) |
 
-> 라우트 순서상 `/summary`는 `/:id`보다 먼저 선언되어야 한다(그렇지 않으면 `summary`가 id로 잡힘).
+> 라우트 순서상 `/summary`, `/merchant-label-candidates` 같은 정적 경로는 `/:id`보다 먼저
+> 선언되어야 한다(그렇지 않으면 정적 경로가 id로 잡힘).
 
 ### `GET /v1/transactions` — 목록
 
@@ -202,6 +204,53 @@ curl -s 'http://localhost:3001/v1/transactions/summary?householdId=3c2d…&from=
   기준이다. 취소가 반영된 순지출이며 취소 레코드(`netAmount=0`)는 더하지 않는다(이중계상 방지).
 - 공개범위 규칙이 반영된다(본인 + 접근 가능한 거래).
 
+### `GET /v1/transactions/merchant-label-candidates` — 사람 라벨 검토 큐
+
+```bash
+curl -s 'http://localhost:3001/v1/transactions/merchant-label-candidates?householdId=3c2d…&limit=20' \
+  -H 'Authorization: Bearer <accessToken>'
+```
+
+응답 `200 OK` (`merchantLabelCandidateListResponseSchema`):
+
+```json
+{
+  "items": [
+    {
+      "representativeTransactionId": "txn-1…",
+      "merchantNormalized": "스타벅스 강남점",
+      "transactionCount": 2,
+      "latestTransactionAt": "2026-07-19T05:00:00.000Z",
+      "source": "model_prediction",
+      "suggestedCategoryId": "cat-cafe…",
+      "suggestedCategorySlug": "cafe"
+    }
+  ],
+  "hasMore": false,
+  "trainingReadiness": {
+    "humanConfirmedLabels": 1,
+    "requiredLabels": 100,
+    "distinctClasses": 1,
+    "requiredClasses": 3,
+    "minimumClassLabels": 1,
+    "requiredLabelsPerClass": 10,
+    "missingLineage": 0,
+    "status": "collect_labels"
+  }
+}
+```
+
+- 승인·집계 포함 거래 가운데 사람 확정 규칙이 없거나 AI 추천만 있는 가맹점을 묶는다.
+  AI 추천이 있는 항목, 확인 가능한 거래 수, 최근 거래 시각 순으로 우선순위를 정한다.
+- 일반 구성원은 본인 거래만, owner/admin은 본인 거래와 `household` 공개 거래만 검토할 수 있다.
+  타인의 `private`·`summary_only` 거래는 가맹점 원문 유출 방지를 위해 후보에서 완전히 제외한다.
+- 금액·메모·문자 원문은 응답하지 않는다. `source=model_prediction`은 추천값일 뿐 학습 정답이 아니다.
+- 화면의 확인 동작은 대표 거래에 `PATCH { categoryId, applyRule: true }`를 보내며, 그때만
+  규칙을 `human_confirmed`로 바꾸고 append-only `feedback_events` 계보를 남긴다.
+- `trainingReadiness`는 가맹점명을 노출하지 않는 household 전체 집계다. 실제 학습은 이 라벨 수집
+  기준 외에도 승인 snapshot과 `group_time` leakage audit를 별도로 통과해야 한다.
+- `limit`은 양의 정수만 허용하고 최대 100으로 제한한다. 미가입 가족은 `403`이다.
+
 ### `PATCH /v1/transactions/:id` (`transactionUpdateRequestSchema`)
 
 ```json
@@ -211,7 +260,7 @@ curl -s 'http://localhost:3001/v1/transactions/summary?householdId=3c2d…&from=
 | 필드 | 규칙 |
 |---|---|
 | `categoryId` | 거래 카테고리 직접 지정(우선순위 1). |
-| `applyRule` | `true` + `categoryId` 변경 시 `(householdId, merchantNormalized) → categoryId`를 `merchant_category_rules`에 upsert → **이후** 승격/재분류에만 반영(과거 소급 안 함). |
+| `applyRule` | `true` + `categoryId` 지정 시 `(householdId, merchantNormalized) → categoryId`를 `human_confirmed` 규칙으로 upsert하고 feedback 계보 기록 → **이후** 승격/재분류에만 반영(과거 소급 안 함). |
 | `merchantNormalized` `cardId`(nullable) `memberId` `visibility` `memo` | 선택 수정. `cardId` 변경 시 visibility 재상속 옵션. |
 
 - 수정은 소유자 또는 owner/admin만 허용한다.

@@ -26,8 +26,12 @@ export function UserMenu() {
   const { user, logout } = useAuth();
 
   async function onLogout() {
-    await logout();
-    router.replace("/login");
+    try {
+      await logout();
+    } finally {
+      // 보안 저장소 삭제 오류가 나도 메모리 세션은 이미 닫혔으므로 로그인 화면으로 이동한다.
+      router.replace("/login");
+    }
   }
 
   return (

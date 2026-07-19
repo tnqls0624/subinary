@@ -1,3 +1,4 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { Citation } from '@family/contracts';
 import { toSeoulString } from '@family/shared';
 
@@ -11,14 +12,8 @@ import { ApiError } from '../api-client';
  * prose (never leaking secrets).
  */
 
-/** Minimal MCP tool result (a single text block, optional error flag). */
-export interface ToolTextResult {
-  content: { type: 'text'; text: string }[];
-  isError?: boolean;
-}
-
-/** Build a text tool result. `isError` marks operational failures. */
-export function textResult(text: string, isError = false): ToolTextResult {
+/** MCP SDK 규약에 맞는 텍스트 결과를 만든다. `isError`는 운영 실패를 표시한다. */
+export function textResult(text: string, isError = false): CallToolResult {
   return { content: [{ type: 'text', text }], isError };
 }
 

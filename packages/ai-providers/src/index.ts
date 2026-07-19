@@ -10,3 +10,5 @@ export * from './mocks.js';
 export * from './factory.js';
 export * from './openai.js';
 export * from './gemini.js';
+export * from './instrumentation.js';
+export * from './model-traffic.js';

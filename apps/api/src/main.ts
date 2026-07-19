@@ -12,6 +12,7 @@ import {
 } from '@nestjs/platform-fastify';
 
 import type { AppConfig } from '@family/config';
+import { NATIVE_CLIENT_ORIGINS } from '@family/shared';
 import { createLogger } from '@family/shared';
 
 import { AppModule } from './app.module';
@@ -155,10 +156,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: [
       webConfig?.corsOrigin ?? 'http://localhost:3000',
-      'capacitor://localhost',
-      'http://localhost',
-      'https://localhost',
-      'ionic://localhost',
+      ...NATIVE_CLIENT_ORIGINS,
     ],
     credentials: true,
     // 프리플라이트 Access-Control-Allow-Methods에 전체 메서드를 명시한다.

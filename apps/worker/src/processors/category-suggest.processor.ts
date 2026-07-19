@@ -21,15 +21,27 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createProviders, type LlmProvider } from '@family/ai-providers';
+import {
+  createProviders,
+  instrumentProviders,
+  type LlmProvider,
+} from '@family/ai-providers';
 import type { AppConfig } from '@family/config';
-import { schema, type Db } from '@family/database';
-import { createLogger, DEFAULT_CATEGORIES, QUEUE_NAMES } from '@family/shared';
+import {
+  createDbAiInvocationObserver,
+  schema,
+  trackPipelineExecution,
+  type Db,
+} from '@family/database';
+import { createLogger, MODEL_SERVING_TASKS, QUEUE_NAMES } from '@family/shared';
 import type { Job } from 'bullmq';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 
 import { DB } from '../database/database.module';
+import { LocalMerchantClassifierService } from '../model-serving/local-merchant-classifier.service';
+import { WorkerModelServingService } from '../model-serving/model-serving.service';
+import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
 /** category-suggest 잡 payload(승격 파이프라인이 enqueue). */
 interface CategorySuggestJobData {
@@ -63,12 +75,22 @@ type CategorySuggestJobResult = {
 /** LLM 응답 상한(JSON {"slug":"..."} 한 줄이면 충분 — 비용/지연 최소화). */
 const SUGGEST_MAX_TOKENS = 64;
 
-/** 시스템 카테고리 slug 집합(이 밖의 slug 는 무효 → 미분류 유지). */
-const SYSTEM_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-
 /** 로그용 가맹점 해시(원문 미기록 정책). md5 hex 앞 12자만 사용한다. */
 function merchantHashOf(merchantNormalized: string): string {
-  return createHash('md5').update(merchantNormalized).digest('hex').slice(0, 12);
+  return createHash('md5')
+    .update(merchantNormalized)
+    .digest('hex')
+    .slice(0, 12);
+}
+
+/** feedback 상관키. 로그용 축약 hash와 달리 충돌 위험을 낮춘 SHA-256 전체값이다. */
+function merchantFeedbackTargetId(
+  householdId: string,
+  merchantNormalized: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([householdId, merchantNormalized]), 'utf8')
+    .digest('hex');
 }
 
 /**
@@ -100,10 +122,14 @@ function extractSlug(text: string): string | null {
 export class CategorySuggestProcessor extends WorkerHost {
   private readonly logger: ReturnType<typeof createLogger>;
   private readonly llm: LlmProvider;
+  private readonly candidateLlm: LlmProvider | null;
 
   constructor(
     @Inject(DB) private readonly db: Db,
     configService: ConfigService,
+    private readonly localClassifier: LocalMerchantClassifierService,
+    private readonly modelServing: WorkerModelServingService,
+    private readonly realtimePublisher: RealtimePublisherService,
   ) {
     super();
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -112,15 +138,88 @@ export class CategorySuggestProcessor extends WorkerHost {
     });
     // Provider 는 설정(config.ai)으로부터 생성한다(rag-index 패턴, fetch 직접 호출 금지).
     const ai = configService.get<AppConfig['ai']>('ai');
-    const providers = createProviders({
-      provider: ai?.provider ?? 'mock',
-      ...(ai?.geminiApiKey !== undefined ? { geminiApiKey: ai.geminiApiKey } : {}),
-      ...(ai?.llmModel !== undefined ? { llmModel: ai.llmModel } : {}),
-    });
+    const providers = instrumentProviders(
+      createProviders({
+        provider: ai?.provider ?? 'mock',
+        ...(ai?.geminiApiKey !== undefined
+          ? { geminiApiKey: ai.geminiApiKey }
+          : {}),
+        ...(ai?.llmModel !== undefined ? { llmModel: ai.llmModel } : {}),
+        strict: nodeEnv === 'production',
+      }),
+      {
+        observer: createDbAiInvocationObserver(this.db),
+        defaultTask: 'worker-ai',
+      },
+    );
     this.llm = providers.llm;
+    if (
+      ai?.candidateProvider !== undefined &&
+      ai.candidateLlmModel !== undefined &&
+      ai.candidateLlmModelRevision !== undefined
+    ) {
+      this.candidateLlm = instrumentProviders(
+        createProviders({
+          provider: ai.candidateProvider,
+          llmModel: ai.candidateLlmModel,
+          ...(ai.candidateGeminiApiKey !== undefined ||
+          ai.geminiApiKey !== undefined
+            ? {
+                geminiApiKey: ai.candidateGeminiApiKey ?? ai.geminiApiKey,
+              }
+            : {}),
+          strict: nodeEnv === 'production',
+        }),
+        {
+          observer: createDbAiInvocationObserver(this.db),
+          defaultTask: 'worker-ai-candidate',
+        },
+      ).llm;
+    } else {
+      this.candidateLlm = null;
+    }
   }
 
-  async process(job: Job<CategorySuggestJobData>): Promise<CategorySuggestJobResult> {
+  async process(
+    job: Job<CategorySuggestJobData>,
+  ): Promise<CategorySuggestJobResult> {
+    return trackPipelineExecution(
+      this.db,
+      {
+        pipelineName: 'category-suggest',
+        pipelineVersion: 'category-suggest-v2',
+        stepName: 'llm-suggest-and-apply',
+        stepVersion: 'llm-suggest-and-apply-v2',
+        trigger: 'bullmq',
+        scopeType: 'household',
+        scopeId: job.data.householdId || 'missing',
+        externalRunId: String(job.id ?? 'unknown'),
+        attempt: job.attemptsMade + 1,
+        maximumAttempts: job.opts?.attempts ?? 1,
+        summarize: (result) => ({
+          inputCount: 1,
+          outputCount: result.outcome === 'classified' ? 1 : 0,
+          rejectedCount:
+            result.outcome === 'llm_failed' ||
+            result.outcome === 'no_valid_suggestion' ||
+            result.outcome === 'category_missing'
+              ? 1
+              : 0,
+          metrics: {
+            outcome: result.outcome,
+            updatedTransactionCount: result.updatedTransactionCount ?? 0,
+          },
+        }),
+      },
+      ({ pipelineRunId }) => this.processTracked(job, pipelineRunId),
+    );
+  }
+
+  /** 실제 분류 처리. 바깥 wrapper가 실행 상태와 AI trace 상관키를 관리한다. */
+  private async processTracked(
+    job: Job<CategorySuggestJobData>,
+    pipelineRunId: string,
+  ): Promise<CategorySuggestJobResult> {
     const { householdId, merchantNormalized, merchantRaw } = job.data;
 
     if (!householdId || !merchantNormalized) {
@@ -156,36 +255,87 @@ export class CategorySuggestProcessor extends WorkerHost {
       return { ...base, outcome: 'rule_exists' };
     }
 
-    // ② LLM 호출. 실패는 잡 실패가 아니라 결정적 폴백(미분류 유지)이다.
-    const slugList = DEFAULT_CATEGORIES.map((c) => `${c.slug}(${c.name})`).join(', ');
-    let responseText: string;
-    try {
-      const response = await this.llm.generate({
-        system:
-          '당신은 한국 가계부 카테고리 분류기입니다. 가맹점명을 보고 주어진 slug 목록에서 ' +
-          '가장 알맞은 카테고리 slug 하나를 고르세요. 반드시 JSON {"slug":"..."} 형식만 출력하세요.',
-        prompt: [
-          `가맹점명: ${merchantRaw || merchantNormalized}`,
-          `카테고리 slug 목록: ${slugList}`,
-          '위 목록에 있는 slug 하나만 골라 JSON {"slug":"..."}만 출력하세요.',
-        ].join('\n'),
-        temperature: 0,
-        maxTokens: SUGGEST_MAX_TOKENS,
-      });
-      responseText = response.text;
-    } catch {
-      // LLM 호출 실패 — 프롬프트/에러 원문은 로그하지 않는다. 미분류 유지.
-      this.logger.warn(
-        { jobId: job.id, ...base, outcome: 'llm_failed' },
-        'category suggestion fallback: llm call failed; leaving unclassified',
+    // 후보 카테고리 = 시스템 + 이 가족의 커스텀. 커스텀도 AI가 고를 수 있도록
+    // 하드코딩(DEFAULT_CATEGORIES) 대신 DB에서 후보 목록/검증·해석 맵을 동적으로 만든다.
+    const candidates = await this.db
+      .select({
+        id: schema.expenseCategories.id,
+        slug: schema.expenseCategories.slug,
+        name: schema.expenseCategories.name,
+      })
+      .from(schema.expenseCategories)
+      .where(
+        or(
+          isNull(schema.expenseCategories.householdId),
+          eq(schema.expenseCategories.householdId, householdId),
+        ),
       );
-      return { ...base, outcome: 'llm_failed' };
+    const idBySlug = new Map(candidates.map((c) => [c.slug, c.id]));
+
+    // ② 승인된 로컬 production alias가 있으면 checksum 검증된 학습 artifact를
+    // 먼저 실행한다. alias가 없을 때만 기존 LLM 경로를 사용한다.
+    const localPrediction = await this.localClassifier.predict(
+      householdId,
+      merchantNormalized,
+      pipelineRunId,
+    );
+    let slug: string | null;
+    let categoryId: string | undefined;
+    let predictionTraceId: string | null = null;
+    if (localPrediction !== null) {
+      slug = localPrediction.categorySlug;
+      categoryId = idBySlug.get(slug);
+      predictionTraceId = localPrediction.traceId;
+      if (categoryId !== localPrediction.categoryId) {
+        throw new Error('local merchant model category is unavailable');
+      }
+    } else {
+      // LLM 호출 실패는 기존 정책대로 잡 실패가 아닌 결정적 폴백이다.
+      const slugList = candidates
+        .map((candidate) => `${candidate.slug}(${candidate.name})`)
+        .join(', ');
+      let responseText: string;
+      try {
+        const response = await this.modelServing.generateLlm(
+          { householdId },
+          MODEL_SERVING_TASKS.MERCHANT_CATEGORY,
+          merchantHash,
+          this.llm,
+          this.candidateLlm,
+          {
+            system:
+              '당신은 한국 가계부 카테고리 분류기입니다. 가맹점명을 보고 주어진 slug 목록에서 ' +
+              '가장 알맞은 카테고리 slug 하나를 고르세요. 반드시 JSON {"slug":"..."} 형식만 출력하세요.',
+            prompt: [
+              `가맹점명: ${merchantRaw || merchantNormalized}`,
+              `카테고리 slug 목록: ${slugList}`,
+              '위 목록에 있는 slug 하나만 골라 JSON {"slug":"..."}만 출력하세요.',
+            ].join('\n'),
+            temperature: 0,
+            maxTokens: SUGGEST_MAX_TOKENS,
+            metadata: {
+              task: 'category-suggest',
+              promptVersion: 'merchant-category-v1',
+              pipelineRunId,
+            },
+          },
+        );
+        responseText = response.text;
+        predictionTraceId = response.traceId ?? null;
+      } catch {
+        // LLM 호출 실패 — 프롬프트/에러 원문은 로그하지 않는다. 미분류 유지.
+        this.logger.warn(
+          { jobId: job.id, ...base, outcome: 'llm_failed' },
+          'category suggestion fallback: llm call failed; leaving unclassified',
+        );
+        return { ...base, outcome: 'llm_failed' };
+      }
+      slug = extractSlug(responseText);
+      categoryId = slug !== null ? idBySlug.get(slug) : undefined;
     }
 
-    // ③ 관대한 JSON 추출 → 시스템 slug 검증. 무효면 조용히 종료(미분류 유지).
-    //    Mock LLM 은 JSON 을 반환하지 않으므로 mock 검증에서는 항상 이 폴백이 실행된다.
-    const slug = extractSlug(responseText);
-    if (slug === null || !SYSTEM_SLUGS.has(slug)) {
+    // ③ 로컬 모델/LLM 결과가 현재 household 카테고리와 일치할 때만 적용한다.
+    if (slug === null || categoryId === undefined) {
       this.logger.info(
         { jobId: job.id, ...base, outcome: 'no_valid_suggestion' },
         'category suggestion fallback: no valid slug in llm response; leaving unclassified',
@@ -193,36 +343,32 @@ export class CategorySuggestProcessor extends WorkerHost {
       return { ...base, outcome: 'no_valid_suggestion' };
     }
 
-    // ④ slug → 시스템 카테고리 id 해석(householdId IS NULL 시드, 승격 키워드 tier 와 동일).
-    const [category] = await this.db
-      .select({ id: schema.expenseCategories.id })
-      .from(schema.expenseCategories)
-      .where(
-        and(
-          eq(schema.expenseCategories.slug, slug),
-          isNull(schema.expenseCategories.householdId),
-        ),
-      )
-      .limit(1);
-    if (!category) {
-      // 시드 누락 등 — 제안은 유효하나 적용 불가. 미분류 유지(잡 실패 아님).
-      this.logger.warn(
-        { jobId: job.id, ...base, outcome: 'category_missing', slug },
-        'category suggestion fallback: system category not found; leaving unclassified',
-      );
-      return { ...base, outcome: 'category_missing', slug };
-    }
-
     // 규칙 upsert + 미분류 거래 일괄 분류(원자적). onConflictDoNothing 으로 경쟁 시
     // 기존(예: 사용자) 규칙을 덮어쓰지 않고, 그 규칙의 categoryId 로 일괄 분류한다.
     const updatedTransactionCount = await this.db.transaction(async (tx) => {
       const now = new Date();
+      // AI 제안은 학습 gold가 아니라 model_prediction feedback으로만 남긴다.
+      // target은 가맹점 원문 대신 동일한 SHA-256 상관키를 사용한다.
+      await tx.insert(schema.feedbackEvents).values({
+        householdId,
+        targetType: 'merchant-category',
+        targetId: merchantFeedbackTargetId(householdId, merchantNormalized),
+        predictionTraceId,
+        labelSchemaVersion: 'merchant-category-v1',
+        label: { categoryId, slug },
+        source: 'model_prediction',
+        actorUserId: null,
+        occurredAt: now,
+      });
       const [insertedRule] = await tx
         .insert(schema.merchantCategoryRules)
         .values({
           householdId,
           merchantPattern: merchantNormalized,
-          categoryId: category.id,
+          categoryId,
+          source: 'model_prediction',
+          predictionTraceId,
+          confirmedAt: null,
           // LLM 제안 규칙은 특정 사용자가 만든 것이 아니다.
           createdBy: null,
         })
@@ -243,7 +389,10 @@ export class CategorySuggestProcessor extends WorkerHost {
           .where(
             and(
               eq(schema.merchantCategoryRules.householdId, householdId),
-              eq(schema.merchantCategoryRules.merchantPattern, merchantNormalized),
+              eq(
+                schema.merchantCategoryRules.merchantPattern,
+                merchantNormalized,
+              ),
             ),
           )
           .limit(1);
@@ -269,9 +418,20 @@ export class CategorySuggestProcessor extends WorkerHost {
 
     // 로그는 식별자/해시/slug/건수만(가맹점 원문·프롬프트·응답 원문 미기록).
     this.logger.info(
-      { jobId: job.id, ...base, outcome: 'classified', slug, updatedTransactionCount },
+      {
+        jobId: job.id,
+        ...base,
+        outcome: 'classified',
+        slug,
+        updatedTransactionCount,
+      },
       'category suggestion applied',
     );
+    // 카테고리 소급 분류가 화면에 반영되도록 실시간 힌트 발행(best-effort,
+    // fire-and-forget — 잡 처리 지연 방지).
+    if (updatedTransactionCount > 0) {
+      void this.realtimePublisher.publish(householdId, 'categories.changed');
+    }
     return { ...base, outcome: 'classified', slug, updatedTransactionCount };
   }
 }

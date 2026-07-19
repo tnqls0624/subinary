@@ -55,6 +55,7 @@ export class AuthService {
   async register(
     input: RegisterRequest,
     userAgent?: string,
+    extendedTtl = false,
   ): Promise<AuthSessionResult> {
     const email = this.normalizeEmail(input.email);
 
@@ -80,6 +81,7 @@ export class AuthService {
     const session = await this.createSession(
       { id: user.id, email: user.email },
       userAgent,
+      extendedTtl,
     );
     return {
       user: this.toUserSummary(user),
@@ -92,6 +94,7 @@ export class AuthService {
   async login(
     input: LoginRequest,
     userAgent?: string,
+    extendedTtl = false,
   ): Promise<AuthSessionResult> {
     const email = this.normalizeEmail(input.email);
 
@@ -117,6 +120,7 @@ export class AuthService {
     const session = await this.createSession(
       { id: user.id, email: user.email },
       userAgent,
+      extendedTtl,
     );
     return {
       user: this.toUserSummary(user),
@@ -157,6 +161,11 @@ export class AuthService {
     if (session.expiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException('invalid session');
     }
+    // refresh 요청의 위조 가능한 platform/origin 헤더로 세션 수명을 승격하지 않는다.
+    // 최초 발급 시 DB에 고정된 수명을 회전 세션이 그대로 계승한다.
+    const extendedTtl =
+      session.expiresAt.getTime() - session.createdAt.getTime() >
+      this.tokenService.refreshTtlSeconds * 1_000;
 
     const userRows = await this.db
       .select()
@@ -177,6 +186,7 @@ export class AuthService {
     const next = await this.createSession(
       { id: user.id, email: user.email },
       userAgent,
+      extendedTtl,
     );
     return {
       user: this.toUserSummary(user),
@@ -287,13 +297,16 @@ export class AuthService {
   private async createSession(
     user: { id: string; email: string },
     userAgent?: string,
+    // 모바일(Capacitor) 자동로그인은 1년 TTL, 웹(쿠키)은 기본 30일.
+    extendedTtl = false,
   ): Promise<IssuedSession> {
     const { accessToken, expiresInSec } =
       await this.tokenService.issueAccessToken(user);
     const { raw, hash } = this.tokenService.generateRefreshToken();
-    const expiresAt = new Date(
-      Date.now() + this.tokenService.refreshTtlSeconds * 1000,
-    );
+    const ttlSec = extendedTtl
+      ? this.tokenService.refreshTtlMobileSeconds
+      : this.tokenService.refreshTtlSeconds;
+    const expiresAt = new Date(Date.now() + ttlSec * 1000);
 
     await this.db.insert(schema.userSessions).values({
       userId: user.id,

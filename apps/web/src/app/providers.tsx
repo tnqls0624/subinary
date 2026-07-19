@@ -25,7 +25,9 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            refetchOnWindowFocus: false,
+            // 앱/탭으로 포커스가 돌아오면 stale 데이터를 새로고침(네이티브 복귀는
+            // native.ts의 appStateChange 무효화가 보강). 실시간 카드문자 반영에 필요.
+            refetchOnWindowFocus: true,
             retry: 1,
             staleTime: 30_000,
           },

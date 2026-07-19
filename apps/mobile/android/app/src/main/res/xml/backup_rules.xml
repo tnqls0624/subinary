@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- refresh 토큰이 들어 있는 Capacitor Preferences 파일은 백업하지 않는다. -->
+    <exclude domain="sharedpref" path="CapacitorStorage.xml" />
+    <!-- Keystore 키와 분리된 암호문을 복원하지 않도록 보안 저장소 파일도 제외한다. -->
+    <exclude domain="sharedpref" path="WSSecureStorageSharedPreferences.xml" />
+</full-backup-content>

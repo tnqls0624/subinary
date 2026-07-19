@@ -297,6 +297,22 @@ export class MemoryService {
         .set({ status: 'approved', promotedMemoryId: newId, updatedAt: now })
         .where(eq(schema.memoryCandidates.id, candidate.id));
 
+      await tx.insert(schema.feedbackEvents).values({
+        workspaceId: candidate.workspaceId,
+        targetType: 'memory-candidate',
+        targetId: candidate.id,
+        labelSchemaVersion: 'memory-candidate-v1',
+        label: {
+          decision: 'approved',
+          type: candidate.type,
+          edited:
+            edits.subject !== undefined || edits.content !== undefined,
+        },
+        source: 'human_confirmed',
+        actorUserId: userId,
+        occurredAt: now,
+      });
+
       return newId;
     });
 
@@ -316,11 +332,25 @@ export class MemoryService {
     const candidate = await this.loadCandidate(candidateId);
     await this.assertOwnedWorkspace(userId, candidate.workspaceId);
 
-    const [updated] = await this.db
-      .update(schema.memoryCandidates)
-      .set({ status: 'rejected', updatedAt: new Date() })
-      .where(eq(schema.memoryCandidates.id, candidate.id))
-      .returning();
+    const now = new Date();
+    const updated = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(schema.memoryCandidates)
+        .set({ status: 'rejected', updatedAt: now })
+        .where(eq(schema.memoryCandidates.id, candidate.id))
+        .returning();
+      await tx.insert(schema.feedbackEvents).values({
+        workspaceId: candidate.workspaceId,
+        targetType: 'memory-candidate',
+        targetId: candidate.id,
+        labelSchemaVersion: 'memory-candidate-v1',
+        label: { decision: 'rejected', type: candidate.type },
+        source: 'human_rejected',
+        actorUserId: userId,
+        occurredAt: now,
+      });
+      return row;
+    });
 
     this.logger.log(
       `memory candidate rejected candidate=${candidate.id} ` +
@@ -722,6 +752,8 @@ function toCandidateSummary(
     confidence: row.confidence,
     status: row.status,
     sourceChunkId: row.sourceChunkId,
+    sourceChunkRevisionId: row.sourceChunkRevisionId,
+    extractorVersion: row.extractorVersion,
     sourceRefId: row.sourceRefId,
     extractedAt: row.extractedAt.toISOString(),
   };

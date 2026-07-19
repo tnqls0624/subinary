@@ -30,6 +30,47 @@ describe('parseCardSms dispatch', () => {
     expect(result.amount).toBe(7700);
   });
 
+  it('routes Toss Bank 알림톡 to the Toss parser (generic would reject on 잔액)', () => {
+    const content = [
+      '[토스뱅크] 체크카드 국내 결제',
+      '김*진님의 공룡통장 카드',
+      '46,460원 결제 | 영등포농협 하나로마트 도림시장',
+      '잔액 109,798원',
+    ].join('\n');
+    const result = parseCardSms({
+      sender: 'kakao',
+      content,
+      receivedAt: new Date('2026-07-15T18:42:11+09:00'),
+    });
+
+    // 가맹점의 '농협' 때문에 NH농협카드로 오라벨되지 않아야 한다.
+    expect(result.issuer).toBe('토스뱅크');
+    expect(result.transactionType).toBe('approval');
+    expect(result.amount).toBe(46460);
+    expect(result.merchantRaw).toBe('영등포농협 하나로마트 도림시장');
+  });
+
+  it('keeps Toss messages away from Shinhan/KB parsers even when the merchant contains their keywords', () => {
+    // 신한/KB 파서의 supports()는 키워드('신한'/'KB'/'국민')만 보므로, 토스 파서가
+    // 먼저 등록돼 있지 않으면 이 문자를 선점해 발급사 오라벨 + 가맹점 오추출
+    // (lastMerchant가 잔액 라인)으로 타인 카드에 자동 연결될 수 있다.
+    const content = [
+      '[토스뱅크] 체크카드 국내 결제',
+      '김*진님의 공룡통장 카드',
+      '18,000원 결제 | 신한서적 강남점',
+      '잔액 91,798원',
+    ].join('\n');
+    const result = parseCardSms({
+      sender: 'kakao',
+      content,
+      receivedAt: new Date('2026-07-15T18:42:11+09:00'),
+    });
+
+    expect(result.issuer).toBe('토스뱅크');
+    expect(result.merchantRaw).toBe('신한서적 강남점');
+    expect(result.amount).toBe(18000);
+  });
+
   it('flags payment aggregators without inventing a real merchant', () => {
     const content = ['신한카드(1234)승인', '15,000원 일시불', '07/15 20:00', '네이버페이'].join('\n');
     const result = parseCardSms({

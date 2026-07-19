@@ -46,6 +46,17 @@ function lastFourDigits(value: string | null): string | null {
   return digits.length < CARD_TAIL_LENGTH ? null : digits.slice(-CARD_TAIL_LENGTH);
 }
 
+/**
+ * 발급사 비교용 정규화 키. 등록 카드는 `현대`, 파싱 이벤트는 `현대카드`처럼 '카드'
+ * 접미사가 달라 공백·접미사를 제거해 맞춘다. 일반 `카드`(특정 실패)는 빈 키(→ null)가
+ * 되어 매칭에서 제외된다. worker `resolveCard`의 동일 규칙과 대칭.
+ */
+function normalizeIssuer(value: string | null): string | null {
+  if (!value) return null;
+  const key = value.replace(/\s+/g, '').replace(/카드$/, '');
+  return key.length > 0 ? key : null;
+}
+
 import { DB } from '../database/database.constants';
 
 /** Roles permitted to manage a card they do not personally own (spec §5.1). */
@@ -154,8 +165,10 @@ export class CardService {
    * a card registered after its transactions arrived would never claim them.
    *
    * Safeguards mirror the promotion path:
-   * - only when this card is the *unique* active card with that tail (otherwise
-   *   the attribution is ambiguous — same guard as worker `resolveCard`);
+   * - 뒤 4자리 매칭: 같은 뒤 4자리 활성 카드가 *유일*할 때만(모호성 방지);
+   * - 발급사 매칭(번호 없는 문자): 같은 발급사 활성 카드가 *유일*할 때만, 원본 SMS에
+   *   카드번호가 없는 거래에 한해(뒤 4자리로 붙는 거래와 배타적) — worker `resolveCard`
+   *   발급사 폴백과 대칭;
    * - only `cardId IS NULL` rows, and never `pending_review` rows (those were
    *   flagged for human review and must not be silently claimed);
    * - linked rows inherit the card's visibility (consistent with promotion and
@@ -167,14 +180,17 @@ export class CardService {
     card: schema.PaymentCard,
   ): Promise<number> {
     const tail = lastFourDigits(card.maskedNumber);
-    if (!tail) {
+    const issuerKey = normalizeIssuer(card.issuer);
+    if (!tail && !issuerKey) {
       return 0;
     }
 
     try {
-      // 모호성 가드: 같은 뒤 4자리 활성 카드가 유일할 때만 소급 연결한다.
       const activeCards = await this.db
-        .select({ maskedNumber: schema.paymentCards.maskedNumber })
+        .select({
+          maskedNumber: schema.paymentCards.maskedNumber,
+          issuer: schema.paymentCards.issuer,
+        })
         .from(schema.paymentCards)
         .where(
           and(
@@ -182,18 +198,26 @@ export class CardService {
             eq(schema.paymentCards.status, 'active'),
           ),
         );
-      const sameTail = activeCards.filter(
-        (c) => lastFourDigits(c.maskedNumber) === tail,
-      );
-      if (sameTail.length !== 1) {
+
+      // 모호성 가드: 같은 뒤 4자리 / 같은 발급사 활성 카드가 각각 유일할 때만 적용.
+      const tailUnique =
+        tail != null &&
+        activeCards.filter((c) => lastFourDigits(c.maskedNumber) === tail)
+          .length === 1;
+      const issuerUnique =
+        issuerKey != null &&
+        activeCards.filter((c) => normalizeIssuer(c.issuer) === issuerKey)
+          .length === 1;
+      if (!tailUnique && !issuerUnique) {
         return 0;
       }
 
-      // cardId=null·비검토(pending_review 제외) 거래 중 원본 SMS 뒤 4자리 일치분.
+      // cardId=null·비검토 거래 + 원본 SMS의 뒤 4자리·발급사.
       const candidates = await this.db
         .select({
           id: schema.cardTransactions.id,
           maskedCardNumber: schema.cardSmsEvents.maskedCardNumber,
+          issuer: schema.cardSmsEvents.issuer,
         })
         .from(schema.cardTransactions)
         .innerJoin(
@@ -208,10 +232,20 @@ export class CardService {
           ),
         );
 
-      const matchIds = candidates
-        .filter((c) => lastFourDigits(c.maskedCardNumber) === tail)
-        .map((c) => c.id);
-      if (matchIds.length === 0) {
+      const matchIds = new Set<string>();
+      for (const c of candidates) {
+        const cTail = lastFourDigits(c.maskedCardNumber);
+        // 뒤 4자리 일치(번호 있는 거래).
+        if (tailUnique && cTail === tail) {
+          matchIds.add(c.id);
+          continue;
+        }
+        // 번호 없는 거래 → 발급사 일치.
+        if (issuerUnique && !cTail && normalizeIssuer(c.issuer) === issuerKey) {
+          matchIds.add(c.id);
+        }
+      }
+      if (matchIds.size === 0) {
         return 0;
       }
 
@@ -222,9 +256,9 @@ export class CardService {
           visibility: card.visibility,
           updatedAt: new Date(),
         })
-        .where(inArray(schema.cardTransactions.id, matchIds));
+        .where(inArray(schema.cardTransactions.id, [...matchIds]));
 
-      return matchIds.length;
+      return matchIds.size;
     } catch {
       return 0;
     }

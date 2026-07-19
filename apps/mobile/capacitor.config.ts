@@ -21,6 +21,13 @@ const config: CapacitorConfig = {
       launchAutoHide: true,
       backgroundColor: "#ffffff",
     },
+    // resize:'native'(iOS): 키보드 표시 시 WKWebView 프레임 자체를 줄여
+    // 100dvh·fixed 요소가 키보드 위 영역 기준으로 재계산된다 — 채팅 입력바가
+    // 키보드에 밀착되는 유일한 모드(body/ionic은 dvh 수식과 안 맞음).
+    // 기본값이지만 레이아웃이 이 동작에 의존하므로 의도를 명시해 고정한다.
+    Keyboard: {
+      resize: "native",
+    },
   },
 };
 

@@ -17,6 +17,9 @@ const REDACT_PATHS: string[] = [
   '*.content',
 ];
 
+/** pino-pretty가 사용하는 dateformat 기준 로컬 시간 출력 형식. */
+export const PINO_PRETTY_TIME_FORMAT = 'SYS:yyyy-mm-dd HH:MM:ss.l o';
+
 export interface CreateLoggerOptions {
   /** pino log level (default: `'info'`). */
   level?: string;
@@ -48,7 +51,7 @@ export function createLogger(name: string, opts: CreateLoggerOptions = {}): Logg
       target: 'pino-pretty',
       options: {
         colorize: true,
-        translateTime: 'SYS:yyyy-MM-dd HH:mm:ss.l o',
+        translateTime: PINO_PRETTY_TIME_FORMAT,
         ignore: 'pid,hostname',
       },
     };

@@ -73,6 +73,7 @@ function mapFinishReason(reason: string | undefined): GenerateResponse['finishRe
 
 /** Google Gemini `generateContent` 기반 {@link LlmProvider}. */
 export class GeminiLlmProvider implements LlmProvider {
+  readonly provider = 'gemini';
   readonly model: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;

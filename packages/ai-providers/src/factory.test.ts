@@ -48,4 +48,43 @@ describe('createProviders', () => {
     expect(createProviders({ provider: 'google' }).embedding).toBeInstanceOf(MockEmbeddingProvider);
     expect(createProviders({ provider: 'nope' }).embedding).toBeInstanceOf(MockEmbeddingProvider);
   });
+
+  it('fails closed for mock, missing credentials and partial providers in strict mode', () => {
+    vi.stubEnv('OPENAI_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    expect(() => createProviders({ provider: 'mock', strict: true })).toThrow(
+      /strict mode/,
+    );
+    expect(() => createProviders({ provider: 'gemini', strict: true })).toThrow(
+      /no API key/,
+    );
+    expect(() =>
+      createProviders({
+        provider: 'openai',
+        openaiApiKey: 'sk-test',
+        strict: true,
+      }),
+    ).toThrow(/partial/);
+    expect(() =>
+      createProviders({
+        provider: 'anthropic',
+        anthropicApiKey: 'anthropic-test',
+        strict: true,
+      }),
+    ).toThrow(/not implemented/);
+    expect(() => createProviders({ provider: 'unknown', strict: true })).toThrow(
+      /unknown/,
+    );
+  });
+
+  it('allows configured Gemini in strict mode without silent fallback', () => {
+    const set = createProviders({
+      provider: 'gemini',
+      geminiApiKey: 'gemini-test',
+      strict: true,
+    });
+    expect(set.llm.provider).toBe('gemini');
+    expect(set.embedding.provider).toBe('mock');
+    expect(set.reranker.provider).toBe('mock');
+  });
 });

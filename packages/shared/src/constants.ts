@@ -9,15 +9,16 @@ export const DEFAULT_TIMEZONE = 'Asia/Seoul';
  * - `slack-import`: Phase 6 asynchronous Slack export parsing queue
  *   (api enqueues, worker consumes).
  * - `rag-index`: Phase 7 RAG indexing queue — chunk + embed a workspace's
- *   Slack threads/messages (worker enqueues after a successful import,
- *   worker consumes; jobId keyed by workspace to collapse re-enqueues).
- * - `memory-extract`: Phase 8 long-term memory extraction queue — rule-based
- *   extraction of memory candidates from a workspace's chunks (api enqueues,
- *   worker consumes; jobId keyed by workspace to collapse re-enqueues).
- * - `graph-extract`: Phase 9 temporal-graph extraction queue — deterministic
- *   rule-based extraction of entities/relationships from a workspace's chunks
- *   (api enqueues, worker consumes; jobId keyed by workspace to collapse
- *   re-enqueues).
+ *   Slack threads/messages after a full import, or rebuild one affected
+ *   message/thread after a create/edit/delete event.
+ * - `source-tombstone`: 원본 삭제 요청을 소비해 object storage와 파생 projection을
+ *   멱등 정리하는 privacy propagation queue.
+ * - `memory-extract`: Phase 8 long-term memory extraction queue — RAG가 발행한
+ *   chunk revision 단위 증분 잡을 기본으로 소비하고, API의 workspace rebuild를
+ *   복구·backfill 경로로 유지한다.
+ * - `graph-extract`: Phase 9 temporal-graph extraction queue — RAG가 발행한
+ *   chunk revision 단위 증분 잡을 기본으로 소비하고, API의 workspace rebuild를
+ *   복구·backfill 경로로 유지한다.
  * - `category-suggest`: LLM merchant-category suggestion queue — the worker
  *   promotion pipeline enqueues one job per unclassified merchant
  *   (jobId `catsug_${householdId}_${md5(merchantNormalized)}`, no colons),
@@ -30,9 +31,34 @@ export const QUEUE_NAMES = {
   CARD_SMS_PARSE: 'card-sms-parse',
   SLACK_IMPORT: 'slack-import',
   RAG_INDEX: 'rag-index',
+  SOURCE_TOMBSTONE: 'source-tombstone',
   MEMORY_EXTRACT: 'memory-extract',
   GRAPH_EXTRACT: 'graph-extract',
   CATEGORY_SUGGEST: 'category-suggest',
+  // 거래 승격 완료 시 푸시 알림을 발송하는 큐(promotion=생산자, worker=소비자).
+  NOTIFICATION_DISPATCH: 'notification-dispatch',
+} as const;
+
+/** offline 평가와 serving alias가 공유하는 안정적인 model task 식별자. */
+export const MODEL_SERVING_TASKS = {
+  RAG_EMBEDDING: 'rag-embedding',
+  RAG_RERANKER: 'rag-reranker',
+  RAG_ANSWER: 'rag-answer',
+  MERCHANT_CATEGORY: 'merchant-category',
+} as const;
+
+/** 운영 제어 평면의 기본 named alias. */
+export const DEFAULT_MODEL_SERVING_ALIAS = 'production';
+
+/** 가맹점 분류 모델 artifact와 Training Runner가 공유하는 구현 버전. */
+export const MERCHANT_CLASSIFIER_TRAINER_VERSION =
+  'merchant-char-ngram-nb-v1';
+
+/** 가맹점 분류 모델의 라벨 수집·학습 진입 공용 기준. */
+export const MERCHANT_TRAINING_READINESS = {
+  minimumLabels: 100,
+  minimumClasses: 3,
+  minimumLabelsPerClass: 10,
 } as const;
 
 /**

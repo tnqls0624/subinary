@@ -32,6 +32,11 @@ export interface CreateProvidersConfig {
   llmModel?: string;
   /** 임베딩 모델명 override (선택). */
   embeddingModel?: string;
+  /**
+   * 프로덕션 안전 모드. true면 Mock 직접 선택, credential 누락, 미구현/부분 구현
+   * provider를 조용히 Mock으로 대체하지 않고 시작 단계에서 실패한다.
+   */
+  strict?: boolean;
 }
 
 /** 경고 로그 (Secret/키/원문 미포함). */
@@ -58,6 +63,18 @@ function createMockProviders(): ProviderSet {
   };
 }
 
+/** strict 모드에서는 폴백 대신 안전한 구성 오류로 중단한다. */
+function fallbackOrThrow(
+  cfg: CreateProvidersConfig | undefined,
+  message: string,
+): ProviderSet {
+  if (cfg?.strict === true) {
+    throw new Error(`[@family/ai-providers] strict mode: ${message}`);
+  }
+  warn(`${message}; falling back to mock providers`);
+  return createMockProviders();
+}
+
 /**
  * 설정값으로부터 LLM/Embedding/Reranker provider 묶음을 생성한다.
  *
@@ -68,7 +85,9 @@ function createMockProviders(): ProviderSet {
  *   키가 없으면 경고 후 Mock 폴백.
  * - `anthropic`: 미구현. 경고 후 Mock 폴백.
  *
- * 어떤 경우에도 예외로 파이프라인을 중단시키지 않고 Mock으로 폴백한다.
+ * 기본(non-strict)에서는 기존처럼 Mock으로 폴백한다. `strict=true`에서는 Mock
+ * 직접 선택, credential 누락, 미구현/부분 구현 provider를 구성 오류로 처리해
+ * 프로덕션이 조용히 가짜 결과를 제공하지 않게 한다(ADR-0017 P0).
  */
 export function createProviders(cfg?: CreateProvidersConfig): ProviderSet {
   const provider = cfg?.provider ?? 'mock';
@@ -77,8 +96,13 @@ export function createProviders(cfg?: CreateProvidersConfig): ProviderSet {
     case 'openai': {
       const apiKey = cfg?.openaiApiKey ?? readEnv('OPENAI_API_KEY');
       if (!apiKey) {
-        warn("provider 'openai' has no API key; falling back to mock providers");
-        return createMockProviders();
+        return fallbackOrThrow(cfg, "provider 'openai' has no API key");
+      }
+      if (cfg?.strict === true) {
+        throw new Error(
+          "[@family/ai-providers] strict mode: provider 'openai' is partial " +
+            '(embedding only; llm/reranker are mock)',
+        );
       }
       // 스켈레톤: 임베딩만 OpenAI, llm/reranker는 아직 Mock. Phase 7 검증은 mock.
       warn("provider 'openai' embedding skeleton is unverified; llm/reranker use mock");
@@ -94,18 +118,15 @@ export function createProviders(cfg?: CreateProvidersConfig): ProviderSet {
     case 'anthropic': {
       const apiKey = cfg?.anthropicApiKey ?? readEnv('ANTHROPIC_API_KEY');
       if (!apiKey) {
-        warn("provider 'anthropic' has no API key; falling back to mock providers");
-      } else {
-        warn("provider 'anthropic' is not implemented; falling back to mock providers");
+        return fallbackOrThrow(cfg, "provider 'anthropic' has no API key");
       }
-      return createMockProviders();
+      return fallbackOrThrow(cfg, "provider 'anthropic' is not implemented");
     }
     case 'gemini':
     case 'google': {
       const apiKey = cfg?.geminiApiKey ?? readEnv('GEMINI_API_KEY');
       if (!apiKey) {
-        warn("provider 'gemini' has no API key; falling back to mock providers");
-        return createMockProviders();
+        return fallbackOrThrow(cfg, "provider 'gemini' has no API key");
       }
       // LLM만 Gemini로 배선한다. 임베딩은 Phase 7 스키마가 vector(256)로 고정돼
       // 있어(재임베딩 필요) Mock을 유지한다 — 분류/질의/인사이트는 LLM만 사용.
@@ -118,8 +139,15 @@ export function createProviders(cfg?: CreateProvidersConfig): ProviderSet {
         reranker: new MockRerankerProvider(),
       };
     }
-    case 'mock':
-    default:
+    case 'mock': {
+      if (cfg?.strict === true) {
+        throw new Error(
+          "[@family/ai-providers] strict mode: provider 'mock' is not allowed",
+        );
+      }
       return createMockProviders();
+    }
+    default:
+      return fallbackOrThrow(cfg, `provider '${provider}' is unknown`);
   }
 }

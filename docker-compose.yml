@@ -176,6 +176,8 @@ services:
     env_file: .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      # 초대 링크 등 공유용 절대 URL의 베이스(공개 웹 도메인).
+      NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
     volumes:

@@ -1,16 +1,24 @@
 import { GenericCardParser } from './parsers/generic.parser.js';
 import { KookminCardParser } from './parsers/kookmin.parser.js';
 import { ShinhanCardParser } from './parsers/shinhan.parser.js';
+import { TossBankCardParser } from './parsers/toss.parser.js';
 
 import type { CardSmsInput, CardSmsParseResult, CardSmsParser } from './types.js';
 
 /**
  * Registered parsers, tried in order. The first whose `supports()` returns true
- * handles the message. Issuer-specific parsers (신한/KB) come first for precise
- * labels; the {@link GenericCardParser} fallback is LAST and catches every other
- * issuer (삼성/현대/롯데/하나/… ) so unknown cards still parse instead of failing.
+ * handles the message.
+ *
+ * 토스뱅크가 맨 앞: supports()가 리터럴 '토스뱅크'를 요구해 가장 특이적이고,
+ * 신한/KB 파서는 발신사 무관 키워드('신한'/'KB'/'국민')만 보므로 가맹점명에 그
+ * 키워드가 든 토스뱅크 알림톡(예: `… | 신한서적`)을 선점해 버린다. 또한 토스뱅크
+ * 알림톡은 잔액 라인 때문에 generic 파서의 은행 문자 배제 규칙에 걸리므로 반드시
+ * generic 보다 앞이어야 한다. The {@link GenericCardParser} fallback is LAST and
+ * catches every other issuer (삼성/현대/롯데/하나/… ) so unknown cards still
+ * parse instead of failing.
  */
 const PARSERS: readonly CardSmsParser[] = [
+  new TossBankCardParser(),
   new ShinhanCardParser(),
   new KookminCardParser(),
   new GenericCardParser(),

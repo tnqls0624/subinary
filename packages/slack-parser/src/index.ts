@@ -11,3 +11,11 @@ export type {
   ParsedSlackExport,
 } from './types.js';
 export { parseSlackExport, tsToDate, compareTs } from './parse.js';
+export {
+  reconcileSlackMessages,
+  type SlackImportSyncMode,
+  type IncomingSlackMessageProjection,
+  type CurrentSlackMessageProjection,
+  type SlackMessageUpdate,
+  type SlackMessageReconciliation,
+} from './reconciliation.js';

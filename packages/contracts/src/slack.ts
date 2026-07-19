@@ -8,6 +8,10 @@ import { z } from 'zod';
 
 // --- Responses ---
 
+/** Slack export 재수집 동기화 방식. snapshot은 번들에 포함된 채널만 완전본으로 본다. */
+export const slackImportSyncModeSchema = z.enum(['merge', 'snapshot']);
+export type SlackImportSyncMode = z.infer<typeof slackImportSyncModeSchema>;
+
 /**
  * `POST /v1/slack/import` acknowledgement. `importId` is the created
  * `source_items.id`; parsing runs asynchronously on the `slack-import` queue,
@@ -16,6 +20,7 @@ import { z } from 'zod';
 export const slackImportResponseSchema = z.object({
   importId: z.string(),
   slackWorkspaceId: z.string(),
+  syncMode: slackImportSyncModeSchema,
   status: z.enum(['queued']),
 });
 export type SlackImportResponse = z.infer<typeof slackImportResponseSchema>;
@@ -79,3 +84,24 @@ export const slackThreadResponseSchema = z.object({
   messages: z.array(slackMessageSummarySchema),
 });
 export type SlackThreadResponse = z.infer<typeof slackThreadResponseSchema>;
+
+/** `PATCH /v1/slack/messages/:id` 요청. 빈 본문은 DELETE로만 처리한다. */
+export const slackMessageEditRequestSchema = z.object({
+  text: z.string().min(1).max(200_000),
+  editedTs: z.string().trim().min(1).max(64).optional(),
+});
+export type SlackMessageEditRequest = z.infer<
+  typeof slackMessageEditRequestSchema
+>;
+
+/** Slack message current projection 변경 접수 결과. */
+export const slackMessageChangeResponseSchema = z.object({
+  messageId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  operation: z.enum(['edited', 'deleted']),
+  status: z.literal('queued'),
+  changedAt: z.string(),
+});
+export type SlackMessageChangeResponse = z.infer<
+  typeof slackMessageChangeResponseSchema
+>;

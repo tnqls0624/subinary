@@ -36,6 +36,7 @@ export class TokenService {
   private readonly accessSecret: string;
   private readonly accessTtlSec: number;
   private readonly refreshTtlSec: number;
+  private readonly refreshTtlMobileSec: number;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -48,11 +49,17 @@ export class TokenService {
     this.accessSecret = auth.accessSecret;
     this.accessTtlSec = auth.accessTtlSec;
     this.refreshTtlSec = auth.refreshTtlSec;
+    this.refreshTtlMobileSec = auth.refreshTtlMobileSec;
   }
 
   /** Refresh-token lifetime in seconds (used for session expiry + cookie maxAge). */
   get refreshTtlSeconds(): number {
     return this.refreshTtlSec;
+  }
+
+  /** 모바일(Capacitor) 자동로그인 세션 TTL(초) — 기본 1년. */
+  get refreshTtlMobileSeconds(): number {
+    return this.refreshTtlMobileSec;
   }
 
   /** Signs a short-lived access token carrying `{ sub, email }`. */

@@ -86,7 +86,8 @@ function firstSentence(text: string): string {
  * - `maxTokens`가 지정되면 근사 토큰 기준으로 잘라내고 `finishReason: 'length'`를 반환한다.
  */
 export class MockLlmProvider implements LlmProvider {
-  private readonly model = MOCK_LLM_MODEL;
+  readonly provider = 'mock';
+  readonly model = MOCK_LLM_MODEL;
 
   async generate(req: GenerateRequest): Promise<GenerateResponse> {
     if (req === null || typeof req !== 'object') {
@@ -161,6 +162,7 @@ export class MockLlmProvider implements LlmProvider {
  * 같은 텍스트 → 항상 같은 벡터. `dimensions=256`, `model='mock'`.
  */
 export class MockEmbeddingProvider implements EmbeddingProvider {
+  readonly provider = 'mock';
   readonly dimensions = MOCK_EMBEDDING_DIMENSION;
   readonly model = MOCK_EMBEDDING_MODEL;
 
@@ -204,7 +206,8 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
  * `topK`가 지정되면 상위 N개만 반환한다.
  */
 export class MockRerankerProvider implements RerankerProvider {
-  private readonly model = MOCK_RERANKER_MODEL;
+  readonly provider = 'mock';
+  readonly model = MOCK_RERANKER_MODEL;
 
   async rerank(req: RerankRequest): Promise<RerankResponse> {
     if (req === null || typeof req !== 'object' || typeof req.query !== 'string') {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- refresh 토큰이 들어 있는 Capacitor Preferences 파일은 백업하지 않는다. -->
+        <exclude domain="sharedpref" path="CapacitorStorage.xml" />
+        <exclude domain="sharedpref" path="WSSecureStorageSharedPreferences.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- 기기 간 이전에서도 이전 기기의 refresh 토큰을 복원하지 않는다. -->
+        <exclude domain="sharedpref" path="CapacitorStorage.xml" />
+        <exclude domain="sharedpref" path="WSSecureStorageSharedPreferences.xml" />
+    </device-transfer>
+</data-extraction-rules>

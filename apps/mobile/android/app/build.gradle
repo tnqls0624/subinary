@@ -1,8 +1,36 @@
 apply plugin: 'com.android.application'
 
+// Play Store 산출물이 실수로 무서명 상태로 만들어지지 않도록 Release 작업을 보호한다.
+// 비밀번호와 키 파일 경로는 저장소 파일이 아니라 셸/CI 비밀 환경변수로만 주입한다.
+def releaseSigningEnvironment = [
+    'ANDROID_KEYSTORE_PATH': System.getenv('ANDROID_KEYSTORE_PATH'),
+    'ANDROID_KEYSTORE_PASSWORD': System.getenv('ANDROID_KEYSTORE_PASSWORD'),
+    'ANDROID_KEY_ALIAS': System.getenv('ANDROID_KEY_ALIAS'),
+    'ANDROID_KEY_PASSWORD': System.getenv('ANDROID_KEY_PASSWORD'),
+]
+def releaseSigningConfigured = releaseSigningEnvironment.values().every { value ->
+    value != null && !value.trim().isEmpty()
+}
+def releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase().contains('release')
+}
+def allowUnsignedRelease = providers.gradleProperty('allowUnsignedRelease')
+    .map { value -> value.toBoolean() }
+    .getOrElse(false)
+
 android {
     namespace = "ai.familymemory.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            release {
+                storeFile file(releaseSigningEnvironment['ANDROID_KEYSTORE_PATH'])
+                storePassword releaseSigningEnvironment['ANDROID_KEYSTORE_PASSWORD']
+                keyAlias releaseSigningEnvironment['ANDROID_KEY_ALIAS']
+                keyPassword releaseSigningEnvironment['ANDROID_KEY_PASSWORD']
+            }
+        }
+    }
     defaultConfig {
         applicationId "ai.familymemory.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -18,9 +46,30 @@ android {
     }
     buildTypes {
         release {
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+// android 블록을 먼저 평가해야 서명 가드 실패 시 AGP가 compileSdk 누락을 중복 보고하지 않는다.
+if (releaseTaskRequested && !releaseSigningConfigured && !allowUnsignedRelease) {
+    def missingVariables = releaseSigningEnvironment.findAll { _name, value ->
+        value == null || value.trim().isEmpty()
+    }.keySet().join(', ')
+    throw new GradleException(
+        "Release 서명 환경변수가 없습니다: ${missingVariables}. " +
+        '컴파일 검증만 할 때는 -PallowUnsignedRelease=true를 명시하세요.'
+    )
+}
+
+if (releaseSigningConfigured) {
+    def releaseKeystoreFile = file(releaseSigningEnvironment['ANDROID_KEYSTORE_PATH'])
+    if (!releaseKeystoreFile.isFile()) {
+        throw new GradleException('ANDROID_KEYSTORE_PATH가 유효한 키스토어 파일이 아닙니다.')
     }
 }
 

@@ -1,6 +1,8 @@
 # Dependencies (installed inside the image)
 node_modules
 **/node_modules
+# 컨테이너 pnpm install이 호스트 마운트에 남긴 스토어(~1GB) — 컨텍스트에서 제외
+.pnpm-store
 
 # Build outputs (rebuilt inside the image)
 dist
@@ -9,12 +11,23 @@ dist
 **/.next
 .turbo
 **/.turbo
+out
+**/out
+
+# Mobile 네이티브 프로젝트/에셋 (서버 이미지에 불필요; 워크스페이스 package.json은 유지)
+apps/mobile/ios
+apps/mobile/android
 
 # VCS
 .git
 
 # Environment (secrets — injected via compose env_file, never baked into the image)
 .env
+.env.*
+!.env.example
 
 # Logs
 *.log
+
+# 운영 논리 백업은 이미지 빌드 컨텍스트에 포함하지 않는다.
+backups

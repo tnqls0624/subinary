@@ -1,0 +1,73 @@
+# Family Memory AI — 프로덕션 이미지 (api / worker / web 공유)
+#
+# dev 이미지(Dockerfile.dev)와 달리 앱을 dist/.next로 "빌드"까지 하고, 런타임은
+# compose(docker-compose.prod.yml)의 서비스별 command로 실행한다:
+#   api    → node apps/api/dist/main.js
+#   worker → node apps/worker/dist/main.js
+#   web    → next start (apps/web)
+#
+# 단일 이미지에 전체 install을 두어(next start·nest dist 모두 node_modules 필요)
+# pnpm 모노레포 standalone 트레이싱 이슈를 피한다.
+FROM node@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+WORKDIR /app
+
+# web 클라이언트 번들에 인라인될 API base URL(빌드 타임 고정).
+# 같은 오리진(https://도메인, /v1→api) 배포 기준. compose build args로 주입.
+ARG NEXT_PUBLIC_API_URL=https://app.subinary.cloud
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# 초대 링크 등 공유용 절대 URL의 베이스(공개 웹 도메인, 빌드 타임 인라인).
+ARG NEXT_PUBLIC_WEB_URL=https://app.subinary.cloud
+ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
+
+FROM base AS builder
+
+# msgpackr의 선택적 네이티브 가속 모듈이 glibc ARM64에서 소스 빌드될 수 있게 한다.
+# 빌드 도구는 builder 단계에만 존재하므로 최종 운영 이미지에는 포함되지 않는다.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+# 의존성 manifest를 소스보다 먼저 복사해 코드만 바뀐 재빌드에서 install cache를 재사용한다.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/mcp/package.json apps/mcp/package.json
+COPY apps/mobile/package.json apps/mobile/package.json
+COPY apps/trainer/package.json apps/trainer/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/ai-providers/package.json packages/ai-providers/package.json
+COPY packages/card-parsers/package.json packages/card-parsers/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/database/package.json packages/database/package.json
+COPY packages/rag/package.json packages/rag/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/slack-parser/package.json packages/slack-parser/package.json
+
+# 빌드에는 devDeps(nest/next/tsup/typescript)가 필요 → 전체 설치(frozen).
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+# 플랫폼 바이너리 누락 시 자바스크립트 폴백으로 조용히 진행되는 회귀를 빌드에서 차단한다.
+RUN cd apps/worker \
+  && node -e "const msgpackr = require(require.resolve('msgpackr', { paths: [require.resolve('bullmq')] })); if (!msgpackr.isNativeAccelerationEnabled) throw new Error('msgpackr 네이티브 가속이 비활성화되었습니다.');"
+
+# 패키지 dist(tsup) → 앱 빌드(api/worker=nest swc dist, web=next build)
+RUN pnpm -r --filter "./packages/*" build
+RUN pnpm --filter @family/api build
+RUN pnpm --filter @family/worker build
+RUN pnpm --filter @family/trainer build
+RUN pnpm --filter @family/web build
+# MCP(선택): compose 서비스는 아니지만 dev 이미지 관례에 맞춰 빌드해 둔다.
+RUN pnpm --filter @family/mcp build
+
+FROM base AS runtime
+
+COPY --from=builder /app /app
+
+EXPOSE 3000 3001 3002
+# 실제 실행 커맨드는 compose 서비스별 command로 지정된다.
+CMD ["node","-e","console.log('override command in docker-compose.prod.yml')"]

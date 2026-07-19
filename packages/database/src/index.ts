@@ -7,4 +7,8 @@ export * from './schema.js';
 export * from './client.js';
 export * from './health.js';
 export * from './errors.js';
+export * from './observability.js';
+export * from './model-alias.js';
+export * from './model-traffic.js';
+export * from './training-run.js';
 export type { Sql } from 'postgres';

@@ -31,9 +31,11 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
+  ne,
   or,
   sql,
   type SQL,
@@ -42,15 +44,23 @@ import {
 import type {
   HouseholdRole,
   LinkCancellationRequest,
+  MerchantLabelCandidateListResponse,
+  MerchantLabelTrainingReadiness,
   TransactionListResponse,
   TransactionSummary,
   TransactionSummaryResponse,
   TransactionUpdateRequest,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
-import { assertKrwInteger, DEFAULT_TIMEZONE } from '@family/shared';
+import { revokeTrainingRuns, schema, type Db } from '@family/database';
+import {
+  assertKrwInteger,
+  createMerchantCategoryTargetId,
+  DEFAULT_TIMEZONE,
+  MERCHANT_TRAINING_READINESS,
+} from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -121,7 +131,10 @@ interface ActorMembership {
 
 @Injectable()
 export class TransactionService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly realtimePublisher: RealtimePublisherService,
+  ) {}
 
   /* ---------------------------------------------------------------------- */
   /* List / read                                                             */
@@ -317,6 +330,211 @@ export class TransactionService {
     };
   }
 
+  /**
+   * 사람 확정 규칙이 없는 가맹점을 수정 가능한 거래 범위에서 집계한다.
+   * 다른 구성원의 private/summary_only 가맹점은 원문 노출을 막기 위해 제외하고,
+   * AI prediction은 추천값으로만 반환한다.
+   */
+  async listMerchantLabelCandidates(
+    userId: string,
+    householdIdInput: string | undefined,
+    limitInput: string | undefined,
+  ): Promise<MerchantLabelCandidateListResponse> {
+    const householdId = this.requireHouseholdId(householdIdInput);
+    const actor = await this.requireMembership(householdId, userId);
+    const take = this.parseLimit(limitInput);
+    const canMutateHouseholdRows = PRIVILEGED_ROLES.includes(actor.role);
+    const mutableMerchantScope = canMutateHouseholdRows
+      ? or(
+          eq(schema.cardTransactions.memberId, actor.memberId),
+          eq(schema.cardTransactions.visibility, 'household'),
+        )
+      : eq(schema.cardTransactions.memberId, actor.memberId);
+
+    const latestTransactionAt = sql<Date>`max(coalesce(
+      ${schema.cardTransactions.approvedAt},
+      ${schema.cardTransactions.createdAt}
+    ))`;
+    const transactionCount = sql<number>`count(*)::int`;
+    const candidatePriority = sql<number>`case
+      when ${schema.merchantCategoryRules.source} = 'model_prediction' then 0
+      else 1
+    end`;
+    const rowsQuery = this.db
+      .select({
+        representativeTransactionId: sql<string>`(
+          array_agg(
+            ${schema.cardTransactions.id}
+            order by coalesce(
+              ${schema.cardTransactions.approvedAt},
+              ${schema.cardTransactions.createdAt}
+            ) desc, ${schema.cardTransactions.id} desc
+          )
+        )[1]`,
+        merchantNormalized: schema.cardTransactions.merchantNormalized,
+        transactionCount,
+        latestTransactionAt,
+        ruleSource: schema.merchantCategoryRules.source,
+        suggestedCategoryId: schema.merchantCategoryRules.categoryId,
+        suggestedCategorySlug: schema.expenseCategories.slug,
+      })
+      .from(schema.cardTransactions)
+      .leftJoin(
+        schema.merchantCategoryRules,
+        and(
+          eq(
+            schema.merchantCategoryRules.householdId,
+            schema.cardTransactions.householdId,
+          ),
+          eq(
+            schema.merchantCategoryRules.merchantPattern,
+            schema.cardTransactions.merchantNormalized,
+          ),
+        ),
+      )
+      .leftJoin(
+        schema.expenseCategories,
+        eq(
+          schema.merchantCategoryRules.categoryId,
+          schema.expenseCategories.id,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.cardTransactions.householdId, householdId),
+          eq(schema.cardTransactions.transactionType, 'approval'),
+          isNull(schema.cardTransactions.excludedAt),
+          sql`${schema.cardTransactions.merchantNormalized} is not null`,
+          sql`btrim(${schema.cardTransactions.merchantNormalized}) <> ''`,
+          mutableMerchantScope as SQL,
+          or(
+            isNull(schema.merchantCategoryRules.id),
+            eq(schema.merchantCategoryRules.source, 'model_prediction'),
+          ),
+        ),
+      )
+      .groupBy(
+        schema.cardTransactions.merchantNormalized,
+        schema.merchantCategoryRules.source,
+        schema.merchantCategoryRules.categoryId,
+        schema.expenseCategories.slug,
+      )
+      .orderBy(
+        candidatePriority,
+        desc(transactionCount),
+        desc(latestTransactionAt),
+      )
+      .limit(take + 1);
+
+    const [rows, trainingReadiness] = await Promise.all([
+      rowsQuery,
+      this.getMerchantLabelTrainingReadiness(householdId),
+    ]);
+
+    return {
+      items: rows.slice(0, take).map((row) => {
+        if (row.merchantNormalized === null) {
+          throw new Error('merchant label candidate has no normalized merchant');
+        }
+        return {
+          representativeTransactionId: row.representativeTransactionId,
+          merchantNormalized: row.merchantNormalized,
+          transactionCount: row.transactionCount,
+          latestTransactionAt: new Date(
+            row.latestTransactionAt,
+          ).toISOString(),
+          source:
+            row.ruleSource === 'model_prediction'
+              ? 'model_prediction'
+              : 'unlabeled',
+          suggestedCategoryId: row.suggestedCategoryId,
+          suggestedCategorySlug: row.suggestedCategorySlug,
+        };
+      }),
+      hasMore: rows.length > take,
+      trainingReadiness,
+    };
+  }
+
+  /** 가맹점명을 반환하지 않고 현재 사람 라벨 진입 게이트만 집계한다. */
+  private async getMerchantLabelTrainingReadiness(
+    householdId: string,
+  ): Promise<MerchantLabelTrainingReadiness> {
+    const [rules, feedbackRows] = await Promise.all([
+      this.db
+        .select({
+          merchantPattern: schema.merchantCategoryRules.merchantPattern,
+          categoryId: schema.merchantCategoryRules.categoryId,
+        })
+        .from(schema.merchantCategoryRules)
+        .where(
+          and(
+            eq(schema.merchantCategoryRules.householdId, householdId),
+            eq(schema.merchantCategoryRules.source, 'human_confirmed'),
+            isNotNull(schema.merchantCategoryRules.confirmedAt),
+          ),
+        ),
+      this.db
+        .select({
+          targetId: schema.feedbackEvents.targetId,
+          categoryId: sql<string | null>`${schema.feedbackEvents.label} ->> 'categoryId'`,
+        })
+        .from(schema.feedbackEvents)
+        .where(
+          and(
+            eq(schema.feedbackEvents.householdId, householdId),
+            eq(schema.feedbackEvents.targetType, 'merchant-category'),
+            eq(schema.feedbackEvents.source, 'human_confirmed'),
+          ),
+        ),
+    ]);
+
+    const labelsByClass = new Map<string, number>();
+    for (const rule of rules) {
+      labelsByClass.set(
+        rule.categoryId,
+        (labelsByClass.get(rule.categoryId) ?? 0) + 1,
+      );
+    }
+    const lineage = new Set(
+      feedbackRows
+        .filter(
+          (row): row is { targetId: string; categoryId: string } =>
+            row.categoryId !== null,
+        )
+        .map((row) => `${row.targetId}:${row.categoryId}`),
+    );
+    const missingLineage = rules.filter((rule) => {
+      const targetId = createMerchantCategoryTargetId(
+        householdId,
+        rule.merchantPattern,
+      );
+      return !lineage.has(`${targetId}:${rule.categoryId}`);
+    }).length;
+    const minimumClassLabels =
+      labelsByClass.size === 0
+        ? 0
+        : Math.min(...labelsByClass.values());
+    const ready =
+      missingLineage === 0 &&
+      rules.length >= MERCHANT_TRAINING_READINESS.minimumLabels &&
+      labelsByClass.size >= MERCHANT_TRAINING_READINESS.minimumClasses &&
+      minimumClassLabels >=
+        MERCHANT_TRAINING_READINESS.minimumLabelsPerClass;
+
+    return {
+      humanConfirmedLabels: rules.length,
+      requiredLabels: MERCHANT_TRAINING_READINESS.minimumLabels,
+      distinctClasses: labelsByClass.size,
+      requiredClasses: MERCHANT_TRAINING_READINESS.minimumClasses,
+      minimumClassLabels,
+      requiredLabelsPerClass:
+        MERCHANT_TRAINING_READINESS.minimumLabelsPerClass,
+      missingLineage,
+      status: ready ? 'ready' : 'collect_labels',
+    };
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Mutations                                                               */
   /* ---------------------------------------------------------------------- */
@@ -383,14 +601,55 @@ export class TransactionService {
         .set(updates)
         .where(eq(schema.cardTransactions.id, id));
 
+      // 단일 거래 카테고리 수정도 사람 확정 라벨이다. 가맹점 원문은 저장하지
+      // 않고 transaction id를 통해 권한/원본 데이터를 역추적한다.
+      if (input.categoryId !== undefined) {
+        await tx.insert(schema.feedbackEvents).values({
+          householdId: current.householdId,
+          targetType: 'transaction-category',
+          targetId: id,
+          labelSchemaVersion: 'transaction-category-v1',
+          label: { categoryId: input.categoryId },
+          source: 'human_confirmed',
+          actorUserId: userId,
+          occurredAt: new Date(),
+        });
+      }
+
       if (input.applyRule && input.categoryId !== undefined && effectiveMerchant) {
         const now = new Date();
+        const targetId = createMerchantCategoryTargetId(
+          current.householdId,
+          effectiveMerchant,
+        );
+        const [previousRule] = await tx
+          .select({
+            id: schema.merchantCategoryRules.id,
+            categoryId: schema.merchantCategoryRules.categoryId,
+          })
+          .from(schema.merchantCategoryRules)
+          .where(
+            and(
+              eq(
+                schema.merchantCategoryRules.householdId,
+                current.householdId,
+              ),
+              eq(
+                schema.merchantCategoryRules.merchantPattern,
+                effectiveMerchant,
+              ),
+            ),
+          )
+          .limit(1);
         await tx
           .insert(schema.merchantCategoryRules)
           .values({
             householdId: current.householdId,
             merchantPattern: effectiveMerchant,
             categoryId: input.categoryId,
+            source: 'human_confirmed',
+            predictionTraceId: null,
+            confirmedAt: now,
             createdBy: userId,
           })
           .onConflictDoUpdate({
@@ -398,12 +657,125 @@ export class TransactionService {
               schema.merchantCategoryRules.householdId,
               schema.merchantCategoryRules.merchantPattern,
             ],
-            set: { categoryId: input.categoryId, updatedAt: now },
+            set: {
+              categoryId: input.categoryId,
+              source: 'human_confirmed',
+              predictionTraceId: null,
+              confirmedAt: now,
+              createdBy: userId,
+              updatedAt: now,
+            },
           });
+        await tx.insert(schema.feedbackEvents).values({
+          householdId: current.householdId,
+          targetType: 'merchant-category',
+          targetId,
+          labelSchemaVersion: 'merchant-category-v1',
+          label: { categoryId: input.categoryId },
+          source: 'human_confirmed',
+          actorUserId: userId,
+          occurredAt: now,
+        });
+
+        // 이미 Gold snapshot에 포함된 규칙의 label이 바뀌면 과거 artifact는
+        // immutable하게 보존하되 평가 근거로는 즉시 revoke한다.
+        if (previousRule && previousRule.categoryId !== input.categoryId) {
+          const snapshotRows = await tx
+            .select({ id: schema.datasetSnapshotItems.datasetSnapshotId })
+            .from(schema.datasetSnapshotItems)
+            .where(
+              eq(
+                schema.datasetSnapshotItems.merchantCategoryRuleId,
+                previousRule.id,
+              ),
+            );
+          const snapshotIds = [
+            ...new Set(snapshotRows.map((snapshot) => snapshot.id)),
+          ];
+          if (snapshotIds.length > 0) {
+            const revokedSnapshots = await tx
+              .update(schema.datasetSnapshots)
+              .set({
+                status: 'revoked',
+                revokedAt: now,
+                revocationReason: 'merchant_category_rule_changed',
+                updatedAt: now,
+              })
+              .where(
+                and(
+                  inArray(schema.datasetSnapshots.id, snapshotIds),
+                  ne(schema.datasetSnapshots.status, 'revoked'),
+                ),
+              )
+              .returning({ id: schema.datasetSnapshots.id });
+            if (revokedSnapshots.length > 0) {
+              await revokeTrainingRuns(
+                tx,
+                revokedSnapshots.map((snapshot) => snapshot.id),
+                'merchant_category_rule_changed',
+                now,
+              );
+              const revokedEvaluations = await tx
+                .update(schema.evaluationRuns)
+                .set({
+                  status: 'revoked',
+                  revokedAt: now,
+                  revocationReason: 'merchant_category_rule_changed',
+                })
+                .where(
+                  and(
+                    inArray(
+                      schema.evaluationRuns.datasetSnapshotId,
+                      revokedSnapshots.map((snapshot) => snapshot.id),
+                    ),
+                    ne(schema.evaluationRuns.status, 'revoked'),
+                  ),
+                )
+                .returning({ id: schema.evaluationRuns.id });
+              if (revokedEvaluations.length > 0) {
+                const suspendedAliases = await tx
+                  .update(schema.modelAliases)
+                  .set({
+                    suspendedAt: now,
+                    suspensionReason: 'evaluation_revoked',
+                    updatedAt: now,
+                  })
+                  .where(
+                    inArray(
+                      schema.modelAliases.evaluationRunId,
+                      revokedEvaluations.map((evaluation) => evaluation.id),
+                    ),
+                  )
+                  .returning({ id: schema.modelAliases.id });
+                if (suspendedAliases.length > 0) {
+                  await tx
+                    .update(schema.modelCanaryRuns)
+                    .set({
+                      status: 'superseded',
+                      decisionReason: 'evaluation_revoked',
+                      lastEvaluatedAt: now,
+                      updatedAt: now,
+                    })
+                    .where(
+                      and(
+                        inArray(
+                          schema.modelCanaryRuns.modelAliasId,
+                          suspendedAliases.map((alias) => alias.id),
+                        ),
+                        eq(schema.modelCanaryRuns.status, 'monitoring'),
+                      ),
+                    );
+                }
+              }
+            }
+          }
+        }
       }
     });
 
     const row = await this.loadSummaryRow(id);
+    // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -478,6 +850,8 @@ export class TransactionService {
     });
 
     const row = await this.loadSummaryRow(approval.id);
+    // 취소↔승인 연결을 가족의 다른 열린 화면에 전파(best-effort).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -496,6 +870,8 @@ export class TransactionService {
       .where(eq(schema.cardTransactions.id, id));
 
     const row = await this.loadSummaryRow(id);
+    // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -538,6 +914,8 @@ export class TransactionService {
       .where(eq(schema.cardTransactions.id, id));
 
     const row = await this.loadSummaryRow(id);
+    // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -559,6 +937,8 @@ export class TransactionService {
     }
 
     const row = await this.loadSummaryRow(id);
+    // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -576,6 +956,8 @@ export class TransactionService {
     }
 
     const row = await this.loadSummaryRow(id);
+    // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
   }
 

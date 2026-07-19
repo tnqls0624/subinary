@@ -1,4 +1,4 @@
-# Slack Import / 조회 API 명세
+# Slack Import / 동기화 / 조회 API 명세
 
 > Phase 6 기준. 계약 스키마의 단일 소스는 `@family/contracts`(zod)이며, 본 문서는 예시다.
 > 모든 엔드포인트는 전역 prefix `v1`을 사용한다. 시각은 ISO 8601 문자열(`toISOString`),
@@ -16,17 +16,18 @@ Phase 6은 Slack Export(JSON 번들)를 업로드해 채널·사용자를 정규
 | 동작 | 방식 | 경로 |
 |---|---|---|
 | Import(업로드) | JWT + multipart 파일 | `POST /v1/slack/import` |
+| 메시지 편집/삭제 | JWT + JSON 또는 path | `PATCH /v1/slack/messages/:id` · `DELETE /v1/slack/messages/:id` |
 | 워크스페이스 목록/상세 | JWT | `GET /v1/slack/workspaces` · `GET /v1/slack/workspaces/:id` |
 | 메시지 검색 | JWT | `GET /v1/slack/messages?...` |
 | 스레드 조회 | JWT | `GET /v1/slack/threads?...` |
 
 - 업로드는 **JSON 번들 multipart**다(ZIP 아님, ADR-0011 §1). 클라이언트가 Slack export ZIP을
   풀어 하나의 JSON 번들로 합쳐 올린다. 서버는 파일을 MinIO(원문 권위 사본) + `source_items`
-  (kind=`slack`)에 이중 보존하고 BullMQ `slack-import` 큐로 파싱을 위임한다.
+  (kind=`slack`)에 이중 보존하고 transactional outbox를 통해 `slack-import` 큐로 파싱을 위임한다.
 - 파싱은 워커에서 **비동기**다. 업로드 응답은 즉시 `status:"queued"`로 수락하고, 결과
   (messageCount 등)는 `GET /v1/slack/workspaces/:id`를 폴링(권장 상한 10초)해 확인한다.
-- Import는 **멱등**이다 — `slack_messages` UNIQUE(slackChannelId, ts) + `onConflictDoNothing`
-  이라 동일 번들 재업로드는 새 `importId`(source_item)만 생기고 **메시지는 중복 저장되지 않는다**.
+- Import는 **멱등**이다. 기본 `merge`는 생성·편집만 반영하고, 명시적 `snapshot`은 번들에 포함된
+  채널 안에서만 누락 메시지를 삭제한다. 기존 tombstone은 재업로드로 복구하지 않는다.
 - **접근제어(PRD §26)**: Slack 데이터는 개인 데이터다. `workspaces.ownerUserId == 요청자`인
   **소유자 본인만** 조회할 수 있다 — 가족 구성원·제3자 모두 불가(`403 Forbidden`).
 - **로그 비노출(PRD §11)**: 메시지 원문/PII/secret/토큰을 운영 로그에 남기지 않는다(개수/식별자만).
@@ -92,6 +93,7 @@ upsert되며, 없으면 새로 생성된다.
 | `mySlackUserId` | 선택 | 내 Slack user id(예: `U1`) — `isMine`/`mine` 필터 기준. 미지정 시 기존 유지. |
 | `workspaceName` | 선택 | 워크스페이스 표시명 override(미지정 시 `workspace.name` → 없으면 `Slack`). |
 | `kind` | 선택 | 데이터 컨테이너 종류(`personal` \| `company`). 기본 `company`. |
+| `syncMode` | 선택 | `merge` \| `snapshot`. 기본 `merge`; `snapshot`은 `channels[]`에 포함된 채널만 완전본으로 간주. |
 
 ```bash
 # 번들 파일 bundle.json 을 multipart 로 업로드
@@ -100,6 +102,7 @@ curl -s -X POST http://localhost:3001/v1/slack/import \
   -F 'mySlackUserId=U1' \
   -F 'workspaceName=회사 슬랙' \
   -F 'kind=company' \
+  -F 'syncMode=merge' \
   -F 'file=@bundle.json;type=application/json'
 ```
 
@@ -109,6 +112,7 @@ curl -s -X POST http://localhost:3001/v1/slack/import \
 {
   "importId": "a1b2c3d4-…",
   "slackWorkspaceId": "f9e8d7c6-…",
+  "syncMode": "merge",
   "status": "queued"
 }
 ```
@@ -117,7 +121,8 @@ curl -s -X POST http://localhost:3001/v1/slack/import \
 |---|---|
 | `importId` | 이번 import의 `source_items.id`(감사·원문 추적 키). 재업로드마다 **새 값**. |
 | `slackWorkspaceId` | 대상 `slack_workspaces.id`. 소유 워크스페이스라 재업로드 시 **동일**. |
-| `status` | 항상 `queued`(파싱 큐 등록). "완료"가 아니라 "등록"을 뜻한다 — 아래 §3을 폴링. |
+| `syncMode` | 적용한 동기화 방식. 누락 시 `merge`. |
+| `status` | 항상 `queued`(outbox 접수). "완료"가 아니라 "등록"을 뜻한다 — 아래 §3을 폴링. |
 
 오류:
 
@@ -270,11 +275,14 @@ curl -s 'http://localhost:3001/v1/slack/threads?slackWorkspaceId=f9e8d7c6-…&ch
 
 ## 6. 접근제어 · 멱등 요약
 
-- **소유자 전용(PRD §26)**: 모든 조회는 `workspaces.ownerUserId == 요청자`를 서비스 계층에서
-  강제한다. 비소유자(가족 구성원 포함)는 상세/메시지/스레드에서 `403`, 목록에서 미노출.
-- **멱등(ADR-0011 §3)**: 재업로드는 새 `importId`(source_item)만 만들고 `slack_messages`는
-  UNIQUE(slackChannelId, ts) + `onConflictDoNothing`으로 중복 저장하지 않는다. channels/users는
-  `onConflictDoUpdate`(이름 갱신), threads는 재계산 upsert. 즉 재import 후 `messageCount`는 불변.
+- **소유자 전용(PRD §26)**: 모든 조회와 메시지 변경은 `workspaces.ownerUserId == 요청자`를
+  서비스 계층에서 강제한다. 비소유자(가족 구성원 포함)는 `403`, 목록에서는 미노출된다.
+- **멱등(ADR-0011 §3)**: 재업로드는 새 `importId`를 만들지만 `(slackChannelId, ts)` change-set으로
+  생성·편집·삭제를 한 번만 반영한다. 동일 source job 재시도는 빈 change-set이 되어 event를 늘리지 않는다.
+- **삭제 범위**: `merge`의 누락 행은 보존한다. `snapshot`도 `channels[]`에 없는 채널은 건드리지 않는다.
+  기존 tombstone 복구가 필요하면 별도 복구 정책/API가 필요하며 import는 자동 복구하지 않는다.
+- **편집 순서**: 현재 메시지보다 `editedTs`가 없거나 오래된 수신 편집은 무시해 과거 export가 최신 값을
+  덮지 못하게 한다.
 
 ---
 

@@ -17,7 +17,9 @@ import type {
   CardSummary,
   CardUpdateRequest,
   CategoryBreakdown,
+  CategoryCreateRequest,
   CategorySummary,
+  CategoryUpdateRequest,
   DeviceRegisterRequest,
   DeviceSecretResponse,
   DeviceSummary,
@@ -29,6 +31,7 @@ import type {
   LinkCancellationRequest,
   LoginRequest,
   MemberBreakdown,
+  MemberColorUpdateRequest,
   MemberRoleUpdateRequest,
   MemberSummary,
   MeResponse,
@@ -46,6 +49,12 @@ import type {
   FinanceQueryRequest,
   FinanceQueryResponse,
   MonthlyInsightsResponse,
+  MerchantLabelCandidateListResponse,
+  LearningOperationsMetricsResponse,
+  PushSubscriptionRegisterRequest,
+  PushSubscriptionResponse,
+  NotificationPreferences,
+  NotificationPreferencesUpdateRequest,
 } from "@family/contracts";
 
 import { isNative } from "./native";
@@ -53,6 +62,9 @@ import { isNative } from "./native";
 /** API 베이스 URL. 환경변수 우선, 로컬 개발 기본값 fallback. */
 const API =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+
+/** apiFetch 밖에서 직접 연결이 필요한 경우(SSE 스트림 등)에 쓰는 베이스 URL. */
+export const API_BASE_URL = API;
 
 /** access token 타입 별칭(메모리 보관, 없을 수 있음). */
 export type AccessToken = string | null;
@@ -266,6 +278,16 @@ export const api = {
         body,
         accessToken,
       }),
+    updateColor: (
+      accessToken: AccessToken,
+      id: string,
+      memberId: string,
+      body: MemberColorUpdateRequest,
+    ) =>
+      apiFetch<MemberSummary>(
+        `/v1/households/${id}/members/${memberId}/color`,
+        { method: "PATCH", body, accessToken },
+      ),
     removeMember: (accessToken: AccessToken, id: string, memberId: string) =>
       apiFetch<{ removed: true }>(
         `/v1/households/${id}/members/${memberId}`,
@@ -280,6 +302,36 @@ export const api = {
         `/v1/households/${id}/invitations/${invitationId}`,
         { method: "DELETE", accessToken },
       ),
+  },
+
+  notifications: {
+    subscribe: (
+      accessToken: AccessToken,
+      body: PushSubscriptionRegisterRequest,
+    ) =>
+      apiFetch<PushSubscriptionResponse>("/v1/notifications/subscriptions", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    unsubscribe: (accessToken: AccessToken, token: string) =>
+      apiFetch<{ removed: true }>(
+        `/v1/notifications/subscriptions/${encodeURIComponent(token)}`,
+        { method: "DELETE", accessToken },
+      ),
+    getPreferences: (accessToken: AccessToken) =>
+      apiFetch<NotificationPreferences>("/v1/notifications/preferences", {
+        accessToken,
+      }),
+    updatePreferences: (
+      accessToken: AccessToken,
+      body: NotificationPreferencesUpdateRequest,
+    ) =>
+      apiFetch<NotificationPreferences>("/v1/notifications/preferences", {
+        method: "PUT",
+        body,
+        accessToken,
+      }),
   },
 
   devices: {
@@ -335,6 +387,20 @@ export const api = {
         `/v1/categories${buildQuery({ householdId })}`,
         { accessToken },
       ),
+    create: (accessToken: AccessToken, body: CategoryCreateRequest) =>
+      apiFetch<CategorySummary>("/v1/categories", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    update: (accessToken: AccessToken, id: string, body: CategoryUpdateRequest) =>
+      apiFetch<CategorySummary>(`/v1/categories/${id}`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
+    delete: (accessToken: AccessToken, id: string) =>
+      apiFetch<void>(`/v1/categories/${id}`, { method: "DELETE", accessToken }),
   },
 
   transactions: {
@@ -345,6 +411,15 @@ export const api = {
       ),
     get: (accessToken: AccessToken, id: string) =>
       apiFetch<TransactionSummary>(`/v1/transactions/${id}`, { accessToken }),
+    labelCandidates: (
+      accessToken: AccessToken,
+      householdId: string,
+      limit = 20,
+    ) =>
+      apiFetch<MerchantLabelCandidateListResponse>(
+        `/v1/transactions/merchant-label-candidates${buildQuery({ householdId, limit })}`,
+        { accessToken },
+      ),
     update: (
       accessToken: AccessToken,
       id: string,
@@ -464,6 +539,18 @@ export const api = {
     ) =>
       apiFetch<MonthlyInsightsResponse>(
         `/v1/ai/monthly-insights${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+  },
+
+  learning: {
+    /** owner/admin용 원문 없는 AI 파이프라인 운영 집계. */
+    operationsMetrics: (
+      accessToken: AccessToken,
+      params: { householdId: string; windowHours?: number },
+    ) =>
+      apiFetch<LearningOperationsMetricsResponse>(
+        `/v1/learning/operations/metrics${buildQuery({ ...params })}`,
         { accessToken },
       ),
   },

@@ -15,6 +15,8 @@ out/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.prod
 
 # Logs
 *.log
@@ -26,6 +28,9 @@ yarn-error.log*
 # Test coverage
 coverage/
 
+# 운영 논리 백업(DB 덤프·MinIO 객체). 민감 데이터이므로 절대 커밋하지 않는다.
+backups/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -36,3 +41,4 @@ Thumbs.db
 *.swp
 *.tsbuildinfo
 .claude/scheduled_tasks.lock
+.gstack/

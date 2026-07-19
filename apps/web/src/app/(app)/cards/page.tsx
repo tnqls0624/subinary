@@ -22,6 +22,7 @@ import type {
   CardSummary,
   CardUpdateRequest,
   CardVisibility,
+  MemberColor,
 } from "@family/contracts";
 
 import {
@@ -70,7 +71,13 @@ import { ListRow, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
-import { queryKeys, useCardList, useHouseholdMembers } from "@/lib/queries";
+import {
+  invalidateTransactionScope,
+  queryKeys,
+  useCardList,
+  useHouseholdMembers,
+} from "@/lib/queries";
+import { memberColorClass } from "@/lib/member-color";
 
 /** 표준 카드사 목록 — 분석 라벨('alias · issuer') 표기 일관성을 위해 자유입력 대신 고정. */
 const ISSUER_OPTIONS = [
@@ -144,6 +151,13 @@ export default function CardsPage() {
       membersQuery.data?.find((m) => m.userId === user?.id)?.memberId ?? null,
     [membersQuery.data, user?.id],
   );
+
+  // 구성원이 직접 고른 색(memberId → 팔레트 키). 없으면 해시 색 폴백.
+  const memberColorById = useMemo(() => {
+    const map = new Map<string, MemberColor | null>();
+    for (const m of membersQuery.data ?? []) map.set(m.memberId, m.color);
+    return map;
+  }, [membersQuery.data]);
   const isManagerRole = MANAGER_ROLES.includes(
     activeMembership?.role as (typeof MANAGER_ROLES)[number],
   );
@@ -186,6 +200,8 @@ export default function CardsPage() {
     });
     // 카드별 집계(CardBreakdown)의 alias·issuer 라벨/합계 갱신.
     void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    // card 스코프 예산의 scopeLabel이 카드 별칭을 임베드 → 별칭 변경 시 함께 갱신.
+    void queryClient.invalidateQueries({ queryKey: ["budgets"] });
   };
 
   const createMutation = useMutation({
@@ -193,10 +209,9 @@ export default function CardsPage() {
       authedFetch((token) => api.cards.create(token, body)),
     onSuccess: (result) => {
       invalidateCards();
-      // 소급 연결(backfill)이 과거 거래를 건드렸으면 목록/집계도 갱신하고 알린다.
+      // 소급 연결(backfill)이 과거 거래를 건드렸으면 거래 스코프 전체를 갱신하고 알린다.
       if (result.linkedTransactionCount > 0) {
-        void queryClient.invalidateQueries({ queryKey: ["transactions"] });
-        void queryClient.invalidateQueries({ queryKey: ["budgets"] });
+        invalidateTransactionScope(queryClient);
         toast.success(
           `과거 거래 ${result.linkedTransactionCount}건을 이 카드에 연결했어요.`,
         );
@@ -340,6 +355,10 @@ export default function CardsPage() {
                     <ListRow
                       className="min-w-0 flex-1"
                       icon={<CreditCard />}
+                      iconClassName={memberColorClass(
+                        c.ownerMemberId,
+                        memberColorById.get(c.ownerMemberId),
+                      )}
                       title={c.alias}
                       subtitle={subtitle}
                       valueSub={<StatusBadge status={c.status} />}

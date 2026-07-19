@@ -18,8 +18,6 @@
  * is validated by the global `ZodValidationPipe` against the contract DTO. A
  * successful ingest replies `200 OK` (idempotent — a duplicate is still a 200).
  */
-import { createHash } from 'node:crypto';
-
 import {
   BadRequestException,
   Body,
@@ -41,7 +39,10 @@ import { Public } from '../auth/decorators/public.decorator';
 import { DeviceHmacGuard } from '../devices/device-hmac.guard';
 import { DeviceTokenGuard } from '../devices/device-token.guard';
 import { Device, type DeviceContext } from '../devices/decorators/device.decorator';
-import { CardSmsIngestService } from './card-sms-ingest.service';
+import {
+  CardSmsIngestService,
+  deriveCardSmsEventId,
+} from './card-sms-ingest.service';
 
 class CardSmsIngestDto extends createZodDto(cardSmsIngestRequestSchema) {}
 
@@ -119,15 +120,10 @@ export class CardSmsController {
     const text = typeof content === 'string' ? content : '';
     const sender = decodeHeader(senderHeader);
     // X-Event-Id 미지정 시 발신자+내용(+수신시각)을 해시해 결정적 생성(재전송 멱등).
-    const receivedAtTag = (receivedAtHeader ?? '').trim();
+    // JSON 경로(card-sms-token)의 서버측 파생과 동일 recipe를 공유한다.
     const eventId =
       (eventIdHeader ?? '').trim() ||
-      createHash('sha256')
-        .update(
-          `${sender}\n${text}${receivedAtTag ? `\n${receivedAtTag}` : ''}`,
-          'utf8',
-        )
-        .digest('hex');
+      deriveCardSmsEventId(sender, text, receivedAtHeader);
 
     const parsed = cardSmsIngestRequestSchema.safeParse({
       eventId,

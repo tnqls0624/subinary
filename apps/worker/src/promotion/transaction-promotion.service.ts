@@ -80,6 +80,8 @@ interface CancellationOutcome {
   status: TransactionStatus;
   linked: boolean;
   skipped: boolean;
+  /** 새로 삽입된 취소 거래 id(skip이면 null) — 알림 enqueue에 사용. */
+  transactionId: string | null;
 }
 
 @Injectable()
@@ -91,6 +93,9 @@ export class TransactionPromotionService {
     // 미분류 승격 시 LLM 카테고리 제안을 트리거하는 category-suggest 큐(생산자).
     @InjectQueue(QUEUE_NAMES.CATEGORY_SUGGEST)
     private readonly categorySuggestQueue: Queue,
+    // 새 거래 승격 시 푸시 알림을 트리거하는 notification-dispatch 큐(생산자).
+    @InjectQueue(QUEUE_NAMES.NOTIFICATION_DISPATCH)
+    private readonly notificationQueue: Queue,
     configService: ConfigService,
   ) {
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -160,8 +165,12 @@ export class TransactionPromotionService {
       return;
     }
 
-    // 3. 카드 자동연결(뒤 4자리) → cardId, visibility 상속.
-    const link = await this.resolveCard(event.householdId, event.maskedCardNumber);
+    // 3. 카드 자동연결(뒤 4자리 → 없으면 발급사 폴백) → cardId, visibility 상속.
+    const link = await this.resolveCard(
+      event.householdId,
+      event.maskedCardNumber,
+      event.issuer,
+    );
 
     // 4. 가맹점 정규화(원문 없으면 null).
     const merchantNormalized = event.merchantRaw
@@ -177,7 +186,7 @@ export class TransactionPromotionService {
 
     // 6/7. 거래유형별 승격.
     if (transactionType === 'approval') {
-      const status = await this.promoteApproval(
+      const { status, transactionId } = await this.promoteApproval(
         event,
         amount,
         link,
@@ -191,6 +200,10 @@ export class TransactionPromotionService {
       // 새로 승격됐고 미분류면 LLM 카테고리 제안을 enqueue(가맹점 단위 dedupe).
       if (status !== 'already_promoted' && categoryId === null) {
         await this.enqueueCategorySuggestion(event, merchantNormalized);
+      }
+      // 새로 승격된 거래는 푸시 알림을 enqueue(수신자/마스킹은 소비자가 결정).
+      if (status !== 'already_promoted' && transactionId) {
+        await this.enqueueNotification(event.householdId, transactionId);
       }
       return;
     }
@@ -214,6 +227,9 @@ export class TransactionPromotionService {
     if (!outcome.skipped && categoryId === null) {
       await this.enqueueCategorySuggestion(event, merchantNormalized);
     }
+    if (!outcome.skipped && outcome.transactionId) {
+      await this.enqueueNotification(event.householdId, outcome.transactionId);
+    }
   }
 
   /* ---------------------------------------------------------------------- */
@@ -234,7 +250,10 @@ export class TransactionPromotionService {
     link: CardLink,
     merchantNormalized: string | null,
     categoryId: string | null,
-  ): Promise<TransactionStatus | 'already_promoted'> {
+  ): Promise<{
+    status: TransactionStatus | 'already_promoted';
+    transactionId: string | null;
+  }> {
     // 모호 매칭은 cardId=null이라 중복 판정 기준(카드)이 없고, '어느 카드인지 미정'
     // 자체가 검토 대상이므로 중복 검사를 건너뛰고 pending_review로 확정한다.
     let status: TransactionStatus;
@@ -279,7 +298,9 @@ export class TransactionPromotionService {
       .onConflictDoNothing({ target: schema.cardTransactions.sourceEventId })
       .returning({ id: schema.cardTransactions.id });
 
-    return inserted ? status : 'already_promoted';
+    return inserted
+      ? { status, transactionId: inserted.id }
+      : { status: 'already_promoted', transactionId: null };
   }
 
   /**
@@ -379,7 +400,12 @@ export class TransactionPromotionService {
 
       if (!inserted) {
         // 이미 승격됨 → 승인 잔액을 건드리지 않는다(멱등).
-        return { status: 'pending_review', linked: false, skipped: true };
+        return {
+          status: 'pending_review',
+          linked: false,
+          skipped: true,
+          transactionId: null,
+        };
       }
 
       // 대응 승인 탐색: 같은 household/card, 승인, 미완료(approved|partially_cancelled),
@@ -416,7 +442,12 @@ export class TransactionPromotionService {
 
       // 유일 매칭만 연결한다. 0개/2개 이상은 애매 → 취소 거래를 pending_review로 유지.
       if (matches.length !== 1) {
-        return { status: 'pending_review', linked: false, skipped: false };
+        return {
+          status: 'pending_review',
+          linked: false,
+          skipped: false,
+          transactionId: inserted.id,
+        };
       }
 
       const approval = matches[0];
@@ -446,7 +477,12 @@ export class TransactionPromotionService {
         })
         .where(eq(schema.cardTransactions.id, inserted.id));
 
-      return { status: approvalStatus, linked: true, skipped: false };
+      return {
+        status: approvalStatus,
+        linked: true,
+        skipped: false,
+        transactionId: inserted.id,
+      };
     });
   }
 
@@ -469,16 +505,13 @@ export class TransactionPromotionService {
   private async resolveCard(
     householdId: string,
     maskedCardNumber: string | null,
+    issuer: string | null,
   ): Promise<CardLink> {
-    const tail = lastFourDigits(maskedCardNumber);
-    if (!tail) {
-      return { cardId: null, visibility: 'household', ambiguous: false };
-    }
-
     const cards = await this.db
       .select({
         id: schema.paymentCards.id,
         maskedNumber: schema.paymentCards.maskedNumber,
+        issuer: schema.paymentCards.issuer,
         visibility: schema.paymentCards.visibility,
       })
       .from(schema.paymentCards)
@@ -488,6 +521,29 @@ export class TransactionPromotionService {
           eq(schema.paymentCards.status, 'active'),
         ),
       );
+
+    const tail = lastFourDigits(maskedCardNumber);
+    if (!tail) {
+      // 카드번호가 없는 문자(네이버 현대카드·모바일 결제 등) → 발급사 기준 폴백.
+      // 같은 발급사 활성 카드가 정확히 1장일 때만 연결(모호하면 종전대로 미연결
+      // approved). 발급사가 일반 '카드'(정규화 시 null)면 매칭하지 않는다.
+      const issuerKey = normalizeIssuer(issuer);
+      if (!issuerKey) {
+        return { cardId: null, visibility: 'household', ambiguous: false };
+      }
+      const issuerMatches = cards.filter(
+        (card) => normalizeIssuer(card.issuer) === issuerKey,
+      );
+      if (issuerMatches.length === 1) {
+        return {
+          cardId: issuerMatches[0].id,
+          visibility: issuerMatches[0].visibility,
+          ambiguous: false,
+        };
+      }
+      // 0장 또는 2장 이상(어느 카드인지 모호) → 종전 동작(미연결, approved).
+      return { cardId: null, visibility: 'household', ambiguous: false };
+    }
 
     const matches = cards.filter(
       (card) => lastFourDigits(card.maskedNumber) === tail,
@@ -608,6 +664,30 @@ export class TransactionPromotionService {
       );
     }
   }
+
+  /**
+   * 새로 승격된 거래에 대해 푸시 알림 잡을 enqueue 한다(수신자 해석·마스킹·선호
+   * 필터는 소비자가 담당). jobId=`notif_${transactionId}`로 재승격/경합의 중복
+   * enqueue 를 흡수한다. enqueue 실패는 승격을 실패시키지 않는다(best-effort —
+   * 앱 내 SSE/폴링이 안전망). 페이로드에 PII 없음(식별자만).
+   */
+  private async enqueueNotification(
+    householdId: string,
+    transactionId: string,
+  ): Promise<void> {
+    try {
+      await this.notificationQueue.add(
+        'dispatch',
+        { transactionId, householdId },
+        { jobId: `notif_${transactionId}`, removeOnComplete: true },
+      );
+    } catch {
+      this.logger.warn(
+        { transactionId },
+        'notification enqueue failed; push skipped (in-app still updates)',
+      );
+    }
+  }
 }
 
 /**
@@ -636,4 +716,18 @@ function lastFourDigits(value: string | null): string | null {
     return null;
   }
   return digits.slice(-CARD_TAIL_LENGTH);
+}
+
+/**
+ * 발급사 비교용 정규화 키. 파서/이벤트는 `현대카드`, 등록 카드는 `현대`처럼 '카드'
+ * 접미사 유무가 달라 직접 비교가 안 되므로 공백·접미사를 제거해 맞춘다.
+ * 파서가 발급사를 특정하지 못한 일반 `카드`는 정규화 시 빈 문자열이 되어(→ null)
+ * 임의 카드에 잘못 붙지 않도록 매칭에서 제외된다.
+ */
+function normalizeIssuer(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const key = value.replace(/\s+/g, '').replace(/카드$/, '');
+  return key.length > 0 ? key : null;
 }

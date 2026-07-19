@@ -4,6 +4,10 @@
  *
  * - 구성원 = ListRow(이니셜 원형 아바타 · 이름 · 이메일 subtitle · 역할
  *   Select(소유자만)/역할 라벨 + 상태 배지) + 나가기/내보내기.
+ * - 아바타 클릭 = 구성원 색상 선택(본인, 또는 소유자·관리자는 모두). 색은 거래·
+ *   카드 아이콘 배경으로 전 화면에서 쓰인다. null = 자동(해시) 색.
+ * - 우측 액션(나가기/내보내기/취소)은 고정폭 슬롯에 두어, 버튼 유무와 무관하게
+ *   행의 값 칼럼이 세로로 정렬되게 한다(관리자 화면 어긋남 방지).
  * - "초대하기" 주 CTA(소유자) → 초대 Dialog(기존 RHF 폼 이동, 로직 보존).
  * - 대기 초대 = ListRow + 취소. 토큰/링크 1회 노출 Dialog + 복사 보존.
  * 권한은 서버에서도 강제(PRD §26). 여기서는 UI 노출/비활성으로 보조.
@@ -22,6 +26,7 @@ import type {
   InvitationCreated,
   InvitationCreateRequest,
   InvitationSummary,
+  MemberColor,
   MemberSummary,
 } from "@family/contracts";
 
@@ -52,6 +57,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Form,
   FormControl,
   FormField,
@@ -72,8 +83,16 @@ import { ListRow, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
+import {
+  MEMBER_COLOR_KEYS,
+  MEMBER_COLOR_LABELS,
+  MEMBER_COLOR_SWATCH_CLASSES,
+  memberColorClass,
+} from "@/lib/member-color";
 import { useHouseholdMembers } from "@/lib/queries";
 import { formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { publicWebUrl } from "@/lib/web-url";
 
 const ROLE_LABEL: Record<HouseholdRole, string> = {
   owner: "소유자",
@@ -183,6 +202,24 @@ export default function HouseholdPage() {
       toast.error(errorMessage(error, "역할을 변경하지 못했어요.")),
   });
 
+  const colorMutation = useMutation({
+    mutationFn: (input: { memberId: string; color: MemberColor | null }) =>
+      authedFetch((token) =>
+        api.households.updateColor(
+          token,
+          householdId as string,
+          input.memberId,
+          { color: input.color },
+        ),
+      ),
+    onSuccess: () => {
+      void invalidateMembers();
+      toast.success("색상을 변경했어요.");
+    },
+    onError: (error) =>
+      toast.error(errorMessage(error, "색상을 변경하지 못했어요.")),
+  });
+
   const removeMutation = useMutation({
     mutationFn: (memberId: string) =>
       authedFetch((token) =>
@@ -221,10 +258,8 @@ export default function HouseholdPage() {
   }
 
   function inviteLink(c: InvitationCreated): string {
-    const path = `/join?token=${encodeURIComponent(c.token)}`;
-    return typeof window !== "undefined"
-      ? `${window.location.origin}${path}`
-      : path;
+    // 공개 웹 도메인 기준 — 앱(Capacitor) origin은 localhost라 쓸 수 없다.
+    return publicWebUrl(`/join?token=${encodeURIComponent(c.token)}`);
   }
 
   async function copyLink() {
@@ -251,6 +286,17 @@ export default function HouseholdPage() {
   const members = membersQuery.data ?? [];
   const invitations = invitationsQuery.data ?? [];
   const busy = removeMutation.isPending || revokeMutation.isPending;
+
+  // 행마다 버튼 유무가 달라도 값 칼럼이 정렬되도록, 액션이 하나라도 있으면
+  // 모든 행에 같은 폭의 슬롯을 둔다(없으면 슬롯 자체를 생략해 폭 낭비 방지).
+  const hasMemberAction = members.some(
+    (m) =>
+      m.status === "active" &&
+      m.role !== "owner" &&
+      (isOwner || m.userId === user?.id),
+  );
+  const hasInvitationAction =
+    isOwner && invitations.some((i) => i.status === "pending");
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -308,15 +354,83 @@ export default function HouseholdPage() {
                   m.status === "active" &&
                   m.role !== "owner" &&
                   (isOwner || isSelf);
+                // 색상은 본인, 또는 소유자·관리자가 아무 구성원이나 변경.
+                const canEditColor =
+                  m.status === "active" &&
+                  (isSelf || myRole === "owner" || myRole === "admin");
                 return (
                   <div key={m.memberId} className="flex items-center gap-1">
                     <ListRow
                       className="min-w-0 flex-1"
                       icon={
-                        <span className="text-sm font-semibold">
-                          {m.name.slice(0, 1) || "?"}
-                        </span>
+                        canEditColor ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label={`${m.name} 색상 변경`}
+                                className="flex size-10 items-center justify-center rounded-full text-sm font-semibold transition-transform hover:scale-105 active:scale-95"
+                              >
+                                {m.name.slice(0, 1) || "?"}
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="start"
+                              className="w-auto min-w-0 p-2"
+                            >
+                              {/* 견본은 DropdownMenuItem — 화살표 키 순회/자동 닫힘/menuitem
+                                  시맨틱을 그대로 얻는다(일반 버튼이면 키보드 접근 불가). */}
+                              <div className="grid grid-cols-4 gap-1">
+                                {MEMBER_COLOR_KEYS.map((key) => (
+                                  <DropdownMenuItem
+                                    key={key}
+                                    aria-label={`${MEMBER_COLOR_LABELS[key]} 색상 선택`}
+                                    disabled={colorMutation.isPending}
+                                    className="justify-center rounded-full p-1.5"
+                                    onSelect={() => {
+                                      if (m.color !== key) {
+                                        colorMutation.mutate({
+                                          memberId: m.memberId,
+                                          color: key,
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <span
+                                      aria-hidden="true"
+                                      className={cn(
+                                        "size-6 rounded-full",
+                                        MEMBER_COLOR_SWATCH_CLASSES[key],
+                                        m.color === key &&
+                                          "ring-ring ring-offset-background ring-2 ring-offset-2",
+                                      )}
+                                    />
+                                  </DropdownMenuItem>
+                                ))}
+                              </div>
+                              <DropdownMenuItem
+                                disabled={
+                                  colorMutation.isPending || m.color === null
+                                }
+                                className="text-muted-foreground mt-1 justify-center text-[13px] font-medium"
+                                onSelect={() =>
+                                  colorMutation.mutate({
+                                    memberId: m.memberId,
+                                    color: null,
+                                  })
+                                }
+                              >
+                                자동 색상으로
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : (
+                          <span className="text-sm font-semibold">
+                            {m.name.slice(0, 1) || "?"}
+                          </span>
+                        )
                       }
+                      iconClassName={memberColorClass(m.memberId, m.color)}
                       title={
                         isSelf ? (
                           <span className="inline-flex items-center gap-1.5">
@@ -372,22 +486,26 @@ export default function HouseholdPage() {
                       }
                       valueSub={<StatusBadge status={m.status} />}
                     />
-                    {canRemove ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive shrink-0 px-2"
-                        disabled={busy}
-                        onClick={() =>
-                          setConfirm({
-                            type: isSelf ? "leave" : "remove",
-                            member: m,
-                          })
-                        }
-                      >
-                        {isSelf ? "나가기" : "내보내기"}
-                      </Button>
+                    {hasMemberAction ? (
+                      <div className="flex w-[72px] shrink-0 justify-end">
+                        {canRemove ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive px-2"
+                            disabled={busy}
+                            onClick={() =>
+                              setConfirm({
+                                type: isSelf ? "leave" : "remove",
+                                member: m,
+                              })
+                            }
+                          >
+                            {isSelf ? "나가기" : "내보내기"}
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 );
@@ -463,19 +581,23 @@ export default function HouseholdPage() {
                       subtitle={`${ROLE_LABEL[i.role]} 초대 · ${formatDate(i.expiresAt)}까지`}
                       valueSub={<StatusBadge status={i.status} />}
                     />
-                    {isOwner && i.status === "pending" ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive shrink-0 px-2"
-                        disabled={busy}
-                        onClick={() =>
-                          setConfirm({ type: "revoke", invitation: i })
-                        }
-                      >
-                        취소
-                      </Button>
+                    {hasInvitationAction ? (
+                      <div className="flex w-12 shrink-0 justify-end">
+                        {i.status === "pending" ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive px-2"
+                            disabled={busy}
+                            onClick={() =>
+                              setConfirm({ type: "revoke", invitation: i })
+                            }
+                          >
+                            취소
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 ))}

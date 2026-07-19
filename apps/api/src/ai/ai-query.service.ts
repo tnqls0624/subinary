@@ -17,11 +17,14 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import type { ProviderSet } from '@family/ai-providers';
+import type { LlmProvider, ProviderSet } from '@family/ai-providers';
 import type { RetrievalResponse, WorkQueryResponse } from '@family/contracts';
+import { createHash } from 'node:crypto';
+import { MODEL_SERVING_TASKS } from '@family/shared';
 
+import { ModelServingService } from '../model-serving/model-serving.service';
 import { RetrievalService } from '../retrieval/retrieval.service';
-import { AI_PROVIDERS } from './ai.constants';
+import { AI_CANDIDATE_LLM, AI_PROVIDERS } from './ai.constants';
 
 /** Human-readable reason returned when a query lacks grounding evidence. */
 const REFUSAL_REASON = '근거를 찾지 못했습니다';
@@ -46,6 +49,9 @@ export class AiQueryService {
   constructor(
     private readonly retrieval: RetrievalService,
     @Inject(AI_PROVIDERS) private readonly providers: ProviderSet,
+    @Inject(AI_CANDIDATE_LLM)
+    private readonly candidateLlm: LlmProvider | null,
+    private readonly modelServing: ModelServingService,
   ) {}
 
   /**
@@ -79,18 +85,35 @@ export class AiQueryService {
 
     // Re-verify ownership immediately before the LLM sees any context (PRD §26).
     await this.retrieval.assertOwnedWorkspace(userId, workspaceId);
-
     const context = result.items.map((it) => ({
       id: it.chunkId,
       text: it.text,
     }));
-    const generated = await this.providers.llm.generate({
-      question,
-      context,
-      // Fallback prompt for providers that do not read `context` directly; the
-      // mock keys on `context`, so its answer cites the passages.
-      prompt: buildPrompt(question, context),
-    });
+    const routingKey = createHash('sha256')
+      .update(workspaceId, 'utf8')
+      .update('\0', 'utf8')
+      .update(userId, 'utf8')
+      .update('\0', 'utf8')
+      .update(question, 'utf8')
+      .digest('hex');
+    const generated = await this.modelServing.generateLlm(
+      { workspaceId },
+      MODEL_SERVING_TASKS.RAG_ANSWER,
+      routingKey,
+      this.providers.llm,
+      this.candidateLlm,
+      {
+        question,
+        context,
+        // Fallback prompt for providers that do not read `context` directly; the
+        // mock keys on `context`, so its answer cites the passages.
+        prompt: buildPrompt(question, context),
+        metadata: {
+          task: 'rag-work-query',
+          promptVersion: 'grounded-answer-v1',
+        },
+      },
+    );
 
     const citations = result.items.map((it) => it.citation);
     this.logger.log(

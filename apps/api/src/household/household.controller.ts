@@ -24,6 +24,7 @@ import {
   householdCreateRequestSchema,
   householdUpdateRequestSchema,
   invitationCreateRequestSchema,
+  memberColorUpdateRequestSchema,
   memberRoleUpdateRequestSchema,
   type HouseholdSummary,
   type InvitationCreated,
@@ -41,6 +42,7 @@ class HouseholdCreateDto extends createZodDto(householdCreateRequestSchema) {}
 class HouseholdUpdateDto extends createZodDto(householdUpdateRequestSchema) {}
 class InvitationCreateDto extends createZodDto(invitationCreateRequestSchema) {}
 class MemberRoleUpdateDto extends createZodDto(memberRoleUpdateRequestSchema) {}
+class MemberColorUpdateDto extends createZodDto(memberColorUpdateRequestSchema) {}
 
 @Controller('households')
 export class HouseholdController {
@@ -113,6 +115,22 @@ export class HouseholdController {
     @Body() dto: MemberRoleUpdateDto,
   ): Promise<MemberSummary> {
     return this.householdService.updateMemberRole(
+      id,
+      user.userId,
+      memberId,
+      dto,
+    );
+  }
+
+  /** PATCH /v1/households/:id/members/:memberId/color — accent color (self or owner/admin). */
+  @Patch(':id/members/:memberId/color')
+  updateMemberColor(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Body() dto: MemberColorUpdateDto,
+  ): Promise<MemberSummary> {
+    return this.householdService.updateMemberColor(
       id,
       user.userId,
       memberId,

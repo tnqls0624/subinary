@@ -6,11 +6,9 @@
  * acting user. Family members are *not* granted access — a non-owner always
  * receives a 403 ({@link requireOwnedSlackWorkspace}).
  *
- * Import is idempotent (spec §1.3): each upload creates a fresh `source_items`
- * row + MinIO bundle and enqueues a `slack-import` job, but re-importing the same
- * export reuses the same `slack_workspaces` row (matched by Slack team id, or by
- * name when the export carries none) so the worker's
- * `UNIQUE(slackChannelId, ts)` collision drops duplicate messages.
+ * Import는 upload마다 새 `source_items`와 MinIO 원본을 만들되 동일
+ * `slack_workspaces`를 재사용한다. Worker는 `(slackChannelId, ts)` change-set으로
+ * merge/snapshot을 멱등 적용하고 기존 tombstone을 자동 복구하지 않는다.
  *
  * Secret hygiene (spec §0 / §1): the bundle text, message bodies, and any PII
  * are never logged — only counts, hashes (truncated), and identifiers are
@@ -18,7 +16,6 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import { InjectQueue } from '@nestjs/bullmq';
 import {
   BadRequestException,
   ForbiddenException,
@@ -27,7 +24,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Queue } from 'bullmq';
 import {
   and,
   asc,
@@ -44,6 +40,7 @@ import {
 } from 'drizzle-orm';
 
 import type {
+  SlackImportSyncMode,
   SlackImportResponse,
   SlackMessageListResponse,
   SlackMessageSummary,
@@ -51,7 +48,7 @@ import type {
   SlackWorkspaceSummary,
 } from '@family/contracts';
 import { schema, type Db } from '@family/database';
-import { QUEUE_NAMES } from '@family/shared';
+import { OUTBOX_EVENT_TYPES } from '@family/shared';
 
 import { DB } from '../database/database.constants';
 import { ObjectStorageService } from '../storage/object-storage.service';
@@ -115,6 +112,7 @@ export interface SlackImportFields {
   mySlackUserId?: string;
   workspaceName?: string;
   kind?: string;
+  syncMode?: string;
 }
 
 /** Query parameters for `GET /v1/slack/messages` (all raw strings). */
@@ -142,7 +140,6 @@ export class SlackService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
-    @InjectQueue(QUEUE_NAMES.SLACK_IMPORT) private readonly importQueue: Queue,
   ) {}
 
   /* ---------------------------------------------------------------------- */
@@ -150,10 +147,10 @@ export class SlackService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * Ingests a Slack export bundle for `userId`. Persists the raw bundle to
-   * MinIO + a `source_items` record and enqueues an asynchronous parse job. The
-   * full structural validation is the worker's `parseSlackExport`; here we only
-   * shallow-parse the JSON to resolve the target workspace.
+   * `userId`의 Slack export bundle을 수집한다. MinIO 원본, `source_items`,
+   * transactional outbox event를 저장한다. 전체 구조 검증은 Worker의
+   * `parseSlackExport`가 담당하며 여기서는 대상 workspace 결정을 위한 얕은 JSON
+   * 파싱만 수행한다.
    */
   async import(
     userId: string,
@@ -162,6 +159,7 @@ export class SlackService {
   ): Promise<SlackImportResponse> {
     const bundle = this.parseBundleShallow(fileBuffer);
     const kind = this.resolveKind(fields.kind);
+    const syncMode = this.resolveSyncMode(fields.syncMode);
 
     const bundleWorkspace =
       isRecord(bundle) && isRecord(bundle.workspace) ? bundle.workspace : {};
@@ -206,33 +204,63 @@ export class SlackService {
       'application/json; charset=utf-8',
     );
 
-    await this.db.insert(schema.sourceItems).values({
-      id: sourceItemId,
-      // Slack 원문은 workspace 소유(householdId 아님, PRD §3.6). 범용 workspaces.id 사용.
-      workspaceId: workspace.workspaceId,
-      kind: 'slack',
-      objectKey,
-      contentHash,
-      sizeBytes,
-      receivedAt: new Date(),
+    const receivedAt = new Date();
+    await this.db.transaction(async (tx) => {
+      await tx.insert(schema.sourceItems).values({
+        id: sourceItemId,
+        // Slack 원문은 workspace 소유(householdId 아님, PRD §3.6). 범용 workspaces.id 사용.
+        workspaceId: workspace.workspaceId,
+        kind: 'slack',
+        objectKey,
+        contentHash,
+        sizeBytes,
+        receivedAt,
+      });
+      const [revision] = await tx
+        .insert(schema.sourceRevisions)
+        .values({
+          sourceItemId,
+          revision: 1,
+          objectKey,
+          contentHash,
+          sizeBytes,
+          parserSchemaVersion: 'slack-raw-v1',
+          consentScope: { mode: 'workspace-only', importSyncMode: syncMode },
+          validFrom: receivedAt,
+        })
+        .returning({ id: schema.sourceRevisions.id });
+      if (!revision) {
+        throw new Error('failed to create Slack source revision');
+      }
+      await tx
+        .update(schema.sourceItems)
+        .set({ currentRevisionId: revision.id })
+        .where(eq(schema.sourceItems.id, sourceItemId));
+      await tx.insert(schema.dataEvents).values({
+        aggregateType: 'source_item',
+        aggregateId: sourceItemId,
+        eventType: OUTBOX_EVENT_TYPES.SOURCE_SLACK_RECEIVED,
+        revisionId: revision.id,
+        workspaceId: workspace.workspaceId,
+        payload: {
+          sourceItemId,
+          slackWorkspaceId: workspace.id,
+          syncMode,
+        },
+        occurredAt: receivedAt,
+      });
     });
-
-    // Key the job by the source-item id so an accidental re-enqueue collapses at
-    // the BullMQ level too.
-    await this.importQueue.add(
-      'import',
-      { sourceItemId, slackWorkspaceId: workspace.id },
-      { jobId: sourceItemId },
-    );
 
     this.logger.log(
       `slack import accepted id=${sourceItemId} workspace=${workspace.id} ` +
-        `hash=${contentHash.slice(0, 12)} size=${sizeBytes} status=queued`,
+        `syncMode=${syncMode} hash=${contentHash.slice(0, 12)} ` +
+        `size=${sizeBytes} status=outbox_pending`,
     );
 
     return {
       importId: sourceItemId,
       slackWorkspaceId: workspace.id,
+      syncMode,
       status: 'queued',
     };
   }
@@ -414,7 +442,12 @@ export class SlackService {
       this.db
         .select({ count: countExpr })
         .from(schema.slackMessages)
-        .where(eq(schema.slackMessages.slackWorkspaceId, workspace.id)),
+        .where(
+          and(
+            eq(schema.slackMessages.slackWorkspaceId, workspace.id),
+            isNull(schema.slackMessages.deletedAt),
+          ),
+        ),
     ]);
 
     const channels = toInt(channelAgg[0]?.count);
@@ -465,6 +498,7 @@ export class SlackService {
 
     const conditions: SQL[] = [
       eq(schema.slackMessages.slackWorkspaceId, workspace.id),
+      isNull(schema.slackMessages.deletedAt),
     ];
     if (query.channelId) {
       conditions.push(eq(schema.slackMessages.slackChannelId, query.channelId));
@@ -539,9 +573,8 @@ export class SlackService {
 
   /**
    * Restores a single thread (owner-only): the root plus replies ordered by `ts`
-   * ascending (numeric comparison — Slack `ts` is not zero-padded). `replyCount`
-   * comes from the precomputed `slack_threads` row when present, else counts the
-   * non-root messages.
+   * ascending (numeric comparison — Slack `ts` is not zero-padded). Deleted
+   * messages are excluded and `replyCount` is derived from the same active rows.
    */
   async getThread(
     userId: string,
@@ -596,6 +629,7 @@ export class SlackService {
           eq(schema.slackMessages.slackWorkspaceId, workspace.id),
           eq(schema.slackMessages.slackChannelId, channelId),
           eq(schema.slackMessages.threadTs, threadTs),
+          isNull(schema.slackMessages.deletedAt),
         ),
       )
       .orderBy(
@@ -607,20 +641,9 @@ export class SlackService {
       this.toMessageSummary(row, workspace.mySlackUserId),
     );
 
-    const [thread] = await this.db
-      .select({ replyCount: schema.slackThreads.replyCount })
-      .from(schema.slackThreads)
-      .where(
-        and(
-          eq(schema.slackThreads.slackChannelId, channelId),
-          eq(schema.slackThreads.threadTs, threadTs),
-        ),
-      )
-      .limit(1);
-
-    const replyCount =
-      thread?.replyCount ??
-      messages.filter((m) => m.ts !== threadTs).length;
+    const replyCount = messages.filter(
+      (message) => message.ts !== threadTs,
+    ).length;
 
     return {
       threadTs,
@@ -679,6 +702,17 @@ export class SlackService {
       throw new BadRequestException('kind must be one of: personal, company');
     }
     return kind as WorkspaceKind;
+  }
+
+  /** 기본 merge, 명시적 snapshot만 번들 채널의 누락 메시지를 삭제로 판정한다. */
+  private resolveSyncMode(syncMode: string | undefined): SlackImportSyncMode {
+    if (syncMode === undefined || syncMode === '') {
+      return 'merge';
+    }
+    if (syncMode !== 'merge' && syncMode !== 'snapshot') {
+      throw new BadRequestException('syncMode must be one of: merge, snapshot');
+    }
+    return syncMode;
   }
 
   /** Clamps the requested page size to `[1, MAX_LIMIT]` (default 50). */

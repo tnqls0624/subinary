@@ -21,6 +21,7 @@ import {
   type AuthResult,
   type MeResponse,
 } from '@family/contracts';
+import { isTrustedNativeClient } from '@family/shared';
 
 import {
   REFRESH_COOKIE,
@@ -48,8 +49,8 @@ interface AckResponse {
  *
  * register/login/refresh are `@Public()`; logout/me/change-password require a
  * valid access token (enforced by the global {@link AccessTokenGuard}).
- * The opaque refresh token lives only in an HttpOnly cookie scoped to
- * `/v1/auth`; it is never returned in a response body.
+ * 웹의 opaque refresh token은 `/v1/auth` 범위 HttpOnly cookie에만 저장한다.
+ * 신뢰 가능한 Capacitor origin은 cookie 대신 응답 바디와 전용 헤더를 사용한다.
  */
 @Controller('auth')
 export class AuthController {
@@ -81,6 +82,7 @@ export class AuthController {
     const result = await this.authService.register(
       body,
       request.headers['user-agent'],
+      this.isMobileClient(request),
     );
     this.setRefreshCookie(reply, result.refresh.raw);
     return this.toAuthResult(request, result);
@@ -98,6 +100,7 @@ export class AuthController {
     const result = await this.authService.login(
       body,
       request.headers['user-agent'],
+      this.isMobileClient(request),
     );
     this.setRefreshCookie(reply, result.refresh.raw);
     return this.toAuthResult(request, result);
@@ -162,13 +165,19 @@ export class AuthController {
     return { success: true };
   }
 
-  /** true일 때 요청이 네이티브(Capacitor) 클라이언트에서 온 것으로 본다. */
+  /** platform 헤더와 WebView origin이 모두 일치할 때만 네이티브 요청으로 본다. */
   private isMobileClient(request: FastifyRequest): boolean {
-    return request.headers['x-client-platform'] === 'capacitor';
+    return isTrustedNativeClient({
+      platform: request.headers['x-client-platform'],
+      origin: request.headers.origin,
+    });
   }
 
   /** 네이티브가 X-Refresh-Token 헤더로 실어 보낸 refresh 토큰을 읽는다. */
   private headerRefreshToken(request: FastifyRequest): string | undefined {
+    if (!this.isMobileClient(request)) {
+      return undefined;
+    }
     const header = request.headers['x-refresh-token'];
     return Array.isArray(header) ? header[0] : header;
   }

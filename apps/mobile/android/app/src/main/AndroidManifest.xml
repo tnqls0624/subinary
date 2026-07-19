@@ -1,27 +1,49 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
+        <!-- adjustResize: 키보드 표시 시 WebView를 리사이즈해(팬 금지) 100dvh 기반
+             채팅 레이아웃이 키보드 위 영역으로 줄어들게 한다. API 35+ edge-to-edge
+             에서는 Capacitor 코어가 IME 인셋을 처리하므로 이 속성은 구버전(API 34↓)
+             기기의 pan/resize 비결정성을 없애는 용도다. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- 커스텀 스킴 딥링크(도메인 검증 불필요, 즉시 동작): familymemory://join?token=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="familymemory" />
+            </intent-filter>
+
+            <!-- HTTPS App Links: https://app.subinary.cloud/join?token=...
+                 앱이 링크를 가로채려면 도메인 소유 검증 필요:
+                 https://app.subinary.cloud/.well-known/assetlinks.json 배포(autoVerify).
+                 도메인은 실제 소유 도메인으로 교체할 것. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="app.subinary.cloud" android:pathPrefix="/join" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -29,9 +51,7 @@
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
     </application>
 

@@ -34,6 +34,7 @@ interface OpenAiEmbeddingApiResponse {
  * 입력 순서를 보존해 벡터 배열을 반환한다. 검증 미사용(스켈레톤).
  */
 export class OpenAiEmbeddingProvider implements EmbeddingProvider {
+  readonly provider = 'openai';
   readonly dimensions: number;
   readonly model: string;
   private readonly apiKey: string;

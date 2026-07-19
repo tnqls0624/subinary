@@ -23,6 +23,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import {
+  ActivityProvider,
+  useActivityStore,
+} from "@/components/activity-provider";
 import { Onboarding } from "@/components/onboarding";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -51,7 +55,7 @@ const RIGHT_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/more", label: "더보기", icon: LayoutGrid },
 ];
 /** '더보기' 탭이 활성으로 취급하는 관리 경로(하위 목적지 포함). */
-const MORE_PATHS = ["/more", "/household", "/cards", "/devices"];
+const MORE_PATHS = ["/more", "/household", "/cards", "/devices", "/categories"];
 
 function BrandMark() {
   return (
@@ -66,13 +70,15 @@ function BrandMark() {
   );
 }
 
-/** 일반 하단 탭 1개(홈/거래/예산/더보기). */
+/** 일반 하단 탭 1개(홈/거래/예산/더보기). badge는 미확인 새 거래 수(거래 탭). */
 function BottomTab({
   item,
   active,
+  badge = 0,
 }: {
   item: NavItem;
   active: boolean;
+  badge?: number;
 }) {
   const Icon = item.icon;
   return (
@@ -86,11 +92,21 @@ function BottomTab({
           : "text-muted-foreground hover:text-foreground",
       )}
     >
-      <Icon
-        className="size-5"
-        strokeWidth={active ? 2.4 : 1.8}
-        aria-hidden="true"
-      />
+      <span className="relative">
+        <Icon
+          className="size-5"
+          strokeWidth={active ? 2.4 : 1.8}
+          aria-hidden="true"
+        />
+        {badge > 0 ? (
+          <span
+            aria-label={`새 거래 ${badge}건`}
+            className="bg-destructive text-destructive-foreground absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+          >
+            {badge > 9 ? "9+" : badge}
+          </span>
+        ) : null}
+      </span>
       {item.label}
     </Link>
   );
@@ -105,15 +121,27 @@ function BottomNav({ pathname }: { pathname: string }) {
     pathname === href || pathname.startsWith(`${href}/`);
   const moreActive = MORE_PATHS.some((p) => isActive(p));
   const aiActive = isActive("/ai");
+  // 미확인 새 거래 배지(ActivityProvider가 갱신, 거래 탭 방문 시 해제).
+  const unseenCount = useActivityStore((s) => s.unseenCount);
 
   return (
+    // data-bottom-nav: 키보드 표시 중(html.kb-open) globals.css가 숨긴다.
+    // 콘텐츠 높이 h-20은 globals.css의 --app-tabbar-h(5rem)와 단일 출처로 동기 —
+    // 자연 높이(중앙 AI 버튼이 지배, ~78.5px)에 의존하면 기기·폰트별로 흔들려
+    // iPhone에서 입력바가 탭바 밑에 깔리는 회귀가 재발한다.
     <nav
       aria-label="주 메뉴"
+      data-bottom-nav
       className="bg-background/95 fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur"
     >
-      <div className="mx-auto grid w-full max-w-lg grid-cols-5 items-center">
+      <div className="mx-auto grid h-20 w-full max-w-lg grid-cols-5 items-center">
         {LEFT_ITEMS.map((item) => (
-          <BottomTab key={item.href} item={item} active={isActive(item.href)} />
+          <BottomTab
+            key={item.href}
+            item={item}
+            active={isActive(item.href)}
+            badge={item.href === "/transactions" ? unseenCount : 0}
+          />
         ))}
 
         {/* 중앙 AI 강조 버튼 */}
@@ -191,11 +219,13 @@ export default function AppLayout({
   if (memberships.length === 0) {
     return (
       <div className="flex min-h-dvh flex-col">
-        <header className="bg-background/90 sticky top-0 z-30 flex h-14 items-center justify-between border-b px-4 backdrop-blur">
-          <BrandMark />
-          <div className="flex items-center gap-1">
-            <ThemeToggle />
-            <UserMenu />
+        <header className="bg-background/90 sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] backdrop-blur">
+          <div className="flex h-14 items-center justify-between px-4">
+            <BrandMark />
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <UserMenu />
+            </div>
           </div>
         </header>
         <main className="flex-1 px-4">
@@ -207,22 +237,29 @@ export default function AppLayout({
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="bg-background/90 sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b px-4 backdrop-blur">
-        <div className="flex min-w-0 items-center gap-3">
-          <BrandMark />
-          <HouseholdSwitcher />
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <ThemeToggle />
-          <UserMenu />
+      {/* pt-[env(safe-area-inset-top)]: 상태바(노치) 영역만큼 헤더를 밀어 겹침 방지 */}
+      <header className="bg-background/90 sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="flex h-14 items-center justify-between gap-2 px-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandMark />
+            <HouseholdSwitcher />
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <ThemeToggle />
+            <UserMenu />
+          </div>
         </div>
       </header>
 
-      {/* 하단 탭바 높이만큼 pb 확보 */}
-      <main className="flex-1 px-4 pt-6 pb-28">
+      {/* 하단 탭바 높이(safe-area 포함)만큼 pb 확보 + 여유 1.5rem.
+          고정값(pb-28=112px)은 iPhone(inset 34px)에서 탭바 총높이(114px)보다 작아
+          마지막 콘텐츠가 탭바 밑에 깔렸다 — 변수 참조로 기기별 편차를 흡수한다. */}
+      <main className="flex-1 px-4 pt-6 pb-[calc(var(--app-tabbar-h)+1.5rem)]">
         {householdId ? children : <Onboarding />}
       </main>
 
+      {/* 전역 결제 활동 레이어 — SSE/폴링으로 새 거래를 감지해 무효화+토스트+배지. */}
+      <ActivityProvider />
       <BottomNav pathname={pathname} />
     </div>
   );

@@ -2,6 +2,11 @@
 
 > 이 문서는 PRD §4 논리 아키텍처를 요약하고, **Phase 0에서 실제로 구현된 컴포넌트**를 표기한다.
 > Phase 0의 단일 진실 소스는 [`docs/phase0-build-spec.md`](../phase0-build-spec.md)다.
+>
+> **상태 안내(2026-07-18):** 이 문서의 구현 상태 표는 Phase 0 기준의 역사적 개요다. 현재 저장소에는
+> Phase 10까지의 Slack/RAG/장기 기억/Temporal Graph/MCP 경로가 구현되어 있다. 현행 AI 파이프라인 분석과
+> 학습·평가 데이터 파이프라인 목표 설계와 P0~P3(격리 Training Runner·로컬 artifact 서빙 포함) 구현 상태는
+> [AI 학습 데이터 파이프라인](./ai-learning-data-pipeline.md)을 기준으로 한다.
 
 ## 1. 설계 원칙
 
@@ -122,5 +127,7 @@ LLM 호출도 Phase 0에서는 수행하지 않는다(계산은 SQL/앱 로직).
 - [ADR-0002 PostgreSQL + pgvector 채택](../adr/0002-use-postgresql-pgvector.md)
 - [ADR-0003 pnpm + Turborepo 모노레포](../adr/0003-monorepo-pnpm-turborepo.md)
 - [ADR-0004 모델 비종속 AI Provider](../adr/0004-model-agnostic-ai-providers.md)
+- [ADR-0017 버전·계보 중심 AI 학습 데이터 파이프라인](../adr/0017-versioned-ai-learning-data-pipeline.md)
+- [AI 학습 데이터 파이프라인 — 현행 분석과 목표 설계](./ai-learning-data-pipeline.md)
 - [Health/Dev API 명세](../api/health.md)
 - [Phase 0 빌드 스펙 (SSOT)](../phase0-build-spec.md)

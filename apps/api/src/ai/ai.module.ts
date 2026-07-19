@@ -1,16 +1,23 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { createProviders } from '@family/ai-providers';
+import {
+  createProviders,
+  instrumentProviders,
+  type LlmProvider,
+  type ProviderSet,
+} from '@family/ai-providers';
 import type { AppConfig } from '@family/config';
+import { createDbAiInvocationObserver, type Db } from '@family/database';
 
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { DB } from '../database/database.constants';
 import { RetrievalModule } from '../retrieval/retrieval.module';
 import { AiQueryController } from './ai-query.controller';
 import { AiQueryService } from './ai-query.service';
 import { FinanceAiController } from './finance-ai.controller';
 import { FinanceAiService } from './finance-ai.service';
-import { AI_PROVIDERS } from './ai.constants';
+import { AI_CANDIDATE_LLM, AI_PROVIDERS } from './ai.constants';
 
 /**
  * Model-agnostic AI provider boundary (PRD 3.4).
@@ -36,20 +43,62 @@ import { AI_PROVIDERS } from './ai.constants';
   providers: [
     {
       provide: AI_PROVIDERS,
-      inject: [ConfigService],
+      inject: [ConfigService, DB],
+      useFactory: (configService: ConfigService, db: Db): ProviderSet => {
+        const ai = configService.get<AppConfig['ai']>('ai');
+        const app = configService.get<AppConfig['app']>('app');
+        if (!ai || !app) {
+          throw new Error('AI/application configuration is missing');
+        }
+        const providers = createProviders({
+          ...ai,
+          strict: app.nodeEnv === 'production',
+        });
+        return instrumentProviders(providers, {
+          observer: createDbAiInvocationObserver(db),
+          defaultTask: 'api-ai',
+        });
+      },
+    },
+    {
+      provide: AI_CANDIDATE_LLM,
+      inject: [ConfigService, DB],
       useFactory: (
         configService: ConfigService,
-      ): ReturnType<typeof createProviders> => {
+        db: Db,
+      ): LlmProvider | null => {
         const ai = configService.get<AppConfig['ai']>('ai');
-        if (!ai) {
-          throw new Error('AI configuration is missing');
+        const app = configService.get<AppConfig['app']>('app');
+        if (!ai || !app) {
+          throw new Error('AI/application configuration is missing');
         }
-        return createProviders(ai);
+        if (
+          ai.candidateProvider === undefined ||
+          ai.candidateLlmModel === undefined ||
+          ai.candidateLlmModelRevision === undefined
+        ) {
+          return null;
+        }
+        const providers = createProviders({
+          provider: ai.candidateProvider,
+          llmModel: ai.candidateLlmModel,
+          ...(ai.candidateGeminiApiKey !== undefined ||
+          ai.geminiApiKey !== undefined
+            ? {
+                geminiApiKey: ai.candidateGeminiApiKey ?? ai.geminiApiKey,
+              }
+            : {}),
+          strict: app.nodeEnv === 'production',
+        });
+        return instrumentProviders(providers, {
+          observer: createDbAiInvocationObserver(db),
+          defaultTask: 'api-ai-candidate',
+        }).llm;
       },
     },
     AiQueryService,
     FinanceAiService,
   ],
-  exports: [AI_PROVIDERS],
+  exports: [AI_PROVIDERS, AI_CANDIDATE_LLM],
 })
 export class AiModule {}

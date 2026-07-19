@@ -13,9 +13,10 @@
  * and never imports `@family/database`, `@family/contracts` or drizzle. Callers
  * map {@link EntityDraft} onto `entities`
  * (`UNIQUE(workspaceId, type, canonicalName)`, upsert with `least(validFrom)`)
- * and {@link RelationshipDraft} onto `relationships`
- * (`UNIQUE(workspaceId, sourceEntityId, type, targetEntityId, sourceRefId)`,
- * insert-or-ignore), resolving `canonicalName → id` upstream.
+ * and {@link RelationshipDraft} onto revision-provenanced `relationships`
+ * (`sourceChunkRevisionId` + `extractorVersion` partial unique index), resolving
+ * `canonicalName → id` upstream. Entity occurrence provenance is stored in
+ * `graph_entity_mentions`.
  *
  * Logging discipline (spec §0): this module never logs; callers must log only
  * counts / identifiers, never chunk `text` or extracted names (potential PII).
@@ -237,7 +238,7 @@ function earlier(a: Date, b: Date): Date {
  *   (confidence {@link CONFIDENCE_WORKS_ON}) for each technology in the chunk.
  *
  * Duplicate relationships sharing `(sourceCanonical, type, targetCanonical,
- * sourceRefId)` are collapsed, mirroring the `relationships` uniqueness key.
+ * sourceRefId)` are collapsed before the caller adds chunk revision provenance.
  *
  * Pure and deterministic: no randomness, no clock, no I/O.
  */

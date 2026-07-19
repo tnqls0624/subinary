@@ -1,3 +1,28 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+allowBuilds:
+  '@swc/core': set this to true or false
+  esbuild: set this to true or false
+  msgpackr-extract: set this to true or false
+  sharp: set this to true or false
+
+# 로컬 macOS 검증과 Linux 운영 이미지 빌드가 같은 lockfile을 공유하므로
+# 네이티브 선택 의존성을 두 운영체제/주요 CPU용으로 함께 설치한다.
+supportedArchitectures:
+  os:
+    - darwin
+    - linux
+  cpu:
+    - arm64
+    - x64
+  libc:
+    - glibc
+
+# pnpm 10+ 공급망 보호에서 프로젝트가 직접 검증·사용하는 네이티브 빌드만 허용한다.
+onlyBuiltDependencies:
+  - "@swc/core"
+  - esbuild
+  - msgpackr-extract
+  - sharp

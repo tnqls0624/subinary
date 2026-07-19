@@ -1,0 +1,2 @@
+ALTER TABLE "slack_messages" ADD COLUMN "deleted_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "slack_messages" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;

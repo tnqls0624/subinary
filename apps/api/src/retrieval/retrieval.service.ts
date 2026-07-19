@@ -33,15 +33,17 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { ProviderSet, RerankDocument } from '@family/ai-providers';
 import type { Citation, ChunkSourceType } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { modelAliasTraceMetadata, schema, type Db } from '@family/database';
 import { reciprocalRankFusion, toVectorLiteral } from '@family/rag';
+import { MODEL_SERVING_TASKS } from '@family/shared';
 
 import { AI_PROVIDERS } from '../ai/ai.constants';
 import { DB } from '../database/database.constants';
+import { ModelServingService } from '../model-serving/model-serving.service';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -112,6 +114,7 @@ export class RetrievalService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AI_PROVIDERS) private readonly providers: ProviderSet,
+    private readonly modelServing: ModelServingService,
   ) {}
 
   /**
@@ -150,13 +153,33 @@ export class RetrievalService {
   ): Promise<RetrievalResult> {
     const { workspaceId, query } = options;
     await this.assertOwnedWorkspace(userId, workspaceId);
+    const [embeddingServing, rerankerServing] = await Promise.all([
+      this.modelServing.assertEmbedding(
+        { workspaceId },
+        MODEL_SERVING_TASKS.RAG_EMBEDDING,
+        this.providers.embedding,
+      ),
+      this.modelServing.assertReranker(
+        { workspaceId },
+        MODEL_SERVING_TASKS.RAG_RERANKER,
+        this.providers.reranker,
+      ),
+    ]);
 
     const topK = this.clampTopK(options.topK);
 
     // 1) Question embedding (mock: deterministic 256-dim).
-    const embedded = await this.providers.embedding.embed([query]);
+    const embedded = await this.providers.embedding.embed([query], {
+      task: 'rag-query-embedding',
+      promptVersion: 'query-embedding-v1',
+      ...modelAliasTraceMetadata(embeddingServing),
+    });
     const queryVec = embedded[0];
-    if (!queryVec || queryVec.length === 0) {
+    if (
+      !queryVec ||
+      queryVec.length !== this.providers.embedding.dimensions ||
+      queryVec.length !== schema.EMBEDDING_DIM
+    ) {
       throw new BadRequestException('failed to embed the query');
     }
 
@@ -168,6 +191,7 @@ export class RetrievalService {
       .where(
         and(
           eq(schema.chunks.workspaceId, workspaceId),
+          isNull(schema.chunks.deletedAt),
           sql`${simExpr} > ${FTS_SIMILARITY_THRESHOLD}`,
         ),
       )
@@ -187,7 +211,14 @@ export class RetrievalService {
         schema.embeddings,
         eq(schema.embeddings.chunkId, schema.chunks.id),
       )
-      .where(eq(schema.chunks.workspaceId, workspaceId))
+      .where(
+        and(
+          eq(schema.chunks.workspaceId, workspaceId),
+          isNull(schema.chunks.deletedAt),
+          eq(schema.embeddings.model, this.providers.embedding.model),
+          eq(schema.embeddings.dim, this.providers.embedding.dimensions),
+        ),
+      )
       .orderBy(asc(distExpr))
       .limit(CANDIDATE_LIMIT);
 
@@ -219,6 +250,7 @@ export class RetrievalService {
       .where(
         and(
           eq(schema.chunks.workspaceId, workspaceId),
+          isNull(schema.chunks.deletedAt),
           inArray(schema.chunks.id, candidateIds),
         ),
       );
@@ -236,6 +268,11 @@ export class RetrievalService {
       query,
       documents,
       topK,
+      metadata: {
+        task: 'rag-rerank',
+        promptVersion: 'rrf-rerank-v1',
+        ...modelAliasTraceMetadata(rerankerServing),
+      },
     });
 
     // 6) Assemble citations. `score` is the RRF fusion score (unitless); the

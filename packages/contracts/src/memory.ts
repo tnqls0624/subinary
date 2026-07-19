@@ -131,9 +131,9 @@ export const memoryExtractResponseSchema = z.object({
 export type MemoryExtractResponse = z.infer<typeof memoryExtractResponseSchema>;
 
 /**
- * Candidate projection for `GET /v1/memory/candidates` (spec §6.2). `sourceChunkId`
- * links to the originating chunk and `sourceRefId` mirrors the chunk's own source
- * ref (Slack `threadTs` etc.); both are null when the candidate is unbound.
+ * Candidate projection for `GET /v1/memory/candidates` (spec §6.2).
+ * `sourceChunkRevisionId`와 `extractorVersion`은 후보를 재현하는 immutable 입력·
+ * 변환 경계이며, `sourceRefId`는 원본 Slack ref를 제공한다.
  */
 export const candidateSummarySchema = z.object({
   id: z.string(),
@@ -143,6 +143,8 @@ export const candidateSummarySchema = z.object({
   confidence: z.number().int(),
   status: candidateStatusSchema,
   sourceChunkId: z.string().nullable(),
+  sourceChunkRevisionId: z.string().nullable(),
+  extractorVersion: z.string(),
   sourceRefId: z.string().nullable(),
   extractedAt: z.string(),
 });

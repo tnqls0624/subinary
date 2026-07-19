@@ -39,12 +39,12 @@ Procedure/Fact)으로 추출하고, 사용자가 **검토 → 승인/거부**해
   → task(담당/맡/…) → decision(결정/하기로/선택했/…) → procedure(절차/방법/순서/단계) → preference
   → fact. `confidence` 는 키워드 매칭 90, 순수 fact 60. 키워드 없는 10자 미만은 노이즈로 skip.
   실제 LLM 추출로 교체 가능하도록 순수 함수 경계를 유지한다.
-- **비동기 추출**: `POST /extract` 는 소유 검증 후 `memory-extract` 큐에 넣고 `202 Accepted` 로
-  응답한다. 워커가 후보를 적재하므로 직후 짧은 시간 동안 후보가 비어 있을 수 있다 — 검증은
-  `GET /candidates` 를 폴링(권장 상한 15초)한다. 커스텀 jobId 는 `memory-extract_<workspaceId>`
-  (BullMQ 제약상 `:` 대신 `_`).
-- **멱등**: 후보 `UNIQUE(workspaceId, sourceChunkId, type, subjectHash)` + `onConflictDoNothing` →
-  `extract` 재실행해도 후보가 중복 생성되지 않고, 이미 승인/거부한 후보의 status 도 보존된다.
+- **자동 증분 추출**: RAG가 current chunk/embedding을 게시하면 `rag.chunk.memory-ready.v1` outbox
+  event가 `{workspaceId, chunkId, chunkRevisionId}` target 잡을 만든다. 워커는 current revision을
+  재확인하고 해당 청크만 읽는다. `POST /extract`는 복구·extractor backfill용 workspace 전체 rebuild다.
+- **멱등/버전**: 후보 identity는 `workspaceId + sourceChunkRevisionId + type + subjectHash +
+  extractorVersion`이다. 동일 revision 재시도는 중복을 만들지 않고, 새 revision/추출기 결과는 기존
+  사용자 검토 상태를 덮지 않는 별도 후보다. 편집 전 후보는 rejected, tombstone 후보 본문은 삭제된다.
 - **원문 연결(PRD §3.1)**: 승인 시 `memory_sources` 에 `chunk`(sourceRefId=chunk uuid) + 원본 참조가
   있으면 `slack_message`(sourceRefId=threadTs)를 넣어 원문까지 역추적한다. 직접 생성은 `manual`.
 - **로그 비노출(PRD §11)**: `subject`/`content`/PII/secret 을 운영 로그에 남기지 않는다(개수/식별자만).
@@ -64,7 +64,8 @@ Procedure/Fact)으로 추출하고, 사용자가 **검토 → 승인/거부**해
 
 ## 1. 추출 트리거 — `POST /v1/memory/extract`
 
-소유한 workspace 의 `chunks` 를 규칙 추출해 `memory_candidates`(pending)를 적재하는 잡을 큐에 넣는다.
+소유한 workspace 의 current chunk revision 전체를 다시 규칙 추출하는 복구/backfill 잡을 큐에 넣는다.
+일상적인 메시지 변경은 RAG outbox가 자동으로 대상 revision만 처리한다.
 
 ### 요청 (`memoryExtractRequestSchema`)
 
@@ -118,6 +119,8 @@ curl -s 'http://localhost:3001/v1/memory/candidates?workspaceId=0a1b2c3d-…&sta
       "confidence": 90,
       "status": "pending",
       "sourceChunkId": "ch000000-…",
+      "sourceChunkRevisionId": "cr000000-…",
+      "extractorVersion": "memory-rule-v1",
       "sourceRefId": "1721400000.000100",
       "extractedAt": "2026-07-16T02:00:00.000Z"
     }
@@ -125,7 +128,8 @@ curl -s 'http://localhost:3001/v1/memory/candidates?workspaceId=0a1b2c3d-…&sta
 }
 ```
 
-- `sourceChunkId` = 근거 chunk uuid, `sourceRefId` = chunk 의 원본 Slack `threadTs`/`ts`(원문 역추적).
+- `sourceChunkRevisionId`와 `extractorVersion`이 재현 경계이며, `sourceRefId`는 원본 Slack
+  `threadTs`/`ts`를 역추적한다.
 
 ---
 

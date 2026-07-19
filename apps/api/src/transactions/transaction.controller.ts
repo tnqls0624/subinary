@@ -8,8 +8,8 @@
  * §8/§26). Request bodies are validated by the global `ZodValidationPipe`
  * against the `@family/contracts` schemas wrapped as DTOs.
  *
- * NOTE: `GET /summary` is declared *before* `GET /:id` so the static route wins
- * over the `:id` param route (path-collision avoidance).
+ * NOTE: static GET routes are declared *before* `GET /:id` so they win over
+ * the `:id` param route (path-collision avoidance).
  */
 import {
   Body,
@@ -27,6 +27,7 @@ import { createZodDto } from 'nestjs-zod';
 import {
   linkCancellationRequestSchema,
   transactionUpdateRequestSchema,
+  type MerchantLabelCandidateListResponse,
   type TransactionListResponse,
   type TransactionSummary,
   type TransactionSummaryResponse,
@@ -98,6 +99,20 @@ export class TransactionController {
       from,
       to,
     });
+  }
+
+  /** GET /v1/transactions/merchant-label-candidates — 사람 확정이 필요한 가맹점 batch. */
+  @Get('merchant-label-candidates')
+  listMerchantLabelCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('householdId') householdId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<MerchantLabelCandidateListResponse> {
+    return this.transactionService.listMerchantLabelCandidates(
+      user.userId,
+      householdId,
+      limit,
+    );
   }
 
   /** GET /v1/transactions/:id — a single transaction (visibility scope applied). */

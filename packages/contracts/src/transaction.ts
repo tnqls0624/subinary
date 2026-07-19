@@ -90,6 +90,57 @@ export const transactionListResponseSchema = z.object({
 });
 export type TransactionListResponse = z.infer<typeof transactionListResponseSchema>;
 
+/** 가맹점 라벨 검토 큐의 현재 상태. AI 제안은 사람 확정 전까지 별도 상태다. */
+export const merchantLabelCandidateSourceSchema = z.enum([
+  'unlabeled',
+  'model_prediction',
+]);
+export type MerchantLabelCandidateSource = z.infer<
+  typeof merchantLabelCandidateSourceSchema
+>;
+
+/**
+ * `GET /v1/transactions/merchant-label-candidates`의 가맹점별 검토 항목.
+ * 호출자가 열람·수정할 수 있는 거래만 집계하며 금액과 원문 문자는 노출하지 않는다.
+ */
+export const merchantLabelCandidateSchema = z.object({
+  representativeTransactionId: z.string().uuid(),
+  merchantNormalized: z.string().min(1).max(200),
+  transactionCount: z.number().int().positive(),
+  latestTransactionAt: z.string().datetime(),
+  source: merchantLabelCandidateSourceSchema,
+  suggestedCategoryId: z.string().uuid().nullable(),
+  suggestedCategorySlug: z.string().nullable(),
+});
+export type MerchantLabelCandidate = z.infer<
+  typeof merchantLabelCandidateSchema
+>;
+
+/** 사람 확정 라벨 수집 단계의 진입 게이트 현황. */
+export const merchantLabelTrainingReadinessSchema = z.object({
+  humanConfirmedLabels: z.number().int().nonnegative(),
+  requiredLabels: z.number().int().positive(),
+  distinctClasses: z.number().int().nonnegative(),
+  requiredClasses: z.number().int().positive(),
+  minimumClassLabels: z.number().int().nonnegative(),
+  requiredLabelsPerClass: z.number().int().positive(),
+  missingLineage: z.number().int().nonnegative(),
+  status: z.enum(['ready', 'collect_labels']),
+});
+export type MerchantLabelTrainingReadiness = z.infer<
+  typeof merchantLabelTrainingReadinessSchema
+>;
+
+/** Cursor 없이 작은 검토 batch를 반환하며 `hasMore`로 다음 batch 존재 여부를 알린다. */
+export const merchantLabelCandidateListResponseSchema = z.object({
+  items: z.array(merchantLabelCandidateSchema),
+  hasMore: z.boolean(),
+  trainingReadiness: merchantLabelTrainingReadinessSchema,
+});
+export type MerchantLabelCandidateListResponse = z.infer<
+  typeof merchantLabelCandidateListResponseSchema
+>;
+
 /**
  * `GET /v1/transactions/summary` — verification-grade monthly rollup.
  * `totalNet` sums `netAmount` over approval transactions (cancellations reflected).
