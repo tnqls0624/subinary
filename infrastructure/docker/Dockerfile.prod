@@ -47,7 +47,9 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY packages/slack-parser/package.json packages/slack-parser/package.json
 
 # 빌드에는 devDeps(nest/next/tsup/typescript)가 필요 → 전체 설치(frozen).
-RUN pnpm install --frozen-lockfile
+# BuildKit 캐시를 사용해 중단·재빌드 시 이미 받은 패키지를 다시 내려받지 않는다.
+RUN --mount=type=cache,id=family-memory-ai-pnpm,target=/pnpm/store \
+  pnpm install --frozen-lockfile
 
 COPY . .
 
