@@ -12,6 +12,8 @@
     "lint": "turbo run lint",
     "ops:infra:bootstrap": "sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh",
     "ops:infra:verify": "sh scripts/ops/verify-ai-pipeline-infrastructure.sh",
+    "ops:alert:test": "node --test infrastructure/ops-sentinel/ops-sentinel.verify.mjs",
+    "ops:alert:verify": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml run --rm --no-deps ops-sentinel send-test",
     "ops:backup": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml run --rm backup once",
     "ops:backup:verify": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml --profile ops run --rm backup-verify",
     "ops:backup:replica:init": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml --profile offsite-backup run --rm backup-replica replica-init",
