@@ -50,6 +50,15 @@ x-app-build: &app-build
       NEXT_PUBLIC_WEB_URL: ${PUBLIC_BASE_URL:-https://app.subinary.cloud}
   image: family-memory-ai/prod:local
 
+# 로그 회전: 기본 json-file 드라이버에 상한을 둔다. 미설정 시 무제한 증가로 CrashLoop 원인 로그가
+# 밀려 사라지거나 디스크를 채운다. 상시 서비스에 적용한다(daemon 측 저장이라 read_only 컨테이너에도 안전).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    compress: "true"
+
 services:
   postgres:
     image: *postgres-image
@@ -68,6 +77,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    logging: *default-logging
     restart: unless-stopped
 
   redis:
@@ -80,6 +90,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+    logging: *default-logging
     restart: unless-stopped
 
   minio:
@@ -91,6 +102,7 @@ services:
     volumes:
       - miniodata:/data
     # 포트 미공개(콘솔 9001 포함). 필요 시 관리용으로만 임시 노출할 것.
+    logging: *default-logging
     restart: unless-stopped
 
   minio-setup:
@@ -134,6 +146,8 @@ services:
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      # dead man's switch(healthchecks.io 등) 핑 URL. 성공 시 URL로, 실패 시 URL/fail로 POST. 미설정 시 무동작.
+      HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
     volumes:
       - type: bind
         source: ${BACKUP_DIR:-./backups}
@@ -150,6 +164,7 @@ services:
       retries: 3
       start_period: 10m
       start_interval: 10s
+    logging: *default-logging
     restart: unless-stopped
 
   # 최신(또는 BACKUP_SNAPSHOT으로 지정한) 스냅샷을 임시 PostgreSQL에 실제 복원한다.
@@ -215,6 +230,47 @@ services:
       - /restore
     restart: "no"
 
+  # DB·Docker socket·제품 secret 없이 backup freshness와 host disk 여유만 감시한다.
+  # 웹훅 미설정 시에도 측정 상태를 보존하며, URL이 설정되면 같은 receiver로 전이를 전달한다.
+  ops-sentinel:
+    build:
+      context: .
+      dockerfile: infrastructure/ops-sentinel/Dockerfile
+    image: family-memory-ai/ops-sentinel:local
+    environment:
+      PIPELINE_ALERT_WEBHOOK_URL: ${PIPELINE_ALERT_WEBHOOK_URL:-}
+      PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN: ${PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN:-}
+      PIPELINE_ALERT_WEBHOOK_FORMAT: ${PIPELINE_ALERT_WEBHOOK_FORMAT:-generic}
+      OPS_SENTINEL_INTERVAL_MS: ${OPS_SENTINEL_INTERVAL_MS:-60000}
+      OPS_SENTINEL_REQUEST_TIMEOUT_MS: ${OPS_SENTINEL_REQUEST_TIMEOUT_MS:-5000}
+      OPS_SENTINEL_BACKUP_MAX_AGE_SECONDS: ${OPS_SENTINEL_BACKUP_MAX_AGE_SECONDS:-90000}
+      OPS_SENTINEL_DISK_MIN_FREE_BYTES: ${OPS_SENTINEL_DISK_MIN_FREE_BYTES:-42949672960}
+      OPS_SENTINEL_DISK_MIN_FREE_PERCENT: ${OPS_SENTINEL_DISK_MIN_FREE_PERCENT:-10}
+    volumes:
+      - type: bind
+        source: ${BACKUP_DIR:-./backups}
+        target: /monitored/backups
+        read_only: true
+      - ops-sentinel-state:/state
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "0.10"
+    mem_limit: 64m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "node", "/app/ops-sentinel.mjs", "healthcheck"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 3m
+    networks:
+      - alert-egress
+    logging: *default-logging
+    restart: unless-stopped
+
   migrate:
     <<: *app-build
     command: pnpm --filter @family/database migrate
@@ -277,6 +333,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    logging: *default-logging
     restart: unless-stopped
 
   worker:
@@ -303,6 +360,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    logging: *default-logging
     restart: unless-stopped
 
   web:
@@ -324,6 +382,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 40s
+    logging: *default-logging
     restart: unless-stopped
 
   # 내부 리버스 프록시: /v1/* → api, 그 외 → web. 공개 포트 없음(cloudflared가 내부망으로 접근).
@@ -338,6 +397,7 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   # Cloudflare Tunnel: 아웃바운드 연결만 → 공유기 포트 개방 불필요, 공인 IP 비노출.
@@ -347,6 +407,28 @@ services:
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.production}
     depends_on:
       - caddy
+    logging: *default-logging
+    restart: unless-stopped
+
+  # 외형 감시(Gatus): 내부 앱 헬스 + 공개 터널 전체 경로를 능동 점검한다.
+  # 설정은 infrastructure/gatus/config.yaml(코드로 관리). 인바운드 포트 미공개 — 모든 점검은 egress.
+  # 이미지는 운영 검증 후 다른 외부 이미지처럼 @sha256 digest로 고정할 것(x-image-pins 정책).
+  gatus:
+    image: twinproduction/gatus:v5.36.0
+    environment:
+      # config.yaml의 ${PUBLIC_BASE_URL}, ${GATUS_ALERT_WEBHOOK_URL} 치환에 쓰인다.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://app.subinary.cloud}
+      # 비우면 경보는 비활성, 감시/상태 UI는 그대로 동작. 수신처가 Slack이면 Incoming Webhook URL을 그대로 넣는다.
+      GATUS_ALERT_WEBHOOK_URL: ${GATUS_ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./infrastructure/gatus/config.yaml:/config/config.yaml:ro
+    # 포트 미공개: UI가 필요하면 caddy 라우팅 + Cloudflare Access 뒤에 둔다(직접 publish 금지).
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:
@@ -356,3 +438,8 @@ volumes:
   caddydata:
   caddyconfig:
   backup-replica-state:
+  ops-sentinel-state:
+
+networks:
+  alert-egress:
+    driver: bridge

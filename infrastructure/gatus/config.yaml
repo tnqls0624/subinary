@@ -1,0 +1,87 @@
+# Gatus — 외형(synthetic) 감시. docker-compose.prod.yml의 gatus 서비스가 read-only로 마운트한다.
+#
+# 왜 필요한가: 기존 경보(operational_alerts outbox, ops-sentinel)는 파이프라인 실패·백업 신선도·
+# 디스크만 본다. postgres/redis/minio 다운, API 5xx, "터널은 Healthy인데 앱이 502"인 상태는
+# 어떤 경보에도 잡히지 않아 최대 25시간(backup_stale) 뒤에야 간접 감지됐다. Gatus가 그 사각지대를 메운다.
+#
+# 배치: 기본 compose 네트워크(내부 서비스 이름 도달) + egress(공개 URL 점검). 인바운드 포트 미공개.
+# 설정은 코드로 관리한다(이 파일을 git으로 리뷰) — Uptime Kuma 대신 Gatus를 택한 이유.
+
+# 업타임 이력을 컨테이너 재시작에도 남기려면 sqlite로 바꾸고 볼륨을 붙인다. 기본은 무상태(메모리).
+storage:
+  type: memory
+
+ui:
+  title: "subinary — 운영 상태"
+  header: "subinary health"
+
+# 실패→발송, 복구→해제 알림. GATUS_ALERT_WEBHOOK_URL이 비면 경보는 비활성이고 감시/상태 UI는 그대로 동작한다.
+# body는 Slack Incoming Webhook과 호환되는 {"text": ...} 형태 — 수신처가 generic이면 이 body를 수신처 스키마에 맞게 조정한다.
+alerting:
+  custom:
+    url: "${GATUS_ALERT_WEBHOOK_URL}"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: |
+      {"text": "[subinary][GATUS] [ENDPOINT_GROUP]/[ENDPOINT_NAME] — [ALERT_TRIGGERED_OR_RESOLVED]: [ALERT_DESCRIPTION] ([ENDPOINT_URL]) errors=[RESULT_ERRORS]"}
+    default-alert:
+      failure-threshold: 3
+      success-threshold: 2
+      send-on-resolved: true
+
+endpoints:
+  # --- 내부(compose 네트워크): 앱 자체의 정상성. 터널/엣지를 거치지 않아 앱 레벨 장애를 순수하게 본다. ---
+  - name: api-ready
+    group: internal
+    url: "http://api:3001/v1/health/ready"   # db·pgvector·redis·storage 4종 하나라도 down이면 503
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: custom
+        description: "API readiness (내부) — DB/Redis/스토리지 의존성 포함"
+
+  - name: worker-live
+    group: internal
+    url: "http://worker:3002/v1/health/live"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: custom
+        description: "Worker liveness (내부)"
+
+  - name: web-health
+    group: internal
+    url: "http://web:3000/api/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: custom
+        description: "Web health (내부)"
+
+  # --- 공개(터널 전체 경로): 엣지→cloudflared→caddy→api/web 전 구간. "터널 Healthy인데 502"를 잡는 유일한 경로. ---
+  # 앱 앞에 Cloudflare Access를 두면 헬스 URL이 차단되므로 Gatus custom headers에 service token을 넣어야 한다(현재는 공개 앱이라 불필요).
+  - name: api-ready-public
+    group: public
+    url: "${PUBLIC_BASE_URL}/v1/health/ready"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 5000"
+    alerts:
+      - type: custom
+        description: "공개 API readiness — 터널 전체 경로"
+
+  - name: web-health-public
+    group: public
+    url: "${PUBLIC_BASE_URL}/api/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 5000"
+    alerts:
+      - type: custom
+        description: "공개 Web health — 터널 전체 경로"

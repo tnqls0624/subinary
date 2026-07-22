@@ -125,3 +125,10 @@ if [ "$retention_days" -gt 0 ]; then
 fi
 
 echo "backup completed: snapshot=${snapshot_name} postgresBytes=${database_bytes} objectCount=${object_count} objectBytes=${object_bytes}"
+
+# 백업 성공을 dead man's switch(healthchecks.io 등)에 통지한다. 맥 밖의 감시자가 이 핑이 끊기면
+# 경보를 낸다 → ops-sentinel까지 죽는 시나리오도 커버. 미설정이거나 핑 실패는 백업 자체를 실패시키지 않는다.
+if [ -n "${HEALTHCHECK_PING_URL:-}" ]; then
+  curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_PING_URL" \
+    || echo "backup warning: healthcheck success ping failed (non-fatal)" >&2
+fi

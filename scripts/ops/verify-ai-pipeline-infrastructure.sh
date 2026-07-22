@@ -79,10 +79,10 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is unavailable"
 [ -f .env.production ] || fail ".env.production is missing"
 compose config --quiet || fail "production compose configuration is invalid"
 
-for service_name in postgres redis api worker web backup; do
+for service_name in postgres redis api worker web backup ops-sentinel; do
   wait_for_state "$service_name" healthy
 done
-for service_name in minio caddy cloudflared; do
+for service_name in minio caddy cloudflared gatus; do
   wait_for_state "$service_name" running
 done
 assert_completed_service minio-setup
@@ -136,7 +136,7 @@ echo "[infra] public_routes=healthy"
 if env_configured PIPELINE_ALERT_WEBHOOK_URL; then
   echo "[infra] alert_webhook=configured"
 else
-  echo "[infra] alert_webhook=not-configured (optional external target)"
+  echo "[infra] alert_webhook=not-configured (required for Task 1 completion)"
 fi
 if env_configured RESTIC_REPOSITORY && env_configured RESTIC_PASSWORD; then
   echo "[infra] offsite_backup=configured"

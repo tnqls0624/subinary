@@ -46,6 +46,10 @@ run_daemon() {
       sleep "$interval_seconds"
     else
       echo "backup failed: retrying in ${retry_seconds}s" >&2
+      # 실패를 dead man's switch에 즉시 통지한다(성공 핑은 backup-once.sh가 담당). 핑 실패는 무시.
+      if [ -n "${HEALTHCHECK_PING_URL:-}" ]; then
+        curl -fsS -m 10 -o /dev/null "${HEALTHCHECK_PING_URL}/fail" || true
+      fi
       sleep "$retry_seconds"
     fi
   done
