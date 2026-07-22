@@ -62,13 +62,13 @@ if [ "$skip_build" = false ]; then
   fi
   echo "[infra] build_disk_free=$((available_disk_kb / 1024 / 1024))GB minimum=${minimum_free_disk_gb}GB"
 
-  echo "[infra] building production application and backup images"
-  compose build api backup
+  echo "[infra] building production application, backup, and ops sentinel images"
+  compose build api backup ops-sentinel
 fi
 
 echo "[infra] starting production AI pipeline infrastructure"
 compose up -d \
-  postgres redis minio minio-setup migrate backup \
+  postgres redis minio minio-setup migrate backup ops-sentinel \
   api worker web caddy cloudflared
 
 sh scripts/ops/verify-ai-pipeline-infrastructure.sh

@@ -48,3 +48,49 @@ test('설정된 FCM private key의 이스케이프 개행을 복원한다', () =
 
   assert.equal(config.notifications.fcmPrivateKey, 'line-one\nline-two');
 });
+
+test('env_file의 빈 Webhook 선택값을 미설정으로 처리한다', () => {
+  const config = validateEnv({
+    ...requiredEnv(),
+    PIPELINE_ALERT_WEBHOOK_URL: '',
+    PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN: '',
+    PIPELINE_ALERT_WEBHOOK_FORMAT: 'slack',
+  });
+
+  assert.equal(config.observability.alertWebhookUrl, undefined);
+  assert.equal(config.observability.alertWebhookBearerToken, undefined);
+  assert.equal(config.observability.alertWebhookFormat, 'slack');
+});
+
+test('설정된 Webhook URL과 Bearer Token을 보존한다', () => {
+  const config = validateEnv({
+    ...requiredEnv(),
+    PIPELINE_ALERT_WEBHOOK_URL: 'https://alerts.example.com/subinary',
+    PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN: 'receiver-secret',
+  });
+
+  assert.equal(
+    config.observability.alertWebhookUrl,
+    'https://alerts.example.com/subinary',
+  );
+  assert.equal(
+    config.observability.alertWebhookBearerToken,
+    'receiver-secret',
+  );
+});
+
+test('잘못된 Webhook URL은 비밀값 없이 설정 경로만 보고한다', () => {
+  assert.throws(
+    () =>
+      validateEnv({
+        ...requiredEnv(),
+        PIPELINE_ALERT_WEBHOOK_URL: 'not-a-webhook-url',
+      }),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /observability\.alertWebhookUrl/u);
+      assert.doesNotMatch(error.message, /not-a-webhook-url/u);
+      return true;
+    },
+  );
+});

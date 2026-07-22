@@ -37,6 +37,10 @@ postgres·redis·minio : 도커 내부망 전용(호스트/인터넷 미노출)
   AI_MODEL_CANARY_MONITOR_BATCH_SIZE=50
   PIPELINE_ALERT_WEBHOOK_URL=https://hooks.example.com/...
   PIPELINE_ALERT_WEBHOOK_FORMAT=generic # 또는 slack
+  OPS_SENTINEL_INTERVAL_MS=60000
+  OPS_SENTINEL_BACKUP_MAX_AGE_SECONDS=90000
+  OPS_SENTINEL_DISK_MIN_FREE_BYTES=42949672960
+  OPS_SENTINEL_DISK_MIN_FREE_PERCENT=10
   AI_EMBEDDING_MODEL=...        # 실제 embedding provider model identity
   AI_EMBEDDING_MODEL_REVISION=... # 승격할 registry model.version과 동일
   AI_CANDIDATE_PROVIDER=gemini  # shadow/live 후보 identity 세 필드는 함께 설정
@@ -240,7 +244,10 @@ docker compose up -d          # dev 스택(next dev 등)
 - [ ] `rag-embedding` 후보 revision backfill 후 활성 청크 coverage 100%와 projection 전환 검증
 - [ ] `AI_MODEL_CANARY_MONITOR_ENABLED=true`와 poll interval/batch 설정 후 scheduled trigger 기록 확인
 - [ ] canary `minimumInvocationCount`, 오류율, p95, 관측 창을 실제 baseline SLO로 조정
-- [ ] `PIPELINE_ALERT_WEBHOOK_URL` 설정 후 terminal failure/quarantine/canary 경보 수신 확인
+- [ ] `PIPELINE_ALERT_WEBHOOK_URL` 설정 후 `pnpm ops:alert:verify` synthetic 수신 확인
+- [ ] `ops-sentinel` healthy와 backup stale/disk low firing·recovered 수신 확인
+- [ ] Cloudflare Tunnel Health notification을 Mac 밖의 email/webhook에 연결
+- [ ] terminal failure/quarantine/canary 격리 경보 검증 통과
 - [ ] 후보 provider/model/revision과 승인 registry identity 일치 확인 후 shadow→소량 live 순서로 전환
 - [ ] `ai_invocations`의 traffic role/bucket/selected와 후보 오류율·지연을 확인하고 정책 pause 절차 검증
 - [x] 격리 Training Runner의 2회 재현성·로컬 alias 서빙·artifact 삭제 전파 검증

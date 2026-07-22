@@ -155,8 +155,9 @@ export const configSchema = z.object({
   auth: z.object({
     accessSecret: z.string().min(16),
     accessTtlSec: z.coerce.number().int().positive().default(900),
-    refreshTtlSec: z.coerce.number().int().positive().default(2592000),
-    // 모바일(Capacitor) 자동로그인 세션 TTL — 기본 1년. 웹(쿠키)은 위 30일 유지.
+    // 웹 refresh 세션/쿠키 수명 — 기본 1년(로그인 시점부터). 회전마다 만료가 갱신된다.
+    refreshTtlSec: z.coerce.number().int().positive().default(31536000),
+    // 모바일(Capacitor) 자동로그인 세션 TTL — 기본 1년. 웹과 동일.
     refreshTtlMobileSec: z.coerce
       .number()
       .int()
@@ -238,8 +239,10 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       modelCanaryMonitorBatchSize: env.AI_MODEL_CANARY_MONITOR_BATCH_SIZE,
     },
     observability: {
-      alertWebhookUrl: env.PIPELINE_ALERT_WEBHOOK_URL,
-      alertWebhookBearerToken: env.PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN,
+      alertWebhookUrl: optionalEnvValue(env.PIPELINE_ALERT_WEBHOOK_URL),
+      alertWebhookBearerToken: optionalEnvValue(
+        env.PIPELINE_ALERT_WEBHOOK_BEARER_TOKEN,
+      ),
       alertWebhookFormat: env.PIPELINE_ALERT_WEBHOOK_FORMAT,
       alertPollIntervalMs: env.PIPELINE_ALERT_POLL_INTERVAL_MS,
       alertBatchSize: env.PIPELINE_ALERT_BATCH_SIZE,
