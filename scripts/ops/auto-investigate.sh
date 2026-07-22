@@ -85,9 +85,17 @@ for row in $rows; do
     date +%s >> "$runlog_file"
 
     if [ -n "$webhook_url" ]; then
-      # Slack 호환 {"text":...}. 결과는 신뢰 불가(자동 생성)임을 명시. 제어문자·길이 방어.
-      safe=$(printf '%s' "$result" | tr -d '\000-\010\013\014\016-\037' | head -c 3500 | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')
-      body="{\"text\":\"[subinary][AI 조사 — 신뢰불가 자동생성] ${kind} ${source_type}/${source_id} @ ${occurred_at}\\n${safe}\"}"
+      # Slack 호환 {"text":...}. header+결과를 한 텍스트로 합쳐 JSON 인코딩한다.
+      # python3 json.dumps가 따옴표·백슬래시·제어문자·유니코드를 정확히 이스케이프(수동 이스케이프의 깨짐 방지).
+      text="[subinary][AI 조사 — 신뢰불가 자동생성] ${kind} ${source_type}/${source_id} @ ${occurred_at}
+${result}"
+      if command -v python3 >/dev/null 2>&1; then
+        body=$(AI_TEXT="$text" python3 -c 'import os,json;print(json.dumps({"text":os.environ["AI_TEXT"][:3600]}))')
+      else
+        # 폴백: 수동 이스케이프(python3 부재 시). 제어문자 제거·길이 제한·따옴표/백슬래시/개행 처리.
+        safe=$(printf '%s' "$text" | tr -d '\000-\010\013\014\016-\037' | head -c 3500 | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')
+        body="{\"text\":\"${safe}\"}"
+      fi
       printf '%s' "$body" | curl -fsS -m 15 --retry 2 --retry-all-errors \
         -H 'Content-Type: application/json' -X POST -d @- "$webhook_url" >/dev/null 2>&1 \
         && echo "  보고 발송됨" || echo "  경고: 보고 발송 실패(non-fatal)"

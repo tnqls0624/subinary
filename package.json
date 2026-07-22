@@ -22,6 +22,7 @@
     "ops:training-readiness": "sh scripts/ops/training-readiness.sh",
     "ops:training:run": "sh scripts/ops/run-training.sh",
     "ops:auto-investigate": "sh scripts/ops/auto-investigate.sh",
+    "ops:auto-investigate:test": "node --test scripts/ops/auto-investigate.verify.mjs",
     "verify:model-promotion:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:ai-pipeline:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:training-runner:isolated": "node scripts/verify-training-runner-isolated.mjs",
