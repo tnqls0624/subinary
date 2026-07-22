@@ -1,0 +1,47 @@
+name: CI
+
+# 운영 secret·endpoint 없이 도는 PR/푸시 검증(ADR-0022가 기각한 것은 'GitHub Actions를 호스트다운
+# 경보 monitor로 쓰는 것'이지 빌드/타입체크 CI가 아니다). docker/DB 없이 되는 것만 실행한다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # packageManager 필드(pnpm@9.15.4)에서 버전 자동 감지
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 타입 안전성(모노레포 전역). 운영 런타임 env가 필요 없다.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # 공유 패키지 빌드(contracts/config/shared/database 등). web 앱 빌드는 NEXT_PUBLIC_* 빌드
+      # 인자가 필요해 CI에서 제외 — 여기선 env 비의존 패키지만 빌드한다.
+      - name: Build packages
+        run: pnpm build:packages
+
+      # docker/DB/외부 서비스가 필요 없는 단위·검증 테스트만.
+      - name: Unit & verification tests
+        run: |
+          node --test infrastructure/ops-sentinel/ops-sentinel.verify.mjs
+          node --test scripts/ops/auto-investigate.verify.mjs
+          node --test scripts/lib/verification-database-guard.test.mjs
+          pnpm test:auth-validation
+          pnpm test:config-validation
