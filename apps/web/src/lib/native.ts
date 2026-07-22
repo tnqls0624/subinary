@@ -13,6 +13,8 @@
 import { Capacitor } from "@capacitor/core";
 import { Preferences } from "@capacitor/preferences";
 
+import { NOTIFICATION_CHANNEL_META } from "@family/shared";
+
 /** 이전 버전 Preferences에 저장된 refresh 토큰 키(1회 마이그레이션 전용). */
 const LEGACY_REFRESH_KEY = "family.refreshToken";
 /** 보안 저장소의 refresh 토큰 키. 실제 저장 키에는 아래 prefix가 추가된다. */
@@ -356,6 +358,26 @@ export async function initPushNotifications(
   }
   if (perm.receive !== "granted") return;
 
+  // 안드로이드: 유형별 알림 채널 생성 → 시스템 설정에서 유형별로 켜고 끌 수 있고,
+  // 서버 FCM payload의 channel_id와 매칭돼 헤드업 배너로 표시된다. 멱등(재호출 안전).
+  if (platform === "android") {
+    for (const ch of NOTIFICATION_CHANNEL_META) {
+      try {
+        await PushNotifications.createChannel({
+          id: ch.id,
+          name: ch.name,
+          description: ch.description,
+          importance: 4, // HIGH — 헤드업 배너
+          visibility: 1, // PUBLIC
+        });
+      } catch {
+        // 채널 생성 실패는 치명적이지 않다(기본 채널로 표시).
+      }
+    }
+  }
+  // 포그라운드 재표시 로컬 알림에 붙일 액션 버튼 타입 등록(1회).
+  await registerLocalNotificationActions();
+
   // 리스너는 세션 최초 1회만 등록한다(중복 등록 방지).
   if (!pushListenersRegistered) {
     pushListenersRegistered = true;
@@ -368,11 +390,16 @@ export async function initPushNotifications(
     void PushNotifications.addListener("registrationError", () => {
       // 등록 실패는 조용히 무시(다음 실행에서 재시도). 원문 로그 금지.
     });
-    // 포그라운드 수신 → 리스트 무효화(앱 안이면 배너 대신 데이터 갱신으로 충분).
-    void PushNotifications.addListener("pushNotificationReceived", () => {
-      pushCallbacks.onForegroundReceived?.();
-    });
-    // 알림 탭 → data.deepLink로 라우팅(워밍/콜드 공통).
+    // 포그라운드 수신 → 리스트 무효화 + 로컬 배너 재표시(원격 푸시는 포그라운드에서
+    // 트레이에 안 뜨므로 앱이 채널·액션을 붙여 배너를 재구성한다).
+    void PushNotifications.addListener(
+      "pushNotificationReceived",
+      (notification) => {
+        pushCallbacks.onForegroundReceived?.();
+        void showForegroundBanner(notification);
+      },
+    );
+    // 원격 푸시 탭(백그라운드/콜드) → data.deepLink로 라우팅.
     void PushNotifications.addListener(
       "pushNotificationActionPerformed",
       (action) => {
@@ -382,10 +409,91 @@ export async function initPushNotifications(
         }
       },
     );
+    // 포그라운드 로컬 배너의 버튼/탭 → extra.deepLink로 라우팅.
+    await registerLocalActionListener();
   }
 
   // OS에 등록 요청 → 성공 시 registration 리스너로 토큰이 온다.
   await PushNotifications.register();
+}
+
+/** 로컬 알림 액션 타입 등록 여부(세션 1회). */
+let localActionsRegistered = false;
+
+/**
+ * 포그라운드 재표시 로컬 알림에 붙일 액션 버튼 타입을 등록한다. actionTypeId는
+ * 채널 id와 동일하게 맞춰(kind별) 유형에 맞는 버튼을 보여준다. 안드로이드 원격
+ * 푸시는 버튼 렌더링을 지원하지 않으므로, 포그라운드 재표시 경로에서만 버튼이 뜬다.
+ */
+async function registerLocalNotificationActions(): Promise<void> {
+  if (localActionsRegistered) return;
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    await LocalNotifications.registerActionTypes({
+      types: NOTIFICATION_CHANNEL_META.map((ch) => ({
+        id: ch.id,
+        actions: [{ id: "view", title: "확인" }],
+      })),
+    });
+    localActionsRegistered = true;
+  } catch {
+    // 액션 등록 실패는 무시(배너는 버튼 없이 표시).
+  }
+}
+
+/** 포그라운드에서 받은 원격 푸시를 로컬 알림 배너로 재표시(채널·액션 포함). */
+async function showForegroundBanner(notification: {
+  title?: string;
+  body?: string;
+  data?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    const data = notification.data ?? {};
+    const channelId =
+      typeof data.channelId === "string" ? data.channelId : undefined;
+    const deepLink =
+      typeof data.deepLink === "string" ? data.deepLink : undefined;
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: Math.floor(Math.random() * 2_000_000_000),
+          title: notification.title ?? "알림",
+          body: notification.body ?? "",
+          channelId,
+          // actionTypeId = 채널 id → 유형별 버튼(registerActionTypes와 매칭).
+          actionTypeId: channelId,
+          extra: { deepLink },
+        },
+      ],
+    });
+  } catch {
+    // 로컬 배너 실패는 무시(데이터 무효화는 이미 수행됨).
+  }
+}
+
+/** 포그라운드 로컬 배너의 버튼/탭 → extra.deepLink로 라우팅(세션 1회 등록). */
+async function registerLocalActionListener(): Promise<void> {
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    void LocalNotifications.addListener(
+      "localNotificationActionPerformed",
+      (event) => {
+        const deepLink = event.notification?.extra?.deepLink;
+        if (typeof deepLink === "string" && deepLink.startsWith("/")) {
+          pushCallbacks.onDeepLink?.(deepLink);
+        }
+      },
+    );
+  } catch {
+    // 리스너 등록 실패는 무시.
+  }
 }
 
 /**

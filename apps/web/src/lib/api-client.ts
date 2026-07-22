@@ -16,6 +16,12 @@ import type {
   CardCreateRequest,
   CardSummary,
   CardUpdateRequest,
+  CardSmsEventDetail,
+  ManualParsePreviewRequest,
+  ManualParsePreviewResponse,
+  ManualTextEntryRequest,
+  ManualTextEntryResponse,
+  ManualFieldsEntryRequest,
   CategoryBreakdown,
   CategoryCreateRequest,
   CategorySummary,
@@ -55,6 +61,8 @@ import type {
   PushSubscriptionResponse,
   NotificationPreferences,
   NotificationPreferencesUpdateRequest,
+  NotificationListResponse,
+  NotificationUnreadCount,
 } from "@family/contracts";
 
 import { isNative } from "./native";
@@ -332,6 +340,32 @@ export const api = {
         body,
         accessToken,
       }),
+    // 인앱 알림함.
+    list: (
+      accessToken: AccessToken,
+      params: { cursor?: string; limit?: number } = {},
+    ) =>
+      apiFetch<NotificationListResponse>(
+        `/v1/notifications${buildQuery({
+          cursor: params.cursor,
+          limit: params.limit,
+        })}`,
+        { accessToken },
+      ),
+    unreadCount: (accessToken: AccessToken) =>
+      apiFetch<NotificationUnreadCount>("/v1/notifications/unread-count", {
+        accessToken,
+      }),
+    markRead: (accessToken: AccessToken, id: string) =>
+      apiFetch<{ success: true }>(
+        `/v1/notifications/${encodeURIComponent(id)}/read`,
+        { method: "POST", accessToken },
+      ),
+    markAllRead: (accessToken: AccessToken) =>
+      apiFetch<{ success: true }>("/v1/notifications/read-all", {
+        method: "POST",
+        accessToken,
+      }),
   },
 
   devices: {
@@ -466,6 +500,33 @@ export const api = {
         `/v1/transactions/summary${buildQuery({ ...params })}`,
         { accessToken },
       ),
+  },
+
+  cardSms: {
+    /** 붙여넣은 문자 상태 없는 파싱 미리보기(등록 전 인식 결과 표시). */
+    parsePreview: (accessToken: AccessToken, body: ManualParsePreviewRequest) =>
+      apiFetch<ManualParsePreviewResponse>("/v1/card-sms/parse-preview", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    /** 문자 붙여넣기 등록(수집 파이프라인 경유, 비동기 승격). cardSmsEventId로 폴링. */
+    manualText: (accessToken: AccessToken, body: ManualTextEntryRequest) =>
+      apiFetch<ManualTextEntryResponse>("/v1/card-sms/manual-text", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    /** 직접 입력 거래 등록(동기) — 생성된 거래를 반환. */
+    manualFields: (accessToken: AccessToken, body: ManualFieldsEntryRequest) =>
+      apiFetch<TransactionSummary>("/v1/card-sms/manual-fields", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    /** manual-text 등록 후 파싱 상태 폴링(GET card-sms-events/:id). */
+    eventStatus: (accessToken: AccessToken, id: string) =>
+      apiFetch<CardSmsEventDetail>(`/v1/card-sms-events/${id}`, { accessToken }),
   },
 
   analytics: {

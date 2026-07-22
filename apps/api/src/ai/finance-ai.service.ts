@@ -583,6 +583,9 @@ export class FinanceAiService {
           eq(schema.cardTransactions.householdId, householdId),
           eq(schema.cardTransactions.transactionType, 'approval'),
           isNull(schema.cardTransactions.excludedAt),
+          // KRW 전용(평균·formatWon이 원 기준). 외화 minor units가 최고액 정렬을
+          // 오염시키지 않게 한다(grounding 정확성 = LLM 답변 정확성).
+          eq(schema.cardTransactions.currency, 'KRW'),
           this.visibilityScope(actorMemberId),
           gte(schema.cardTransactions.approvedAt, from),
           lt(schema.cardTransactions.approvedAt, to),

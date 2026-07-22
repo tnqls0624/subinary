@@ -29,8 +29,10 @@ export type AnalyticsMeta = z.infer<typeof analyticsMetaSchema>;
 
 /**
  * `GET /v1/analytics/monthly` — net spend for the period plus the immediately
- * preceding equal-length window (PRD §16; Phase 5 §5.1). Amounts are KRW
- * integers; `totalNet` sums `netAmount` over approval transactions.
+ * preceding equal-length window (PRD §16; Phase 5 §5.1). All analytics
+ * aggregates are **KRW-only** (foreign-currency rows are excluded server-side so
+ * the minor-unit integers stay comparable); values are KRW won (KRW exponent 0,
+ * so minor == major). `totalNet` sums `netAmount` over approval transactions.
  * `deltaNet = totalNet - previousNet`; `deltaRate = deltaNet / previousNet`,
  * `null` when `previousNet` is 0.
  */

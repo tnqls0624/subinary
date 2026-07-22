@@ -11,6 +11,7 @@
  * ------------------------------------------------------------------------- */
 import {
   Activity,
+  Bell,
   ChevronRight,
   CreditCard,
   Fingerprint,
@@ -64,6 +65,12 @@ const ITEMS: ReadonlyArray<MoreItem> = [
     icon: Tags,
     title: "카테고리 관리",
     description: "우리 가족만의 지출 카테고리를 만들고 정리해요",
+  },
+  {
+    href: "/more/notifications",
+    icon: Bell,
+    title: "알림 설정",
+    description: "푸시 알림·최소 금액·무음 시간대를 조절해요",
   },
 ];
 
@@ -152,7 +159,7 @@ export default function MorePage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">더보기</h1>
+        <h1 className="sr-only">더보기</h1>
         <p className="text-muted-foreground text-sm">
           {activeMembership?.name ?? ""} · 가족과 기기를 관리해요.
         </p>

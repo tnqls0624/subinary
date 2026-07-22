@@ -5,3 +5,4 @@ export { StatusBadge, type BadgeTone } from "./status-badge";
 export { BarList, type BarListItem } from "./bar-list";
 export { UsageBar } from "./usage-bar";
 export { ListRow } from "./list-row";
+export { PageBackHeader } from "./page-back-header";

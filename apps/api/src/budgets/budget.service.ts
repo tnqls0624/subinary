@@ -230,6 +230,9 @@ export class BudgetService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // '중복이라 제외' 확정 거래는 예산 사용률에서도 뺀다(analytics와 동일 규칙).
       isNull(schema.cardTransactions.excludedAt),
+      // 예산 통화와 같은 통화만 소진에 합산(amount=minor units). 외화 지출이 KRW
+      // 예산 소진율을 오염시키지 않게 하고, 향후 비-KRW 예산도 자연히 지원한다.
+      eq(schema.cardTransactions.currency, budget.currency),
       gte(schema.cardTransactions.approvedAt, period.from),
       lt(schema.cardTransactions.approvedAt, period.to),
       this.visibilityScope(actorMemberId),

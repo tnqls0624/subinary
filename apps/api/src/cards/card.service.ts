@@ -13,6 +13,7 @@
  * PAN. The value and any other PII are never logged.
  */
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -115,6 +116,32 @@ export class CardService {
     return member;
   }
 
+  /**
+   * Validates that `memberId` is an **active** member of `householdId` — used to
+   * guard card owner assignment/reassignment. A card's owner drives its icon
+   * color and owner-scoped permissions, so an owner outside the household (or
+   * inactive) must be rejected. 400 rather than 404 (client sent a bad owner).
+   */
+  private async assertActiveMember(
+    householdId: string,
+    memberId: string,
+  ): Promise<void> {
+    const [member] = await this.db
+      .select({ id: schema.householdMembers.id })
+      .from(schema.householdMembers)
+      .where(
+        and(
+          eq(schema.householdMembers.id, memberId),
+          eq(schema.householdMembers.householdId, householdId),
+          eq(schema.householdMembers.status, 'active'),
+        ),
+      )
+      .limit(1);
+    if (!member) {
+      throw new BadRequestException('owner must be an active household member');
+    }
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Card management                                                         */
   /* ---------------------------------------------------------------------- */
@@ -135,11 +162,18 @@ export class CardService {
   ): Promise<CardCreateResult> {
     const membership = await this.requireMembership(input.householdId, userId);
 
+    // 소유자: 지정 없으면 등록자 본인. 다른 구성원 지정 시 같은 household의 활성
+    // 구성원인지 검증한다(아이콘 색·소유자 권한이 여기서 결정됨).
+    const ownerMemberId = input.ownerMemberId ?? membership.id;
+    if (ownerMemberId !== membership.id) {
+      await this.assertActiveMember(input.householdId, ownerMemberId);
+    }
+
     const [created] = await this.db
       .insert(schema.paymentCards)
       .values({
         householdId: input.householdId,
-        ownerMemberId: membership.id,
+        ownerMemberId,
         issuer: input.issuer,
         alias: input.alias,
         // 저장 권장: 카드번호 뒤 4자리만(자동연결은 뒤 4자리 매칭, §1.5). 전체 PAN 금지.
@@ -307,6 +341,7 @@ export class CardService {
       alias?: string;
       visibility?: schema.PaymentCard['visibility'];
       status?: schema.PaymentCard['status'];
+      ownerMemberId?: string;
       updatedAt: Date;
     } = { updatedAt: new Date() };
     if (input.alias !== undefined) {
@@ -317,6 +352,12 @@ export class CardService {
     }
     if (input.status !== undefined) {
       patch.status = input.status;
+    }
+    // 소유자 재지정: 같은 household의 활성 구성원만 허용. 아이콘 색이 새 소유자
+    // 색으로 바뀐다. 권한은 위 isOwner/isManager 게이트를 그대로 따른다.
+    if (input.ownerMemberId !== undefined) {
+      await this.assertActiveMember(card.householdId, input.ownerMemberId);
+      patch.ownerMemberId = input.ownerMemberId;
     }
 
     const [updated] = await this.db

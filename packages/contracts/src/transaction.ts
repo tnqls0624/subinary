@@ -51,9 +51,11 @@ export type LinkCancellationRequest = z.infer<typeof linkCancellationRequestSche
 
 /**
  * Transaction projection for `GET /v1/transactions` / `GET /v1/transactions/:id`.
- * Amounts are KRW integers; `netAmount = amount - cancelledAmount` for approvals
- * and `0` for cancellations. `masked: true` marks another member's
- * `summary_only` row whose merchant/memo fields are redacted (PRD §8, §26).
+ * Amounts are integer **minor units of `currency`** (`major = amount /
+ * 10^exponent(currency)`; KRW/JPY exponent 0, USD/EUR exponent 2). Clients format
+ * per `currency`. `netAmount = amount - cancelledAmount` for approvals and `0`
+ * for cancellations. `masked: true` marks another member's `summary_only` row
+ * whose merchant/memo fields are redacted (PRD §8, §26).
  */
 export const transactionSummarySchema = z.object({
   id: z.string(),
@@ -66,6 +68,12 @@ export const transactionSummarySchema = z.object({
   cancelledAmount: z.number().int(),
   netAmount: z.number().int(),
   currency: z.string(),
+  // 외화 원거래(환산 전). 외화 거래는 승격 시 승인 시점 환율로 KRW 환산(amount/currency
+  // 는 KRW)하고, 원통화 원본을 여기 보존한다. KRW 거래는 전부 null. originalAmount는
+  // originalCurrency의 minor units, exchangeRate는 원통화 1단위당 KRW(추정치).
+  originalAmount: z.number().int().nullable(),
+  originalCurrency: z.string().nullable(),
+  exchangeRate: z.number().nullable(),
   merchantRaw: z.string().nullable(),
   merchantNormalized: z.string().nullable(),
   categoryId: z.string().nullable(),
@@ -144,6 +152,8 @@ export type MerchantLabelCandidateListResponse = z.infer<
 /**
  * `GET /v1/transactions/summary` — verification-grade monthly rollup.
  * `totalNet` sums `netAmount` over approval transactions (cancellations reflected).
+ * KRW-only aggregate: foreign-currency transactions are excluded so the minor-unit
+ * integers stay comparable. `currency` marks the aggregate currency (always `KRW`).
  */
 export const transactionSummaryResponseSchema = z.object({
   period: z.object({
@@ -151,6 +161,7 @@ export const transactionSummaryResponseSchema = z.object({
     to: z.string(),
     timezone: z.string(),
   }),
+  currency: z.string(),
   totalNet: z.number().int(),
   totalApproved: z.number().int(),
   totalCancelled: z.number().int(),

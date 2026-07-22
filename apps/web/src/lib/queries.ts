@@ -7,6 +7,7 @@
  * queryKeys 팩토리는 뮤테이션 이후 invalidate에 재사용한다.
  * ------------------------------------------------------------------------- */
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -27,6 +28,10 @@ import type {
   MonthlyAnalytics,
   TransactionListResponse,
   BudgetListResponse,
+  NotificationPreferences,
+  NotificationPreferencesUpdateRequest,
+  ManualParsePreviewRequest,
+  ManualFieldsEntryRequest,
 } from "@family/contracts";
 
 import {
@@ -195,6 +200,34 @@ export function useTransactions(
   });
 }
 
+/**
+ * 거래 목록 무한 스크롤용 쿼리. 단일 페이지 {@link useTransactions}(대시보드 최근거래
+ * 등)와 별도 훅으로 둔다 — data 형태(pages 배열)가 다르고 queryKey도 "infinite"로
+ * 구분한다(형태 충돌 방지). 커서는 각 페이지의 nextCursor로 이어받는다. queryKey는
+ * ["transactions", …] 접두를 유지하므로 invalidateTransactionScope로 함께 무효화된다.
+ */
+export function useInfiniteTransactions(
+  filters: Omit<TransactionListParams, "householdId" | "cursor"> = {},
+  opts?: QueryOpts,
+) {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.transactions(householdId, filters), "infinite"],
+    enabled,
+    refetchInterval: opts?.refetchInterval,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      authedFetch((token) =>
+        api.transactions.list(token, {
+          householdId: householdId as string,
+          ...filters,
+          cursor: pageParam,
+        }),
+      ),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
 // --- Budgets ----------------------------------------------------------------
 
 export function useBudgets(month?: string): UseQueryResult<BudgetListResponse> {
@@ -242,6 +275,71 @@ export function useCategoryList(): UseQueryResult<CategorySummary[]> {
       authedFetch((token) =>
         api.categories.list(token, householdId as string),
       ),
+  });
+}
+
+// --- Notifications ----------------------------------------------------------
+
+/** 현재 사용자의 알림 선호(user 스코프, household 무관). 행 없으면 서버가 기본값. */
+export function useNotificationPreferences(): UseQueryResult<NotificationPreferences> {
+  const { authedFetch } = useAuth();
+  return useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () =>
+      authedFetch((token) => api.notifications.getPreferences(token)),
+  });
+}
+
+/** 알림 선호 전체 대체(PUT). 성공 시 캐시를 응답으로 갱신. */
+export function useUpdateNotificationPreferences() {
+  const { authedFetch } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NotificationPreferencesUpdateRequest) =>
+      authedFetch((token) => api.notifications.updatePreferences(token, body)),
+    onSuccess: (data) => {
+      qc.setQueryData(["notification-preferences"], data);
+    },
+  });
+}
+
+/** 인앱 알림함 목록(최신순, 커서 무한스크롤). */
+export function useNotifications() {
+  const { authedFetch } = useAuth();
+  return useInfiniteQuery({
+    queryKey: ["notifications"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      authedFetch((token) =>
+        api.notifications.list(token, { cursor: pageParam, limit: 30 }),
+      ),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** 안읽음 개수(헤더 벨 뱃지). 포커스 복귀 시 재조회. */
+export function useUnreadCount(): UseQueryResult<{ count: number }> {
+  const { authedFetch } = useAuth();
+  return useQuery({
+    queryKey: ["notification-unread"],
+    queryFn: () => authedFetch((token) => api.notifications.unreadCount(token)),
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * 전체 읽음(알림함 진입 시 자동 호출). 목록 캐시는 **무효화하지 않아** 진입 당시의
+ * 안읽음/읽음 구분(스냅샷)을 화면에 유지하고, 헤더 벨 뱃지(unread-count)만 갱신한다.
+ */
+export function useMarkAllNotificationsRead() {
+  const { authedFetch } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      authedFetch((token) => api.notifications.markAllRead(token)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-unread"] });
+    },
   });
 }
 
@@ -354,5 +452,62 @@ export function useHouseholdMembers(): UseQueryResult<MemberSummary[]> {
       authedFetch((token) =>
         api.households.members(token, householdId as string),
       ),
+  });
+}
+
+// --- Manual entry (문자 붙여넣기 / 직접 입력) -------------------------------
+
+/** 붙여넣은 문자 파싱 미리보기(등록 전 인식 결과 표시). */
+export function useParsePreview() {
+  const { authedFetch } = useHouseholdScope();
+  return useMutation({
+    mutationFn: (body: ManualParsePreviewRequest) =>
+      authedFetch((token) => api.cardSms.parsePreview(token, body)),
+  });
+}
+
+/**
+ * 문자 붙여넣기 등록. 수집 후 워커의 파싱·승격을 기다리며 이벤트 상태를 폴링한다
+ * (~15회 × 0.9s). 최종 이벤트 detail을 함께 반환해 UI가 결과(승격/실패)를 표시한다.
+ */
+export function useManualTextEntry() {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { content: string; sender?: string }) => {
+      const res = await authedFetch((token) =>
+        api.cardSms.manualText(token, {
+          householdId: householdId as string,
+          ...input,
+        }),
+      );
+      let detail = await authedFetch((token) =>
+        api.cardSms.eventStatus(token, res.cardSmsEventId),
+      );
+      for (let i = 0; i < 15 && detail.parseStatus === "pending"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        detail = await authedFetch((token) =>
+          api.cardSms.eventStatus(token, res.cardSmsEventId),
+        );
+      }
+      return { ...res, detail };
+    },
+    onSuccess: () => invalidateTransactionScope(qc),
+  });
+}
+
+/** 직접 입력 거래 등록(동기). 성공 시 거래/집계/예산 캐시 무효화. */
+export function useManualFieldsEntry() {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Omit<ManualFieldsEntryRequest, "householdId">) =>
+      authedFetch((token) =>
+        api.cardSms.manualFields(token, {
+          householdId: householdId as string,
+          ...body,
+        }),
+      ),
+    onSuccess: () => invalidateTransactionScope(qc),
   });
 }

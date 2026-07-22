@@ -2,7 +2,7 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 거래 내역 페이지 (오늘의집 디자인 언어)
  *
- * 상단 필터 칩 행(기간/카테고리/카드/구성원/유형/상태) + cursor 페이지네이션.
+ * 상단 필터 칩 행(기간/카테고리/카드/구성원/유형/상태) + 무한 스크롤(useInfiniteQuery).
  * 목록은 날짜별 그룹("7월 17일" 헤더) + ListRow(카테고리 아이콘 · 가맹점 ·
  * 카드/구성원/카테고리 · 금액 · 상태 배지). 행 클릭 → 상세 Dialog에서
  * 카테고리 변경(applyRule)/공개 범위/메모/정상·중복 표시/취소연결을 처리한다.
@@ -11,7 +11,7 @@
  * - 타인 summary_only(masked) 항목은 가맹점을 '(비공개)'로 표기하고 편집을 막는다.
  * - 권한은 서버(서비스 계층)가 강제하며, 실패 시 배너로 메시지를 노출한다.
  * ------------------------------------------------------------------------- */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -51,7 +51,12 @@ import { ListRow, Money, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { categoryIcon } from "@/lib/category-icon";
-import { formatDate, formatMonth, formatWon, currentMonth } from "@/lib/format";
+import {
+  formatDate,
+  formatMoney,
+  formatMonth,
+  currentMonth,
+} from "@/lib/format";
 import { memberColorClass } from "@/lib/member-color";
 import { useHousehold } from "@/lib/household-context";
 import {
@@ -60,9 +65,10 @@ import {
   useCategoryList,
   useCreateCategory,
   useHouseholdMembers,
-  useTransactions,
+  useInfiniteTransactions,
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { AddTransactionDialog } from "./add-transaction-dialog";
 
 /* -------------------------------------------------------------------------- */
 /* Local types                                                                */
@@ -241,23 +247,11 @@ export default function TransactionsPage() {
   /** 인라인 카테고리 변경 시 merchant_category_rules로 저장할지(applyRule). */
   const [applyRule, setApplyRule] = useState(false);
 
-  // --- cursor 페이지네이션(커서 히스토리 + 현재 인덱스) ---
-  const [pageStack, setPageStack] = useState<Array<string | undefined>>([
-    undefined,
-  ]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = pageStack[pageIndex];
-
-  const resetPage = () => {
-    setPageStack([undefined]);
-    setPageIndex(0);
-  };
-
-  // 필터 변경 시 항상 첫 페이지로 되돌린다. (Radix Select는 문자열 값을 직접 준다)
+  // 무한 스크롤: 필터 변경 시 queryKey가 바뀌어 자동으로 첫 페이지부터 새로 로드된다
+  // (별도 페이지 리셋 불필요). (Radix Select는 문자열 값을 직접 준다)
   const bindFilter =
     (setter: (value: string) => void) => (value: string) => {
       setter(value);
-      resetPage();
     };
 
   /** 모든 필터를 기본값(이번 달·전체)으로 되돌린다(빈 상태 CTA). */
@@ -268,7 +262,6 @@ export default function TransactionsPage() {
     setCategoryId("");
     setType("");
     setStatus("");
-    resetPage();
   };
 
   const hasActiveFilter =
@@ -300,6 +293,15 @@ export default function TransactionsPage() {
     for (const m of members) map.set(m.memberId, m.color);
     return map;
   }, [members]);
+
+  // 거래 색은 "카드 소유자" 기준(문자 전달자가 아니라 카드 주인). 카드 화면 색과 일치.
+  const cardOwnerById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of cards) map.set(c.id, c.ownerMemberId);
+    return map;
+  }, [cards]);
+  const attributedMemberId = (txn: TransactionSummary) =>
+    (txn.cardId ? cardOwnerById.get(txn.cardId) : undefined) ?? txn.memberId;
 
   const cardById = useMemo(() => {
     const map = new Map<string, { alias: string; issuer: string }>();
@@ -341,23 +343,35 @@ export default function TransactionsPage() {
       from,
       to,
       limit: PAGE_SIZE,
-      cursor: cursor || undefined,
     }),
-    [memberId, cardId, categoryId, type, status, from, to, cursor],
+    [memberId, cardId, categoryId, type, status, from, to],
   );
-  const listQuery = useTransactions(filters);
+  const listQuery = useInfiniteTransactions(filters);
 
-  const items = listQuery.data?.items ?? [];
-  const nextCursor = listQuery.data?.nextCursor ?? null;
-  const canPrev = pageIndex > 0;
-  const canNext = nextCursor != null;
+  // 무한 스크롤: 모든 페이지의 items를 평탄화한다.
+  const items = useMemo(
+    () => listQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [listQuery.data],
+  );
 
-  const goNext = () => {
-    if (nextCursor == null) return;
-    setPageStack((prev) => [...prev.slice(0, pageIndex + 1), nextCursor]);
-    setPageIndex((i) => i + 1);
-  };
-  const goPrev = () => setPageIndex((i) => Math.max(0, i - 1));
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = listQuery;
+
+  // 리스트 하단 sentinel이 뷰포트에 들어오면 다음 페이지를 당겨온다(200px 선로딩).
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !hasNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // --- 날짜별 그룹(발생일 기준, 서버 정렬 순서 유지) ---
   const groups = useMemo<DayGroup[]>(() => {
@@ -380,7 +394,13 @@ export default function TransactionsPage() {
       group.items.push(txn);
       // 합계 제외(excludedAt) 거래는 서버 집계(summary/budget/analytics)와 동일하게
       // 날짜 소계에서도 뺀다 — 같은 행을 '제외됨'으로 표시하면서 소계엔 더하면 모순.
-      if (txn.transactionType === "approval" && txn.excludedAt == null) {
+      // amount는 minor units라 통화가 섞이면 소계가 무의미하므로 KRW만 합산한다
+      // (외화 건은 개별 행에 자기 통화로 표시됨; 서버 KRW 집계 원칙과 동일).
+      if (
+        txn.transactionType === "approval" &&
+        txn.excludedAt == null &&
+        (txn.currency ?? "KRW") === "KRW"
+      ) {
         group.total += txn.netAmount;
       }
     }
@@ -392,6 +412,7 @@ export default function TransactionsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [memoTarget, setMemoTarget] = useState<TransactionSummary | null>(null);
   const [linkTarget, setLinkTarget] = useState<TransactionSummary | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   // 푸시 알림 딥링크(?txn=<id>) → 해당 거래 상세 열기. 목록에 없을 수 있어
   // (다른 월/필터) 단건 조회로 폴백한다. 볼 수 없는 거래(private/masked)는
@@ -532,8 +553,9 @@ export default function TransactionsPage() {
     return cardById.get(txn.cardId)?.alias ?? "카드";
   };
 
+  // 색과 동일하게 카드 소유자 기준 이름(미연결이면 거래 귀속 구성원).
   const memberNameOf = (txn: TransactionSummary): string =>
-    memberNameById.get(txn.memberId) ?? "구성원";
+    memberNameById.get(attributedMemberId(txn)) ?? "구성원";
 
   const subtitleOf = (txn: TransactionSummary): string => {
     const parts = [
@@ -550,11 +572,16 @@ export default function TransactionsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight">거래 내역</h1>
-        <p className="text-muted-foreground text-sm">
-          우리 가족의 카드 소비를 한곳에서 볼 수 있어요
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="sr-only">거래 내역</h1>
+          <p className="text-muted-foreground text-sm">
+            우리 가족의 카드 소비를 한곳에서 볼 수 있어요
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAddOpen(true)}>
+          거래 추가
+        </Button>
       </div>
 
       {/* 필터 칩 행 — Select 로직/sentinel 매핑은 그대로, 트리거만 칩 스타일 */}
@@ -775,10 +802,8 @@ export default function TransactionsPage() {
                             txn.masked || excluded
                               ? "bg-muted text-muted-foreground"
                               : memberColorClass(
-                                  txn.memberId,
-                                  txn.memberId
-                                    ? memberColorById.get(txn.memberId)
-                                    : null,
+                                  attributedMemberId(txn),
+                                  memberColorById.get(attributedMemberId(txn)),
                                 )
                           }
                           title={
@@ -792,12 +817,22 @@ export default function TransactionsPage() {
                           }
                           subtitle={subtitleOf(txn)}
                           value={
-                            <span className={cn(excluded && "line-through opacity-60")}>
-                              {isCancellation ? (
-                                <Money amount={-txn.amount} muted />
-                              ) : (
-                                <Money amount={txn.netAmount} />
+                            <span
+                              className={cn(
+                                "flex flex-col items-end",
+                                excluded && "line-through opacity-60",
                               )}
+                            >
+                              {isCancellation ? (
+                                <Money amount={-txn.amount} currency={txn.currency} muted />
+                              ) : (
+                                <Money amount={txn.netAmount} currency={txn.currency} />
+                              )}
+                              {txn.originalCurrency && txn.originalAmount != null ? (
+                                <span className="text-muted-foreground text-[11px]">
+                                  {formatMoney(txn.originalAmount, txn.originalCurrency)}
+                                </span>
+                              ) : null}
                             </span>
                           }
                           valueSub={
@@ -832,32 +867,28 @@ export default function TransactionsPage() {
                 </section>
               ))}
 
-              <div className="flex flex-col items-center gap-3">
-                {canNext ? (
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    disabled={listQuery.isFetching}
-                    onClick={goNext}
-                  >
-                    다음 거래 보기
-                  </Button>
-                ) : null}
-                <div className="flex items-center gap-3">
+              {/* 무한 스크롤 sentinel: 뷰포트 진입 시 자동 로드(관찰 실패 대비 버튼 폴백) */}
+              <div
+                ref={loadMoreRef}
+                className="flex flex-col items-center gap-2 py-2"
+              >
+                {isFetchingNextPage ? (
                   <span className="text-muted-foreground text-[13px]">
-                    {items.length}건 · {pageIndex + 1}페이지
+                    불러오는 중…
                   </span>
-                  {canPrev ? (
-                    <button
-                      type="button"
-                      onClick={goPrev}
-                      disabled={listQuery.isFetching}
-                      className="text-accent-foreground text-[13px] font-medium disabled:opacity-50"
-                    >
-                      이전 페이지로
-                    </button>
-                  ) : null}
-                </div>
+                ) : hasNextPage ? (
+                  <button
+                    type="button"
+                    onClick={() => void fetchNextPage()}
+                    className="text-accent-foreground text-[13px] font-medium"
+                  >
+                    더 보기
+                  </button>
+                ) : (
+                  <span className="text-muted-foreground text-[13px]">
+                    {items.length}건 · 마지막이에요
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -910,6 +941,8 @@ export default function TransactionsPage() {
           onConfirm={(approvalId) => confirmLink(linkTarget, approvalId)}
         />
       ) : null}
+
+      <AddTransactionDialog open={addOpen} onOpenChange={setAddOpen} />
     </div>
   );
 }
@@ -995,7 +1028,7 @@ function TransactionDetailDialog({
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto">
+      <DialogContent className="max-h-[92dvh] gap-3 overflow-y-auto overscroll-contain">
         <DialogHeader>
           <DialogTitle>{merchantLabel(txn)}</DialogTitle>
           <DialogDescription>
@@ -1004,7 +1037,7 @@ function TransactionDetailDialog({
         </DialogHeader>
 
         {/* 금액 요약 */}
-        <div className="bg-muted flex flex-col items-center gap-1 rounded-xl px-4 py-5">
+        <div className="bg-muted flex flex-col items-center gap-1 rounded-xl px-4 py-4">
           <span className="text-muted-foreground text-[13px]">
             {isCancellation ? "취소 금액" : "결제 금액"}
           </span>
@@ -1015,11 +1048,20 @@ function TransactionDetailDialog({
             )}
           >
             {isCancellation ? (
-              <Money amount={-txn.amount} />
+              <Money amount={-txn.amount} currency={txn.currency} />
             ) : (
-              <Money amount={txn.netAmount} />
+              <Money amount={txn.netAmount} currency={txn.currency} />
             )}
           </span>
+          {txn.originalCurrency && txn.originalAmount != null ? (
+            <span className="text-muted-foreground text-[13px]">
+              해외 결제 {formatMoney(txn.originalAmount, txn.originalCurrency)}
+              {txn.exchangeRate
+                ? ` · 환율 ${txn.exchangeRate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}`
+                : ""}{" "}
+              (승인 시점 환산, 실제 청구액은 다를 수 있어요)
+            </span>
+          ) : null}
           {excluded ? (
             <span className="bg-background text-muted-foreground mt-1 rounded-full px-2 py-0.5 text-xs font-medium">
               합계에서 제외됨
@@ -1027,8 +1069,8 @@ function TransactionDetailDialog({
           ) : null}
           {!isCancellation && txn.netAmount !== txn.amount ? (
             <span className="text-muted-foreground text-[13px]">
-              원래 {formatWon(txn.amount)}에서 취소{" "}
-              {formatWon(txn.cancelledAmount)}이 반영됐어요
+              원래 {formatMoney(txn.amount, txn.currency)}에서 취소{" "}
+              {formatMoney(txn.cancelledAmount, txn.currency)}이 반영됐어요
             </span>
           ) : null}
           <span className="flex items-center gap-1.5 pt-1">
@@ -1046,7 +1088,7 @@ function TransactionDetailDialog({
           </span>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {/* 카드 연결/재지정 — 미연결·모호(pending_review) 거래 해소 경로 */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="detail-card">카드</Label>
@@ -1360,13 +1402,16 @@ function LinkCancellationModal({
   const candidates = (approvalsQuery.data?.items ?? []).filter(
     (a) =>
       (a.status === "approved" || a.status === "partially_cancelled") &&
+      // 동일 통화 승인만 후보(amount=minor units — 이종 통화 잔액 비교는 무의미).
+      a.currency === cancellation.currency &&
       a.amount - a.cancelledAmount >= cancellation.amount,
   );
 
   const options: Option[] = candidates.map((a) => ({
     value: a.id,
-    label: `${merchantLabel(a)} · 남은 금액 ${formatWon(
+    label: `${merchantLabel(a)} · 남은 금액 ${formatMoney(
       a.amount - a.cancelledAmount,
+      a.currency,
     )} · ${formatDate(a.approvedAt, { dateOnly: true })}`,
   }));
 
@@ -1376,8 +1421,8 @@ function LinkCancellationModal({
         <DialogHeader>
           <DialogTitle>어떤 결제를 취소한 건가요?</DialogTitle>
           <DialogDescription>
-            이 취소 금액 {formatWon(cancellation.amount)}을 원래 결제와 연결해
-            주세요. 연결하면 순지출이 자동으로 다시 계산돼요.
+            이 취소 금액 {formatMoney(cancellation.amount, cancellation.currency)}을 원래
+            결제와 연결해 주세요. 연결하면 순지출이 자동으로 다시 계산돼요.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">

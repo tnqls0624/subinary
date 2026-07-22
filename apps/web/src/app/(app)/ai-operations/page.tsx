@@ -8,14 +8,13 @@ import {
   Database,
   Gauge,
   Loader2,
-  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 
 import type { LearningOperationsMetricsResponse } from "@family/contracts";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { PageBackHeader } from "@/components/widgets";
 import {
   Card,
   CardContent,
@@ -281,24 +280,10 @@ export default function AiOperationsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-4">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">AI 파이프라인 운영</h1>
-          <p className="text-muted-foreground text-sm">
-            큐, 실행, 토큰, 데이터 품질을 원문 없이 확인해요.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          disabled={query.isFetching}
-          onClick={() => void query.refetch()}
-          aria-label="운영 지표 새로고침"
-        >
-          <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
+      <PageBackHeader
+        title="AI 파이프라인 운영"
+        subtitle="큐, 실행, 토큰, 데이터 품질을 원문 없이 확인해요."
+      />
 
       {query.isLoading ? (
         <Card className="items-center p-8 text-sm">

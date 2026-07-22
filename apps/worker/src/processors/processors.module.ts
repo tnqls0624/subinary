@@ -2,12 +2,14 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
+import { FxRateService } from '../promotion/fx-rate.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { OutboxDispatcherService } from '../outbox/outbox-dispatcher.service';
 import { WorkerModelServingService } from '../model-serving/model-serving.service';
 import { LocalMerchantClassifierService } from '../model-serving/local-merchant-classifier.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import { FcmService } from '../notifications/fcm.service';
+import { NotificationSchedulerService } from '../notifications/notification-scheduler.service';
 import { StorageModule } from '../storage/storage.module';
 import { CardSmsParseProcessor } from './card-sms-parse.processor';
 import { CategorySuggestProcessor } from './category-suggest.processor';
@@ -58,6 +60,8 @@ import { TestProcessor } from './test.processor';
     TestProcessor,
     CardSmsParseProcessor,
     TransactionPromotionService,
+    // 외화 거래 승격 시 승인 시점 환율로 KRW 환산(원화 지출/예산 통합).
+    FxRateService,
     // 거래 승격/파싱 완료를 Redis pub/sub로 발행하는 실시간 힌트 퍼블리셔.
     RealtimePublisherService,
     SlackImportProcessor,
@@ -69,6 +73,8 @@ import { TestProcessor } from './test.processor';
     // 새 거래 승격 시 FCM 푸시를 발송(수신자 해석·마스킹·선호 필터).
     NotificationDispatchProcessor,
     FcmService,
+    // 스케줄 알림(확인 리마인더·주간 요약)을 주기적으로 enqueue.
+    NotificationSchedulerService,
     OutboxDispatcherService,
     WorkerModelServingService,
     LocalMerchantClassifierService,

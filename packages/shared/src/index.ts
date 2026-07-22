@@ -27,6 +27,7 @@ export type { OutboxEventType, OutboxQueueRoute } from './outbox.js';
 export {
   buildOperationalAlertWebhookPayload,
   calculateOperationalAlertRetryDelayMs,
+  sanitizeOperationalAlertEnvelope,
 } from './operational-alert.js';
 export type {
   OperationalAlertEnvelope,
@@ -40,7 +41,14 @@ export {
   summarizeOperationalQueues,
 } from './operational-metrics.js';
 export type { OperationalQueueMetricInput } from './operational-metrics.js';
-export { assertKrwInteger, sumKrw } from './money.js';
+export {
+  assertKrwInteger,
+  assertMinorUnits,
+  currencyExponent,
+  formatMoney,
+  minorToMajor,
+  sumKrw,
+} from './money.js';
 export {
   REALTIME_CHANNEL_PREFIX,
   REALTIME_CHANNEL_PATTERN,
@@ -94,5 +102,15 @@ export type {
   MerchantDatasetSplit,
 } from './merchant-classifier.js';
 export { createMerchantCategoryTargetId } from './merchant-label.js';
+export {
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_CHANNEL_META,
+  notificationDeepLink,
+} from './notifications.js';
+export type {
+  NotificationKind,
+  NotificationChannelMeta,
+  NotificationDispatchJob,
+} from './notifications.js';
 export { nowUtc, toSeoulString } from './time.js';
 export type { Visibility, Sensitivity, WorkspaceKind } from './types.js';

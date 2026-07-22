@@ -79,7 +79,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ListRow, StatusBadge } from "@/components/widgets";
+import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -300,14 +300,14 @@ export default function HouseholdPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">가족</h1>
-        <p className="text-muted-foreground text-sm">
-          {activeMembership?.name
+      <PageBackHeader
+        title="가족"
+        subtitle={
+          activeMembership?.name
             ? `${activeMembership.name} 가족의 구성원과 초대를 관리해요.`
-            : "가족 구성원과 초대를 관리해요."}
-        </p>
-      </div>
+            : "가족 구성원과 초대를 관리해요."
+        }
+      />
 
       {/* 구성원 */}
       <Card>

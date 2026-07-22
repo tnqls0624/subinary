@@ -26,14 +26,20 @@ export const cardCreateRequestSchema = z.object({
     .regex(/^\d{4}$/, 'maskedNumber must be exactly the last 4 digits')
     .optional(),
   visibility: cardVisibilitySchema.default('household'),
+  // 카드 소유자(가족 구성원). 생략하면 서버가 등록자 본인으로 설정한다. 지정 시
+  // 같은 household의 활성 구성원이어야 한다(서버 검증). 아이콘 색은 소유자를 따른다.
+  ownerMemberId: z.string().uuid().optional(),
 });
 export type CardCreateRequest = z.infer<typeof cardCreateRequestSchema>;
 
-/** `PATCH /v1/cards/:id` — update a card's alias, visibility, or status. */
+/** `PATCH /v1/cards/:id` — update a card's alias, visibility, status, or owner. */
 export const cardUpdateRequestSchema = z.object({
   alias: z.string().min(1).max(100).optional(),
   visibility: cardVisibilitySchema.optional(),
   status: cardStatusSchema.optional(),
+  // 소유자 재지정. 같은 household의 활성 구성원이어야 한다(서버 검증). 아이콘 색이
+  // 새 소유자 색으로 바뀐다.
+  ownerMemberId: z.string().uuid().optional(),
 });
 export type CardUpdateRequest = z.infer<typeof cardUpdateRequestSchema>;
 

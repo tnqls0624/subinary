@@ -10,6 +10,7 @@
  * - 멤버십 0개: 탭바 없이 <Onboarding/>(가족 생성/초대 수락)만 노출.
  * ------------------------------------------------------------------------- */
 import {
+  Bell,
   CreditCard,
   Home,
   LayoutGrid,
@@ -33,6 +34,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
+import { useUnreadCount } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -64,8 +66,28 @@ function BrandMark() {
         <CreditCard className="size-4" />
       </span>
       <span className="hidden text-sm font-bold tracking-tight sm:inline">
-        Family Memory
+        모아
       </span>
+    </Link>
+  );
+}
+
+/** 헤더 알림 벨 + 안읽음 뱃지. 탭 → /notifications. */
+function NotificationBell() {
+  const { data } = useUnreadCount();
+  const count = data?.count ?? 0;
+  return (
+    <Link
+      href="/notifications"
+      aria-label={count > 0 ? `알림 ${count}건` : "알림"}
+      className="hover:bg-muted relative flex size-9 items-center justify-center rounded-full transition-colors"
+    >
+      <Bell className="size-5" aria-hidden="true" />
+      {count > 0 ? (
+        <span className="bg-destructive text-destructive-foreground absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold">
+          {count > 9 ? "9+" : count}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -245,6 +267,7 @@ export default function AppLayout({
             <HouseholdSwitcher />
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <NotificationBell />
             <ThemeToggle />
             <UserMenu />
           </div>

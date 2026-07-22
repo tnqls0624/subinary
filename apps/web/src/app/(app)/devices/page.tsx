@@ -68,7 +68,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ListRow, StatusBadge } from "@/components/widgets";
+import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -211,12 +211,10 @@ export default function DevicesPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">장치</h1>
-        <p className="text-muted-foreground text-sm">
-          휴대폰을 등록하면 카드 문자를 자동으로 모아요.
-        </p>
-      </div>
+      <PageBackHeader
+        title="장치"
+        subtitle="휴대폰을 등록하면 카드 문자를 자동으로 모아요."
+      />
 
       {/* 장치 목록 */}
       <Card>

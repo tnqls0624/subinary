@@ -61,7 +61,7 @@ import {
   useCategoryList,
   useHouseholdMembers,
 } from "@/lib/queries";
-import { formatMonth, formatWon } from "@/lib/format";
+import { formatMoney, formatMonth } from "@/lib/format";
 
 /** select 옵션(로컬 타입). */
 type Option = { value: string; label: string };
@@ -98,7 +98,7 @@ function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
     return (
       <p className="text-destructive text-[13px] font-medium">
         {overBy > 0
-          ? `예산을 ${formatWon(overBy)} 넘었어요`
+          ? `예산을 ${formatMoney(overBy, budget.currency)} 넘었어요`
           : "예산을 모두 썼어요"}
       </p>
     );
@@ -112,7 +112,7 @@ function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
   }
   return (
     <p className="text-muted-foreground text-[13px]">
-      {formatWon(budget.amount - budget.spent)} 더 쓸 수 있어요
+      {formatMoney(budget.amount - budget.spent, budget.currency)} 더 쓸 수 있어요
     </p>
   );
 }
@@ -270,7 +270,7 @@ export default function BudgetsPage() {
       {/* 페이지 헤더 + 주 CTA(상단 우측) ----------------------------------- */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">예산</h1>
+          <h1 className="sr-only">예산</h1>
           <p className="text-muted-foreground text-sm">
             이번 달 얼마나 썼는지 한눈에 확인해요
           </p>
@@ -346,6 +346,7 @@ export default function BudgetsPage() {
                   label={budget.name ?? budget.scopeLabel}
                   spent={budget.spent}
                   amount={budget.amount}
+                  currency={budget.currency}
                   usageRate={budget.usageRate}
                   meta={
                     budget.name

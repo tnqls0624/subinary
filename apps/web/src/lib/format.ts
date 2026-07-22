@@ -1,10 +1,18 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 표시 포맷 유틸 (Phase 5 §6.1)
  *
- * 모든 금액은 KRW 정수, 모든 시각은 Asia/Seoul 기준으로 표시한다(PRD §3.3).
- * 계산은 서버(SQL)에서 끝났다고 가정하며, 여기서는 표시 변환만 담당한다.
+ * 금액은 해당 통화의 minor units 정수, 시각은 Asia/Seoul 기준으로 표시한다
+ * (PRD §3.3). 계산은 서버(SQL)에서 끝났다고 가정하며, 여기서는 표시 변환만 담당한다.
+ * 개별 카드거래 금액은 통화별 포맷이 필요하므로 {@link formatMoney}(shared 단일
+ * 원천)를 사용한다. formatWon/formatKRW는 KRW 전용 집계(월간/예산 등)에만 쓴다.
  * ------------------------------------------------------------------------- */
-import { DEFAULT_TIMEZONE } from "@family/shared";
+import { DEFAULT_TIMEZONE, formatMoney } from "@family/shared";
+
+/**
+ * minor-units 금액을 통화별로 포맷한다(₩12,500 / $22.00 …). shared 헬퍼 재노출 —
+ * 개별 카드거래 금액 표시의 단일 진입점(worker·web·mobile 공통 규약).
+ */
+export { formatMoney };
 
 /** KRW 통화 포맷터. 소수점 없음(원화는 정수). */
 const krwFormatter = new Intl.NumberFormat("ko-KR", {
@@ -73,6 +81,30 @@ export function formatDate(
   if (Number.isNaN(parsed.getTime())) return "—";
   const formatter = opts?.dateOnly ? dateOnlyFormatter : dateTimeFormatter;
   return formatter.format(parsed);
+}
+
+/**
+ * ISO 시각을 상대 표기로("방금·N분 전·N시간 전·어제·N일 전·M월 D일"). 알림함용.
+ * 7일 이상 지난 건 Asia/Seoul 기준 월/일 절대 표기. null/무효는 빈 문자열.
+ */
+export function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const diffMs = Date.now() - then.getTime();
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 1) return "방금";
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return "어제";
+  if (day < 7) return `${day}일 전`;
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: DEFAULT_TIMEZONE,
+    month: "long",
+    day: "numeric",
+  }).format(then);
 }
 
 /** `YYYY-MM` → `2026년 7월` 표기. 형식이 아니면 원문 반환. */

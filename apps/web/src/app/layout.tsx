@@ -5,13 +5,13 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Family Memory AI",
-  description: "가족 금융 웹앱 — 대시보드 · 거래 · 예산 · 장치 · 가족 관리",
-  applicationName: "Family Memory",
+  title: "모아",
+  description: "가족과 함께 모으는 가계부 — 대시보드 · 거래 · 예산 · 장치 · 가족 관리",
+  applicationName: "모아",
   // iOS 홈화면/네이티브 셸: 상태바·전체화면 힌트(웹에선 무해).
   appleWebApp: {
     capable: true,
-    title: "Family Memory",
+    title: "모아",
     statusBarStyle: "default",
   },
   // 금액/날짜 텍스트를 iOS가 전화번호 등으로 오탐지해 링크화하는 것 방지.

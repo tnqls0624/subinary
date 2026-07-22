@@ -28,7 +28,7 @@ import { create } from "zustand";
 
 import { API_BASE_URL, ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import { formatWon } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { useHousehold } from "@/lib/household-context";
 import { initPushNotifications } from "@/lib/native";
 import { invalidateTransactionScope } from "@/lib/queries";
@@ -92,6 +92,15 @@ function writeCursor(householdId: string, value: string): void {
   }
 }
 
+/**
+ * 거래 탭 경로 판정 — 모바일 정적 export는 `trailingSlash: true`(next.config)라
+ * pathname이 `/transactions/`(슬래시 포함)로 온다. 정확 일치(`=== "/transactions"`)만
+ * 쓰면 모바일에서 배지가 영영 안 사라지고 폴링이 계속 재증가시키므로 둘 다 허용한다.
+ */
+function isTransactionsPath(pathname: string): boolean {
+  return pathname === "/transactions" || pathname === "/transactions/";
+}
+
 /** 앱 셸((app)/layout)에 1회 마운트되는 무렌더 컴포넌트. */
 export function ActivityProvider() {
   const { status, authedFetch } = useAuth();
@@ -143,7 +152,7 @@ export function ActivityProvider() {
       if (fresh.length === 0) return;
 
       invalidateTransactionScope(queryClient);
-      if (pathnameRef.current === "/transactions") return; // 화면이 직접 갱신됨.
+      if (isTransactionsPath(pathnameRef.current)) return; // 화면이 직접 갱신됨.
 
       bump(fresh.length);
       // 스냅샷이 상한(ACTIVITY_SCAN_LIMIT)에 가득 찼으면 더 있을 수 있어 '+' 표기.
@@ -156,7 +165,7 @@ export function ActivityProvider() {
       const noun = isCancel ? "결제 취소" : "거래";
       const message =
         fresh.length === 1 && merchant
-          ? `${merchant} ${formatWon(first.amount)} ${noun}가 기록됐어요`
+          ? `${merchant} ${formatMoney(first.amount, first.currency)} ${noun}가 기록됐어요`
           : `새 ${noun} ${fresh.length}${many ? "+" : ""}건이 기록됐어요`;
       toast.info(message, {
         action: { label: "보기", onClick: () => router.push("/transactions") },
@@ -191,7 +200,7 @@ export function ActivityProvider() {
   // 거래 탭 방문 = 확인 완료 → 배지 해제 + 커서 전진(재토스트 방지).
   // 가족 전환 시에도 배지 리셋.
   useEffect(() => {
-    if (pathname === "/transactions") {
+    if (isTransactionsPath(pathname)) {
       clear();
       void checkActivityRef.current();
     }
@@ -228,6 +237,9 @@ export function ActivityProvider() {
       hintTimer = window.setTimeout(() => {
         hintTimer = null;
         invalidateTransactionScope(queryClient);
+        // 새 활동(거래 승격 등)은 알림도 만들므로 헤더 벨 뱃지/목록도 갱신.
+        void queryClient.invalidateQueries({ queryKey: ["notification-unread"] });
+        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         void checkActivityRef.current();
       }, HINT_DEBOUNCE_MS);
     };

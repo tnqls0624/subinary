@@ -179,19 +179,46 @@ export class TransactionService {
     if (query.categoryId) {
       conditions.push(eq(schema.cardTransactions.categoryId, query.categoryId));
     }
+    // 기간 필터는 승인시각(approvedAt) 기준이되, 미파싱으로 NULL인 거래는 SQL
+    // 3치 논리상 `NULL >= from`이 항상 false라 어떤 달을 골라도 목록에서 빠진다.
+    // createdAt(문자 수신 시각)으로 폴백해 누락을 막는다(정렬 축과도 일치).
+    // COALESCE를 SQL 표현식으로 만들면 드라이버가 컬럼 타입을 몰라 Date 바인딩이
+    // 깨지므로, 컬럼 기반 OR(approvedAt 우선, NULL이면 createdAt)로 표현한다.
     const from = this.parseDate(query.from, 'from');
     if (from) {
-      conditions.push(gte(schema.cardTransactions.approvedAt, from));
+      conditions.push(
+        or(
+          gte(schema.cardTransactions.approvedAt, from),
+          and(
+            isNull(schema.cardTransactions.approvedAt),
+            gte(schema.cardTransactions.createdAt, from),
+          ),
+        ) as SQL,
+      );
     }
     const to = this.parseDate(query.to, 'to');
     if (to) {
-      conditions.push(lt(schema.cardTransactions.approvedAt, to));
+      conditions.push(
+        or(
+          lt(schema.cardTransactions.approvedAt, to),
+          and(
+            isNull(schema.cardTransactions.approvedAt),
+            lt(schema.cardTransactions.createdAt, to),
+          ),
+        ) as SQL,
+      );
     }
+    // 금액 필터는 원(KRW) 기준값이고 amount는 minor units라, 외화(다른 스케일)와
+    // 교차 비교하면 틀린다($22.00=2200이 2,000~3,000원 필터에 오매칭). 금액 필터가
+    // 걸리면 KRW 거래로 스코프를 제한한다.
     const minAmount = this.parseAmount(query.minAmount, 'minAmount');
+    const maxAmount = this.parseAmount(query.maxAmount, 'maxAmount');
+    if (minAmount !== undefined || maxAmount !== undefined) {
+      conditions.push(eq(schema.cardTransactions.currency, 'KRW'));
+    }
     if (minAmount !== undefined) {
       conditions.push(gte(schema.cardTransactions.amount, minAmount));
     }
-    const maxAmount = this.parseAmount(query.maxAmount, 'maxAmount');
     if (maxAmount !== undefined) {
       conditions.push(lte(schema.cardTransactions.amount, maxAmount));
     }
@@ -288,6 +315,9 @@ export class TransactionService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // '중복이라 제외' 확정 거래는 요약 합계에서도 뺀다(analytics/budgets와 동일).
       isNull(schema.cardTransactions.excludedAt),
+      // 요약 합계는 KRW 전용(amount=minor units라 외화 혼입 시 오염). 응답에도
+      // currency:'KRW' 마커를 내려 클라이언트가 ₩ 포맷을 확정하게 한다.
+      eq(schema.cardTransactions.currency, 'KRW'),
       this.visibilityScope(actor.memberId),
       gte(schema.cardTransactions.approvedAt, from),
       lt(schema.cardTransactions.approvedAt, to),
@@ -322,6 +352,7 @@ export class TransactionService {
         to: to.toISOString(),
         timezone: DEFAULT_TIMEZONE,
       },
+      currency: 'KRW',
       totalNet,
       totalApproved,
       totalCancelled,
@@ -812,6 +843,11 @@ export class TransactionService {
     if (approval.transactionType !== 'approval') {
       throw new BadRequestException('target is not an approval transaction');
     }
+    // amount는 minor units라 통화가 다르면 뺄셈/비교가 무의미하다(USD 취소를 KRW
+    // 승인에 연결 등). 동일 통화 거래끼리만 연결을 허용한다.
+    if (approval.currency !== cancellation.currency) {
+      throw new BadRequestException('transactions have different currencies');
+    }
 
     const remaining = approval.amount - approval.cancelledAmount;
     if (cancellation.amount > remaining) {
@@ -1228,7 +1264,7 @@ function maskedFor(txn: schema.CardTransaction, actorMemberId: string): boolean 
 }
 
 /** Projects a transaction row (+ category slug) to its contract summary. */
-function buildSummary(
+export function buildSummary(
   txn: schema.CardTransaction,
   categorySlug: string | null,
   masked: boolean,
@@ -1244,6 +1280,9 @@ function buildSummary(
     cancelledAmount: txn.cancelledAmount,
     netAmount: txn.netAmount,
     currency: txn.currency,
+    originalAmount: txn.originalAmount,
+    originalCurrency: txn.originalCurrency,
+    exchangeRate: txn.exchangeRate,
     merchantRaw: masked ? null : txn.merchantRaw,
     merchantNormalized: masked ? null : txn.merchantNormalized,
     categoryId: txn.categoryId,

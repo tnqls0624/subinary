@@ -67,7 +67,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ListRow, StatusBadge } from "@/components/widgets";
+import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -78,6 +78,7 @@ import {
   useHouseholdMembers,
 } from "@/lib/queries";
 import { memberColorClass } from "@/lib/member-color";
+import { cn } from "@/lib/utils";
 
 /** 표준 카드사 목록 — 분석 라벨('alias · issuer') 표기 일관성을 위해 자유입력 대신 고정. */
 const ISSUER_OPTIONS = [
@@ -131,6 +132,68 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
+/** 소유자 목록 항목(구성원 이름 + memberId). */
+interface OwnerOption {
+  memberId: string;
+  name: string;
+}
+
+/**
+ * 소유자 선택 + 실시간 색 미리보기. 좌측 큰 아이콘은 선택된 소유자의 색을 즉시
+ * 반영해(카드 목록의 아이콘과 동일 규칙) "소유자를 바꾸면 색이 바뀐다"를 폼에서
+ * 바로 보여준다. 각 선택지에도 해당 구성원 색 스와치를 붙인다.
+ */
+function OwnerSelect({
+  id,
+  members,
+  value,
+  onChange,
+  colorClassOf,
+}: {
+  id: string;
+  members: OwnerOption[];
+  value: string;
+  onChange: (memberId: string) => void;
+  colorClassOf: (memberId: string) => string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className={cn(
+          "flex size-10 shrink-0 items-center justify-center rounded-full transition-colors",
+          value ? colorClassOf(value) : "bg-muted text-muted-foreground",
+        )}
+        aria-hidden="true"
+      >
+        <CreditCard className="size-5" />
+      </span>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue placeholder="소유자를 선택하세요" />
+        </SelectTrigger>
+        <SelectContent>
+          {members.map((m) => (
+            <SelectItem key={m.memberId} value={m.memberId}>
+              <span className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "flex size-5 items-center justify-center rounded-full",
+                    colorClassOf(m.memberId),
+                  )}
+                  aria-hidden="true"
+                >
+                  <CreditCard className="size-3" />
+                </span>
+                {m.name}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 /** '****1234' / '1234' 등 저장 포맷 차이를 흡수해 뒤 4자리만 뽑는다. */
 function lastFour(masked: string | null | undefined): string {
   if (!masked) return "";
@@ -158,6 +221,18 @@ export default function CardsPage() {
     for (const m of membersQuery.data ?? []) map.set(m.memberId, m.color);
     return map;
   }, [membersQuery.data]);
+
+  // 소유자 선택지(활성 구성원) + 소유자 memberId → 아이콘 색 클래스(목록과 동일 규칙).
+  const ownerOptions = useMemo<OwnerOption[]>(
+    () =>
+      (membersQuery.data ?? []).map((m) => ({
+        memberId: m.memberId,
+        name: m.userId === user?.id ? `${m.name} (나)` : m.name,
+      })),
+    [membersQuery.data, user?.id],
+  );
+  const ownerColorClass = (memberId: string) =>
+    memberColorClass(memberId, memberColorById.get(memberId) ?? null);
   const isManagerRole = MANAGER_ROLES.includes(
     activeMembership?.role as (typeof MANAGER_ROLES)[number],
   );
@@ -170,13 +245,17 @@ export default function CardsPage() {
   const [alias, setAlias] = useState("");
   const [masked, setMasked] = useState("");
   const [visibility, setVisibility] = useState<CardVisibility>("household");
+  // 소유자(빈 값이면 본인 myMemberId로 폴백). 아이콘 색이 이 선택을 따른다.
+  const [ownerMemberId, setOwnerMemberId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const createOwnerId = ownerMemberId || myMemberId || "";
 
   // 수정 다이얼로그 상태(alias/visibility 만 — maskedNumber 는 계약상 수정 불가).
   const [editing, setEditing] = useState<CardSummary | null>(null);
   const [editAlias, setEditAlias] = useState("");
   const [editVisibility, setEditVisibility] =
     useState<CardVisibility>("household");
+  const [editOwnerMemberId, setEditOwnerMemberId] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
 
   // 상태 전환(비활성/재활성) 확인.
@@ -220,6 +299,7 @@ export default function CardsPage() {
       setAlias("");
       setMasked("");
       setVisibility("household");
+      setOwnerMemberId("");
       setFormError(null);
       setRegisterOpen(false);
     },
@@ -254,6 +334,8 @@ export default function CardsPage() {
       // 뒤 4자리는 선택이지만 자동연결의 유일한 키 → 4자리일 때만 전송, 아니면 생략.
       maskedNumber: maskedTail.length === 4 ? maskedTail : undefined,
       visibility,
+      // 소유자 미선택이면 서버가 본인으로 설정(undefined 전송).
+      ownerMemberId: createOwnerId || undefined,
     });
   }
 
@@ -261,6 +343,7 @@ export default function CardsPage() {
     setEditing(card);
     setEditAlias(card.alias);
     setEditVisibility(card.visibility);
+    setEditOwnerMemberId(card.ownerMemberId);
     setEditError(null);
   }
 
@@ -274,7 +357,12 @@ export default function CardsPage() {
     }
     updateMutation.mutate({
       id: editing.id,
-      body: { alias: editAlias.trim(), visibility: editVisibility },
+      body: {
+        alias: editAlias.trim(),
+        visibility: editVisibility,
+        // 소유자 변경 시 서버가 검증하고, 목록/폼 아이콘 색이 새 소유자 색으로 바뀐다.
+        ownerMemberId: editOwnerMemberId || undefined,
+      },
     });
   }
 
@@ -294,12 +382,10 @@ export default function CardsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">결제 카드</h1>
-        <p className="text-muted-foreground text-sm">
-          카드를 등록하면 카드 문자가 이 카드에 자동으로 연결돼요.
-        </p>
-      </div>
+      <PageBackHeader
+        title="결제 카드"
+        subtitle="카드를 등록하면 카드 문자가 이 카드에 자동으로 연결돼요."
+      />
 
       {/* 카드 목록 */}
       <Card>
@@ -471,6 +557,20 @@ export default function CardsPage() {
             </div>
 
             <div className="flex flex-col gap-2">
+              <Label htmlFor="card-owner">소유자</Label>
+              <OwnerSelect
+                id="card-owner"
+                members={ownerOptions}
+                value={createOwnerId}
+                onChange={setOwnerMemberId}
+                colorClassOf={ownerColorClass}
+              />
+              <p className="text-muted-foreground text-[13px]">
+                카드 아이콘 색이 소유자 색을 따라요.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
               <Label htmlFor="card-masked">카드번호 뒤 4자리</Label>
               <Input
                 id="card-masked"
@@ -576,6 +676,19 @@ export default function CardsPage() {
                 value={editAlias}
                 onChange={(e) => setEditAlias(e.target.value)}
               />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="edit-owner">소유자</Label>
+              <OwnerSelect
+                id="edit-owner"
+                members={ownerOptions}
+                value={editOwnerMemberId}
+                onChange={setEditOwnerMemberId}
+                colorClassOf={ownerColorClass}
+              />
+              <p className="text-muted-foreground text-[13px]">
+                소유자를 바꾸면 카드 아이콘 색도 바뀌어요.
+              </p>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="edit-visibility">공개 범위</Label>

@@ -19,6 +19,27 @@ import { DB } from '../database/database.constants';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
+/**
+ * refresh 토큰 회전 직후의 유예 창(ms).
+ *
+ * 액세스 토큰(15분)이 만료되는 순간, 여러 탭·대시보드 병렬 쿼리·SSE가 거의 동시에
+ * 같은(방금 회전된) refresh 토큰을 제시하는 것은 정상 동작이다. 회전은 즉시 기존
+ * 세션을 revoke하므로, 이 동시성 상황이 그대로 '재사용 공격'으로 오탐되면 전 세션이
+ * 무효화되어 로그인이 풀린다(클라이언트 single-flight는 탭 단위라 다중 탭을 못 막음).
+ *
+ * 더 큰 유실 경로는 모바일이다: 회전 요청은 서버에 도달해 기존 토큰이 revoke됐지만,
+ * 응답이 오기 전 iOS가 앱을 백그라운드 suspend/강제 종료하면 새 토큰을 저장하지 못하고
+ * stale 토큰이 남는다. 30분~1시간 뒤 재개해 그 stale 토큰을 재제시하면 30초 창으로는
+ * 못 덮어 '탈취'로 오판→전 세션 몰살(모바일·웹 동반 로그아웃)로 이어졌다.
+ *
+ * 따라서 이 창 안의 재제시는 탈취가 아니라 '응답 유실 후 재시도'로 보고, 401로 끊지
+ * 않고 새 세션을 발급해 조용히 복구한다(refresh 참조). 창을 넘긴 재제시만 실제 탈취로
+ * 간주해 전 세션을 무효화한다. 가족 2인 + 토큰이 Keychain(whenUnlockedThisDeviceOnly)/
+ * HttpOnly 쿠키에 있어 1회용 토큰 추출 난도가 매우 높은 위협 모델이라, 24h 복구 창의
+ * 재사용 노출은 자동 로그아웃 제거의 이득에 비해 수용 가능한 교환이다.
+ */
+const REFRESH_REUSE_GRACE_MS = 24 * 60 * 60 * 1000; // 24h
+
 /** Freshly minted access tokens + the raw refresh token for the cookie. */
 interface IssuedSession {
   tokens: AuthTokens;
@@ -153,12 +174,18 @@ export class AuthService {
       throw new UnauthorizedException('invalid session');
     }
 
-    // 재사용 탐지: 이미 revoke된 세션의 토큰이 다시 제시되면 전체 세션 무효화.
+    // 재사용 탐지: 이미 revoke된 세션의 토큰이 다시 제시된 경우.
+    // - 유예 창(REFRESH_REUSE_GRACE_MS) 밖: 실제 탈취로 간주 → 전 세션 무효화 + 401.
+    // - 유예 창 안: 다중 탭 동시 회전 / 모바일 회전 응답 유실(백그라운드 suspend·앱
+    //   종료로 새 토큰 저장 실패) 후 재시도로 보고, 401로 끊지 않고 아래 정상 회전
+    //   경로로 흘려보내 새 세션을 발급한다(자동 로그아웃 제거). 재-revoke는 멱등.
     if (session.revokedAt) {
-      await this.revokeAllSessions(session.userId);
-      throw new UnauthorizedException('invalid session');
-    }
-    if (session.expiresAt.getTime() <= Date.now()) {
+      if (Date.now() - session.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
+        await this.revokeAllSessions(session.userId);
+        throw new UnauthorizedException('invalid session');
+      }
+      // 유예 창 안 → 복구 경로로 폴백(throw 하지 않음).
+    } else if (session.expiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException('invalid session');
     }
     // refresh 요청의 위조 가능한 platform/origin 헤더로 세션 수명을 승격하지 않는다.

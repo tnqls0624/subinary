@@ -46,6 +46,30 @@ import {
 /** 생체인식 프롬프트 공통 문구(부트스트랩 게이트/로그인 화면 재시도 동일). */
 const BIOMETRIC_REASON = "저장된 로그인을 사용하려면 본인 확인이 필요해요";
 
+/**
+ * 탭 간 refresh 직렬화 락 이름. Web Locks는 같은 origin의 모든 탭이 공유한다.
+ * 액세스 토큰(15분) 만료 시 여러 탭이 각자 refresh하면, 회전으로 무효화된 토큰을
+ * 뒤늦게 제시한 탭이 (서버 유예 밖이면) 세션을 흔든다. 한 번에 한 탭만 회전시키고
+ * 대기 탭은 앞 탭이 갱신한 쿠키로 진행하게 해 이 경합을 없앤다.
+ */
+const REFRESH_LOCK = "family-auth-refresh";
+
+/**
+ * refresh 실행을 브라우저 전역 락으로 감싼다. Web Locks 미지원 환경(구형 WebView 등)
+ * 은 콜백을 그대로 실행한다 — 탭 내 single-flight(inflightRefresh)로 폴백된다.
+ */
+function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks =
+    typeof navigator !== "undefined" && "locks" in navigator
+      ? navigator.locks
+      : undefined;
+  // lib.dom의 request 콜백 반환이 제네릭이라 () => Promise<T>가 Promise<Promise<T>>로
+  // 추론된다 — 실제 런타임 반환은 Promise<T>이므로 좁혀서 반환한다.
+  return locks
+    ? (locks.request(REFRESH_LOCK, fn) as Promise<T>)
+    : fn();
+}
+
 /** 인증 부트스트랩/세션 상태. */
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -116,7 +140,8 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
    */
   const refreshSession = useCallback((): Promise<AuthResult> => {
     if (inflightRefresh.current) return inflightRefresh.current;
-    const run = (async () => {
+    // 탭 간 락으로 감싼다 → 동시에 여러 탭이 회전해 서로의 토큰을 무효화하는 걸 막는다.
+    const run = withRefreshLock(async () => {
       try {
         const stored = await getStoredRefreshToken();
         const refreshed = await api.auth.refresh(stored ?? undefined);
@@ -134,7 +159,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       } finally {
         inflightRefresh.current = null;
       }
-    })();
+    });
     inflightRefresh.current = run;
     return run;
   }, [setAccessToken]);

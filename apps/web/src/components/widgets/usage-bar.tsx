@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 
-import { formatWon, percent } from "@/lib/format";
+import { formatMoney, percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface UsageBarProps {
   label: ReactNode;
-  /** 현재월 순지출(KRW 정수). */
+  /** 현재월 순지출(minor units, 예산 통화 기준). */
   spent: number;
-  /** 예산 한도(KRW 정수). */
+  /** 예산 한도(minor units, 예산 통화 기준). */
   amount: number;
+  /** 예산 통화(ISO4217). 기본 'KRW'. spent/amount 표시에 사용. */
+  currency?: string;
   /** 사용률 = spent/amount(서버 계산). 1 초과 가능(초과 지출). */
   usageRate: number;
   /** 우측 상단 보조 텍스트(스코프 종류 등). */
@@ -20,6 +22,7 @@ export function UsageBar({
   label,
   spent,
   amount,
+  currency = "KRW",
   usageRate,
   meta,
 }: UsageBarProps) {
@@ -53,7 +56,7 @@ export function UsageBar({
       </div>
       <div className="flex items-baseline justify-between text-sm">
         <span className="text-muted-foreground tabular-nums">
-          {formatWon(spent)} / {formatWon(amount)}
+          {formatMoney(spent, currency)} / {formatMoney(amount, currency)}
         </span>
         <span className={cn("tabular-nums font-medium", pctText)}>
           {percent(usageRate)}

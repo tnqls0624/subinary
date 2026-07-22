@@ -27,6 +27,7 @@ import type {
   MerchantLabelCandidate,
 } from "@family/contracts";
 
+import { PageBackHeader } from "@/components/widgets";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -180,13 +181,10 @@ export default function CategoriesPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">카테고리 관리</h1>
-        <p className="text-muted-foreground text-sm">
-          우리 가족만의 지출 카테고리를 만들어요. 만든 카테고리는 AI 자동분류에도
-          쓰여요.
-        </p>
-      </div>
+      <PageBackHeader
+        title="카테고리 관리"
+        subtitle="우리 가족만의 지출 카테고리를 만들어요. 만든 카테고리는 AI 자동분류에도 쓰여요."
+      />
 
       {/* 모델 학습에는 AI 예측이 아니라 사용자가 명시적으로 확정한 규칙만 사용한다. */}
       <Card className="flex flex-col gap-4 p-4">

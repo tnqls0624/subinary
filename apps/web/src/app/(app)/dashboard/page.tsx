@@ -71,6 +71,7 @@ import { useHousehold } from "@/lib/household-context";
 import { memberColorClass } from "@/lib/member-color";
 import {
   useBudgets,
+  useCardList,
   useCards,
   useCategories,
   useCategoryList,
@@ -83,6 +84,9 @@ import { cn } from "@/lib/utils";
 
 /** 처리 대기 건수 집계 시 한 번에 가져올 상한(초과 시 'N+' 표기). */
 const REVIEW_SCAN_LIMIT = 100;
+
+/** '읽지 못한 문자'는 건별로 이 기간(3일)만 홈에 노출한다(지난 건은 자동 숨김). */
+const PARSE_FAILED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** BarList 상위 노출 개수(구성원/카드/카테고리 공통). */
 const BREAKDOWN_TOP_N = 6;
@@ -128,6 +132,20 @@ export default function DashboardPage() {
     for (const m of householdMembersQuery.data ?? []) map.set(m.memberId, m.color);
     return map;
   }, [householdMembersQuery.data]);
+  // 전 구성원 이름(카드 소유자가 이달 지출이 없어 analytics.members에 없을 수 있어 폴백).
+  const householdNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of householdMembersQuery.data ?? []) map.set(m.memberId, m.name);
+    return map;
+  }, [householdMembersQuery.data]);
+  // 카드 소유자 매핑: 거래 색/이름은 "카드 소유자" 기준으로 표시한다(문자를 대신
+  // 전달한 사람이 아니라 카드 주인이 누구 지출인지를 나타냄 — 카드 화면과 동일 색).
+  const cardListQuery = useCardList();
+  const cardOwnerById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of cardListQuery.data ?? []) map.set(c.id, c.ownerMemberId);
+    return map;
+  }, [cardListQuery.data]);
   const cardsQuery = useCards(month);
   const categoriesQuery = useCategories(month);
   const budgetsQuery = useBudgets(month);
@@ -243,8 +261,22 @@ export default function DashboardPage() {
     Boolean(pendingReviewQuery.data?.nextCursor) ||
     Boolean(duplicateQuery.data?.nextCursor);
 
-  const parseFailedCount = parseFailedQuery.data?.length ?? 0;
+  // 읽지 못한 문자: 건별로 최근 3일 이내 수신 건만 노출(3일 지난 실패 건은 자동 숨김).
+  // 데이터/DB는 그대로 두고 표시만 필터한다(receivedAt 기준, 클라이언트 계산).
+  const parseFailedRecent = useMemo(() => {
+    const cutoff = Date.now() - PARSE_FAILED_WINDOW_MS;
+    return (parseFailedQuery.data ?? []).filter(
+      (e) => new Date(e.receivedAt).getTime() >= cutoff,
+    );
+  }, [parseFailedQuery.data]);
+  const parseFailedCount = parseFailedRecent.length;
   const parseFailedMore = parseFailedCount >= REVIEW_SCAN_LIMIT;
+
+  // 노출 규칙: 확인필요 거래는 1건이라도 있으면(해결하면 자동으로 사라짐), 읽지
+  // 못한 문자는 3일 이내 건이 있으면 표시. 둘 다 없으면 카드 자체를 감춘다.
+  const showReviewRow = reviewError || reviewCount > 0;
+  const showParseFailedRow = parseFailedQuery.isError || parseFailedCount > 0;
+  const showReviewCard = showReviewRow || showParseFailedRow;
 
   const monthly = monthlyQuery.data;
   const delta = monthly
@@ -255,8 +287,9 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-xl font-bold tracking-tight">홈</h1>
+      {/* 제목은 하단 탭('홈')과 중복이라 시각적으로 숨긴다(스크린리더용 h1만 유지). */}
+      <div className="flex items-baseline justify-end">
+        <h1 className="sr-only">홈</h1>
         <span className="text-muted-foreground text-[13px]">
           {formatMonth(month)}
         </span>
@@ -324,10 +357,12 @@ export default function DashboardPage() {
       {/* AI 인사이트(있을 때만 렌더). 자연어 질의는 하단 탭 중앙 'AI'(/ai)로 분리. */}
       <MonthlyInsightsCard month={month} />
 
-      {/* 확인 필요 — 처리 대기 백로그 */}
-      <Card className="gap-0 py-2">
-        <CardContent className="px-3">
-          <Link href="/transactions" className="block">
+      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·읽지 못한 문자가 모두 없으면 숨김. */}
+      {showReviewCard ? (
+        <Card className="gap-0 py-2">
+          <CardContent className="px-3">
+            {showReviewRow ? (
+              <Link href="/transactions" className="block">
             <ListRow
               className="hover:bg-muted/70 transition-colors"
               icon={<CircleAlert />}
@@ -356,7 +391,9 @@ export default function DashboardPage() {
               }
               chevron
             />
-          </Link>
+              </Link>
+            ) : null}
+            {showParseFailedRow ? (
           <ListRow
             className={
               parseFailedCount > 0
@@ -396,8 +433,10 @@ export default function DashboardPage() {
               parseFailedCount > 0 ? () => setParseFailedOpen(true) : undefined
             }
           />
-        </CardContent>
-      </Card>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 예산 요약 */}
       <Card>
@@ -449,6 +488,7 @@ export default function DashboardPage() {
                     }
                     spent={b.spent}
                     amount={b.amount}
+                    currency={b.currency}
                     usageRate={b.usageRate}
                   />
                 );
@@ -539,16 +579,26 @@ export default function DashboardPage() {
               </p>
             ) : (
               <div className="-mx-2 flex flex-col">
-                {cardItems.map((item) => (
-                  <ListRow
-                    key={item.key}
-                    icon={<CreditCard />}
-                    title={item.label}
-                    subtitle={`전체의 ${percent(item.ratio)}`}
-                    value={<Money amount={item.value} />}
-                    valueSub={item.meta}
-                  />
-                ))}
+                {cardItems.map((item) => {
+                  // 카드 아이콘 색 = 그 카드 소유자 색(카드 화면과 동일). item.key=cardId,
+                  // 미연결('unlinked')이면 소유자가 없어 기본 색.
+                  const ownerId = cardOwnerById.get(item.key);
+                  return (
+                    <ListRow
+                      key={item.key}
+                      icon={<CreditCard />}
+                      iconClassName={
+                        ownerId
+                          ? memberColorClass(ownerId, memberColorById.get(ownerId))
+                          : undefined
+                      }
+                      title={item.label}
+                      subtitle={`전체의 ${percent(item.ratio)}`}
+                      value={<Money amount={item.value} />}
+                      valueSub={item.meta}
+                    />
+                  );
+                })}
               </div>
             )}
           </section>
@@ -586,7 +636,14 @@ export default function DashboardPage() {
                   // status 배지보다 우선해 '제외됨'으로 표기하고 금액을 흐리게 처리한다.
                   const excluded = t.excludedAt != null;
                   const signed = cancelled ? -t.amount : t.netAmount;
-                  const who = memberNameById.get(t.memberId);
+                  // 색·이름 기준 구성원 = 카드 소유자(연결된 카드가 있으면), 없으면
+                  // 거래 귀속 구성원. 카드 화면의 소유자 색과 일치시킨다.
+                  const attributedId =
+                    (t.cardId ? cardOwnerById.get(t.cardId) : undefined) ??
+                    t.memberId;
+                  const who =
+                    householdNameById.get(attributedId) ??
+                    memberNameById.get(attributedId);
                   // 카테고리 = 아이콘(모양), 구성원 = 배경색 — 거래 목록과 동일 규칙.
                   const Icon = cancelled
                     ? RotateCcw
@@ -601,10 +658,8 @@ export default function DashboardPage() {
                         cancelled || excluded
                           ? "bg-muted text-muted-foreground"
                           : memberColorClass(
-                              t.memberId,
-                              t.memberId
-                                ? memberColorById.get(t.memberId)
-                                : null,
+                              attributedId,
+                              memberColorById.get(attributedId),
                             )
                       }
                       title={merchantLabel(t)}
@@ -615,7 +670,7 @@ export default function DashboardPage() {
                       }
                       value={
                         <span className={cn(excluded && "line-through opacity-60")}>
-                          <Money amount={signed} muted={cancelled} />
+                          <Money amount={signed} currency={t.currency} muted={cancelled} />
                         </span>
                       }
                       valueSub={
@@ -642,7 +697,7 @@ export default function DashboardPage() {
       {/* 읽지 못한 문자 상세(원문) 다이얼로그 — 네이티브/웹 공통. */}
       <ParseFailedDialog
         open={parseFailedOpen}
-        events={parseFailedQuery.data ?? []}
+        events={parseFailedRecent}
         onClose={() => setParseFailedOpen(false)}
       />
     </div>

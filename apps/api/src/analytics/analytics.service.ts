@@ -422,10 +422,33 @@ export class AnalyticsService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // 사용자가 '중복이라 제외' 확정한 거래는 모든 합계/브레이크다운에서 뺀다.
       isNull(schema.cardTransactions.excludedAt),
+      // 모든 analytics 집계는 KRW 전용이다. amount는 minor units라 외화($22.00=2200)와
+      // 원화(₩2,200=2200)가 정수로 구분되지 않으므로, 이 단일 초크포인트에서 통화를
+      // 걸러 monthly/categories/members/cards/merchants/sumNet 전부를 정화한다.
+      eq(schema.cardTransactions.currency, 'KRW'),
       this.visibilityScope(actorMemberId),
-      gte(schema.cardTransactions.approvedAt, from),
-      lt(schema.cardTransactions.approvedAt, to),
+      this.periodWindow(from, to),
     ];
+  }
+
+  /**
+   * 기간 창: 승인시각(approvedAt)이 `[from,to)`이거나, approvedAt이 NULL(미파싱)이면
+   * 생성시각(createdAt)이 `[from,to)`. `NULL >= from`이 항상 false라 승인시각
+   * 미파싱 거래가 집계에서 통째로 빠지는 것을 막는다(목록 필터와 동일 규칙).
+   * COALESCE를 SQL 표현식으로 쓰면 Date 바인딩이 깨지므로 컬럼 기반 OR로 표현한다.
+   */
+  private periodWindow(from: Date, to: Date): SQL {
+    return or(
+      and(
+        gte(schema.cardTransactions.approvedAt, from),
+        lt(schema.cardTransactions.approvedAt, to),
+      ),
+      and(
+        isNull(schema.cardTransactions.approvedAt),
+        gte(schema.cardTransactions.createdAt, from),
+        lt(schema.cardTransactions.createdAt, to),
+      ),
+    ) as SQL;
   }
 
   /**
@@ -487,8 +510,7 @@ export class AnalyticsService {
           // 이미 '중복 제외'된 행은 합계에 애초에 없으므로 '권한으로 제외된 건수'에서도
           // 빼야 이중 집계가 안 된다(다른 집계의 isNull(excludedAt)와 정렬).
           isNull(schema.cardTransactions.excludedAt),
-          gte(schema.cardTransactions.approvedAt, period.from),
-          lt(schema.cardTransactions.approvedAt, period.to),
+          this.periodWindow(period.from, period.to),
           ne(schema.cardTransactions.memberId, actorMemberId),
           eq(schema.cardTransactions.visibility, 'private'),
         ),
