@@ -44,12 +44,16 @@ fi
 # 타임아웃으로 감싼다(멀티턴 LLM 루프가 지연/행에 걸려도 호출자가 무기한 블록되지 않게).
 # macOS엔 timeout(1)이 없으므로 gtimeout(coreutils)→timeout→perl-alarm 순으로 폴백.
 # perl alarm 타이머는 exec 후에도 유지되어 초과 시 holmes에 SIGALRM을 보낸다.
+# 설정 선택: 자동 경로는 INVESTIGATE_CONFIG=config-automated.yaml(bash 비활성)을 주입한다. 기본은 수동용 config.yaml.
+config_path="$script_dir/${INVESTIGATE_CONFIG:-config.yaml}"
+[ -f "$config_path" ] || { echo "config 없음: $config_path" >&2; exit 64; }
+
 timeout_seconds="${INVESTIGATE_TIMEOUT_SECONDS:-600}"
 if command -v gtimeout >/dev/null 2>&1; then
-  exec gtimeout "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+  exec gtimeout "$timeout_seconds" holmes ask "$@" --config "$config_path"
 elif command -v timeout >/dev/null 2>&1; then
-  exec timeout "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+  exec timeout "$timeout_seconds" holmes ask "$@" --config "$config_path"
 else
   exec perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' \
-    "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+    "$timeout_seconds" holmes ask "$@" --config "$config_path"
 fi

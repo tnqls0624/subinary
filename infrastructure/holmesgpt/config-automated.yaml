@@ -1,0 +1,25 @@
+# HolmesGPT 자동 실행 전용 설정 (경보 → 무인 조사). 수동용 config.yaml과 분리한다.
+#
+# 왜 분리하나: 자동 경로는 경보에서 파생된 프롬프트로 조사를 트리거하므로 프롬프트 인젝션 표면이 있다.
+# bash(호스트 명령)·internet(SSRF/데이터 유출)·kubectl-run 등 상태 변경/외부 접근 툴셋을 전부 끄고
+# 읽기 전용 docker/core만 남겨, 인젝션이 성공해도 컨테이너 조회 이상은 하지 못하게 한다.
+# (수동 사용은 사람이 감독하므로 config.yaml에서 bash를 허용하되, 자동 경로는 여기서 차단.)
+model: gemini/gemini-2.5-flash
+
+toolsets:
+  # 유일하게 허용: 컨테이너 read-only 조회(docker ps/logs/inspect/events 등)
+  docker/core:
+    enabled: true
+  # 자동 경로에서 위험 툴셋 명시 차단(기본 활성이라 반드시 꺼야 함)
+  bash:
+    enabled: false
+  internet:
+    enabled: false
+  kubectl-run:
+    enabled: false
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  helm/core:
+    enabled: false
