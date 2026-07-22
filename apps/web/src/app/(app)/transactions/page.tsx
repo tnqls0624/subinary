@@ -1053,13 +1053,19 @@ function TransactionDetailDialog({
   const canEditAmount =
     txn.cancelledAmount === 0 && txn.parentTransactionId == null;
 
-  // 금액·날짜 편집 로컬 상태(현재 값으로 초기화, 변경분만 저장).
+  // 금액·날짜 인라인 편집 상태(평소엔 읽기, '수정' 탭 시 편집 모드).
+  const [editing, setEditing] = useState(false);
   const initialDate = toDateTimeLocal(occurredAt(txn));
   const [editAmount, setEditAmount] = useState(String(txn.amount));
   const [editDate, setEditDate] = useState(initialDate);
   const editDirty =
     (canEditAmount && editAmount.trim() !== String(txn.amount)) ||
     editDate !== initialDate;
+  const cancelEdit = () => {
+    setEditAmount(String(txn.amount));
+    setEditDate(initialDate);
+    setEditing(false);
+  };
   const saveEdits = () => {
     const body: { amount?: number; occurredAt?: string } = {};
     if (canEditAmount) {
@@ -1109,96 +1115,122 @@ function TransactionDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* 금액 요약 */}
-        <div className="bg-muted flex flex-col items-center gap-1 rounded-xl px-4 py-4">
-          <span className="text-muted-foreground text-[13px]">
-            {isCancellation ? "취소 금액" : "결제 금액"}
-          </span>
-          <span
-            className={cn(
-              "text-2xl font-bold tabular-nums",
-              excluded && "text-muted-foreground line-through",
-            )}
-          >
-            {isCancellation ? (
-              <Money amount={-txn.amount} currency={txn.currency} />
-            ) : (
-              <Money amount={txn.netAmount} currency={txn.currency} />
-            )}
-          </span>
-          {txn.originalCurrency && txn.originalAmount != null ? (
-            <span className="text-muted-foreground text-[13px]">
-              해외 결제 {formatMoney(txn.originalAmount, txn.originalCurrency)}
-              {txn.exchangeRate
-                ? ` · 환율 ${txn.exchangeRate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}`
-                : ""}{" "}
-              (승인 시점 환산, 실제 청구액은 다를 수 있어요)
-            </span>
-          ) : null}
-          {excluded ? (
-            <span className="bg-background text-muted-foreground mt-1 rounded-full px-2 py-0.5 text-xs font-medium">
-              합계에서 제외됨
-            </span>
-          ) : null}
-          {!isCancellation && txn.netAmount !== txn.amount ? (
-            <span className="text-muted-foreground text-[13px]">
-              원래 {formatMoney(txn.amount, txn.currency)}에서 취소{" "}
-              {formatMoney(txn.cancelledAmount, txn.currency)}이 반영됐어요
-            </span>
-          ) : null}
-          <span className="flex items-center gap-1.5 pt-1">
-            {isCancellation ? (
-              <span className="text-muted-foreground text-xs">
-                {TYPE_LABELS[txn.transactionType]} 거래
+        {/* 금액 요약 — 평소엔 읽기 뷰, '수정' 탭 시 인라인 편집으로 전환 */}
+        <div className="bg-muted relative flex flex-col items-center gap-1 rounded-xl px-4 py-4">
+          {editing ? (
+            <div className="flex w-full flex-col gap-2">
+              <span className="text-muted-foreground text-[13px]">
+                금액·날짜 수정
               </span>
-            ) : null}
-            <StatusBadge status={txn.status} />
-            {txn.installmentMonths ? (
-              <span className="text-muted-foreground text-xs">
-                {txn.installmentMonths}개월 할부
+              <div className="flex flex-col gap-2">
+                <Input
+                  inputMode="numeric"
+                  aria-label="금액"
+                  value={editAmount}
+                  disabled={busy || !canEditAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                />
+                <Input
+                  type="datetime-local"
+                  aria-label="날짜/시각"
+                  value={editDate}
+                  disabled={busy}
+                  onChange={(e) => setEditDate(e.target.value)}
+                />
+              </div>
+              {!canEditAmount ? (
+                <p className="text-muted-foreground text-[12px]">
+                  취소가 연결된 거래는 금액을 바꿀 수 없어요. 날짜만 수정돼요.
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={cancelEdit}
+                >
+                  취소
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy || !editDirty}
+                  onClick={() => {
+                    saveEdits();
+                    setEditing(false);
+                  }}
+                >
+                  저장
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {!txn.masked ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setEditing(true)}
+                  className="text-accent-foreground absolute top-3 right-3 text-[13px] font-medium disabled:opacity-50"
+                >
+                  수정
+                </button>
+              ) : null}
+              <span className="text-muted-foreground text-[13px]">
+                {isCancellation ? "취소 금액" : "결제 금액"}
               </span>
-            ) : null}
-          </span>
+              <span
+                className={cn(
+                  "text-2xl font-bold tabular-nums",
+                  excluded && "text-muted-foreground line-through",
+                )}
+              >
+                {isCancellation ? (
+                  <Money amount={-txn.amount} currency={txn.currency} />
+                ) : (
+                  <Money amount={txn.netAmount} currency={txn.currency} />
+                )}
+              </span>
+              {txn.originalCurrency && txn.originalAmount != null ? (
+                <span className="text-muted-foreground text-[13px]">
+                  해외 결제 {formatMoney(txn.originalAmount, txn.originalCurrency)}
+                  {txn.exchangeRate
+                    ? ` · 환율 ${txn.exchangeRate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}`
+                    : ""}{" "}
+                  (승인 시점 환산, 실제 청구액은 다를 수 있어요)
+                </span>
+              ) : null}
+              {excluded ? (
+                <span className="bg-background text-muted-foreground mt-1 rounded-full px-2 py-0.5 text-xs font-medium">
+                  합계에서 제외됨
+                </span>
+              ) : null}
+              {!isCancellation && txn.netAmount !== txn.amount ? (
+                <span className="text-muted-foreground text-[13px]">
+                  원래 {formatMoney(txn.amount, txn.currency)}에서 취소{" "}
+                  {formatMoney(txn.cancelledAmount, txn.currency)}이 반영됐어요
+                </span>
+              ) : null}
+              <span className="flex items-center gap-1.5 pt-1">
+                {isCancellation ? (
+                  <span className="text-muted-foreground text-xs">
+                    {TYPE_LABELS[txn.transactionType]} 거래
+                  </span>
+                ) : null}
+                <StatusBadge status={txn.status} />
+                {txn.installmentMonths ? (
+                  <span className="text-muted-foreground text-xs">
+                    {txn.installmentMonths}개월 할부
+                  </span>
+                ) : null}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex flex-col gap-3">
-          {/* 금액·날짜 수정 — 잘못 등록/입력된 거래 보정 */}
-          <div className="flex flex-col gap-2">
-            <Label>금액·날짜 수정</Label>
-            <div className="flex gap-2">
-              <Input
-                inputMode="numeric"
-                aria-label="금액"
-                value={editAmount}
-                disabled={busy || !canEditAmount}
-                onChange={(e) => setEditAmount(e.target.value)}
-                className="flex-1"
-              />
-              <Input
-                type="datetime-local"
-                aria-label="날짜/시각"
-                value={editDate}
-                disabled={busy}
-                onChange={(e) => setEditDate(e.target.value)}
-                className="flex-1"
-              />
-            </div>
-            {!canEditAmount ? (
-              <p className="text-muted-foreground text-[13px]">
-                취소가 연결된 거래는 금액을 수정할 수 없어요. 날짜만 바꿀 수 있어요.
-              </p>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              className="w-fit"
-              disabled={busy || !editDirty}
-              onClick={saveEdits}
-            >
-              수정 저장
-            </Button>
-          </div>
-
           {/* 카드 연결/재지정 — 미연결·모호(pending_review) 거래 해소 경로 */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="detail-card">카드</Label>
