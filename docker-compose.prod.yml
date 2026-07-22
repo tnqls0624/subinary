@@ -430,7 +430,9 @@ services:
     # depends_on 없음(의도적): 감시자는 감시 대상(api/web)보다 먼저·독립적으로 떠야 한다.
     # api/web에 service_healthy로 묶으면 콜드부트에서 앱이 죽을 때 gatus 자체가 안 떠서
     # 이 서비스가 닫으려던 사각지대가 재현된다. 부팅 중 대상 미준비는 alerting failure-threshold(3회=90s)가 흡수.
-    # 포트 미공개: UI가 필요하면 caddy 라우팅 + Cloudflare Access 뒤에 둔다(직접 publish 금지).
+    ports:
+      # 127.0.0.1에만 바인딩 = 맥 로컬에서만 접근(LAN·인터넷 비노출). 상시 UI는 caddy+Cloudflare Access.
+      - "127.0.0.1:8080:8080"
     logging: *default-logging
     restart: unless-stopped
 
@@ -467,7 +469,13 @@ services:
     depends_on:
       - socket-proxy
     networks:
+      # socket-proxy(internal, egress 없음)로 프록시 도달 + observability(non-internal)로 로컬 포트 publish.
+      # default 망에는 여전히 안 붙어서 앱 컨테이너(api/web)는 dozzle에 도달 못 함(lateral 로그 열람 차단 유지).
       - socket-proxy
+      - observability
+    ports:
+      # 127.0.0.1 전용. internal 망만으론 host publish가 안 돼 전용 observability 망을 통해 노출.
+      - "127.0.0.1:8081:8080"
     logging: *default-logging
     restart: unless-stopped
 
@@ -485,6 +493,8 @@ services:
       - beszel-data:/beszel_data
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 네이티브 agent 접근용(Docker Desktop은 자동이나 명시)
+    ports:
+      - "127.0.0.1:8090:8090"   # 맥 로컬 전용. 상시 UI는 caddy+Cloudflare Access.
     logging: *default-logging
     restart: unless-stopped
 
@@ -502,7 +512,11 @@ volumes:
 networks:
   alert-egress:
     driver: bridge
-  # socket-proxy 전용망: egress 없음(internal). 프록시는 여기에만, dozzle은 여기+default에 붙는다.
+  # socket-proxy 전용망: egress 없음(internal). socket 접근 컨테이너를 인터넷에서 격리.
   socket-proxy:
     driver: bridge
     internal: true
+  # dozzle의 로컬 포트 publish 전용(non-internal). dozzle만 여기+socket-proxy에 붙어,
+  # 앱 컨테이너(default)에서 dozzle 도달은 차단하면서 맥 로컬 UI 접근만 허용한다.
+  observability:
+    driver: bridge
