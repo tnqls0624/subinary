@@ -157,6 +157,6 @@ pnpm verify:ai-pipeline:isolated
 - [ ] `api`와 `ops-sentinel` 갱신 후 healthy 확인
 - [ ] `pnpm ops:alert:verify` 실제 수신 확인
 - [ ] application terminal alert 격리 검증 통과
-- [ ] Cloudflare Tunnel Health notification 활성화
+- [x] Cloudflare Tunnel Health notification 활성화(2026-07-22: email 전달)
 - [ ] receiver timeout/retry와 recovered 수신 기록
 - [ ] 외부 payload PII·secret 검사 0건

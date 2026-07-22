@@ -246,7 +246,7 @@ docker compose up -d          # dev 스택(next dev 등)
 - [ ] canary `minimumInvocationCount`, 오류율, p95, 관측 창을 실제 baseline SLO로 조정
 - [ ] `PIPELINE_ALERT_WEBHOOK_URL` 설정 후 `pnpm ops:alert:verify` synthetic 수신 확인
 - [ ] `ops-sentinel` healthy와 backup stale/disk low firing·recovered 수신 확인
-- [ ] Cloudflare Tunnel Health notification을 Mac 밖의 email/webhook에 연결
+- [x] Cloudflare Tunnel Health notification을 Mac 밖의 email/webhook에 연결(2026-07-22: email 전달 설정)
 - [ ] terminal failure/quarantine/canary 격리 경보 검증 통과
 - [ ] 후보 provider/model/revision과 승인 registry identity 일치 확인 후 shadow→소량 live 순서로 전환
 - [ ] `ai_invocations`의 traffic role/bucket/selected와 후보 오류율·지연을 확인하고 정책 pause 절차 검증
