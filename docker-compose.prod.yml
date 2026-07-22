@@ -24,6 +24,10 @@ x-image-pins:
   minio-client: &minio-client-image minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
   caddy: &caddy-image caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
   cloudflared: &cloudflared-image cloudflare/cloudflared@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+  # 2026-07-22 관측 스택. digest는 배포·리뷰로 검증한 실행 이미지에서 고정.
+  gatus: &gatus-image twinproduction/gatus@sha256:c5f210d095fa78e6efaa20ffeb14803f2ba4f10615e16a6d12087697149617f0             # v5.36.0
+  socket-proxy: &socket-proxy-image tecnativa/docker-socket-proxy@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476  # v0.4.2
+  dozzle: &dozzle-image amir20/dozzle@sha256:bc1ee4ba8d66c7fc0d03823a78486165fb219809f79eaf54cecf3114d647ab14                     # v10.6.11
 
 x-backup-replica-environment: &backup-replica-environment
   RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
@@ -412,9 +416,8 @@ services:
 
   # 외형 감시(Gatus): 내부 앱 헬스 + 공개 터널 전체 경로를 능동 점검한다.
   # 설정은 infrastructure/gatus/config.yaml(코드로 관리). 인바운드 포트 미공개 — 모든 점검은 egress.
-  # 이미지는 운영 검증 후 다른 외부 이미지처럼 @sha256 digest로 고정할 것(x-image-pins 정책).
   gatus:
-    image: twinproduction/gatus:v5.36.0
+    image: *gatus-image
     environment:
       # config.yaml의 ${PUBLIC_BASE_URL}, ${GATUS_ALERT_WEBHOOK_URL} 치환에 쓰인다.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://app.subinary.cloud}
@@ -434,9 +437,8 @@ services:
   # dozzle(및 향후 beszel-agent)은 raw socket 대신 이 프록시를 통해서만 Docker API를 읽는다.
   # POST=0(기본) — 컨테이너 생성/exec/삭제·이미지 빌드·시크릿·소켓 쓰기 전부 차단. GET 조회만 허용.
   # 소켓을 만지는 유일한 지점이며, 전용 internal 네트워크(egress 없음)에 격리한다.
-  # 이미지는 운영 검증 후 @sha256 digest로 고정할 것(x-image-pins 정책).
   socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.4.2
+    image: *socket-proxy-image
     environment:
       CONTAINERS: 1   # 목록/inspect/logs/stats (GET)
       INFO: 1
@@ -455,7 +457,7 @@ services:
   # 전용 internal 망(socket-proxy)에만 둔다 — default 망에 있으면 무인증 :8080이 앱 컨테이너(api/web)에서
   # 도달돼 침해 시 전 스택 로그가 열람되는 lateral 경로가 된다. UI 노출은 caddy 라우팅+Cloudflare Access로 통제.
   dozzle:
-    image: amir20/dozzle:v10.6.11
+    image: *dozzle-image
     environment:
       DOZZLE_REMOTE_HOST: tcp://socket-proxy:2375
       # MCP(/api/mcp)는 현재 소비자가 없어(HolmesGPT는 호스트 docker CLI로 로그를 읽음) 순수 공격표면이라 비활성.
