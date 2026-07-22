@@ -1,0 +1,16 @@
+# HolmesGPT — 호스트 네이티브 AI 조사 CLI 설정 (config-as-code, 시크릿 없음).
+#
+# 왜 호스트 네이티브인가: docker/core 툴셋은 호스트의 docker CLI로 컨테이너를 읽는다(docker ps/logs/inspect 등,
+# 전부 read-only). 컨테이너로 띄우면 socket을 마운트해야 해 "socket 직접 마운트 회피" 기조에 어긋난다.
+# 맥에 uv tool로 설치한 holmes는 Docker Desktop CLI를 그대로 쓰므로 소켓 마운트가 필요 없다.
+#
+# 실행: infrastructure/holmesgpt/investigate.sh "<질문>"  (GEMINI_API_KEY는 .env에서 주입, 값은 커밋 안 함)
+# LLM: 레포가 이미 쓰는 Gemini 재사용. 조사 1건은 멀티턴 툴콜이라 토큰이 변동적이다.
+model: gemini/gemini-2.5-flash
+
+# docker/core·bash는 0.36.0에서 기본 활성이지만 의도를 명시적으로 못박는다.
+toolsets:
+  docker/core:
+    enabled: true
+  bash:
+    enabled: true
