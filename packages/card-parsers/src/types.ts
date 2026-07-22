@@ -23,18 +23,23 @@ export interface CardSmsInput {
 /**
  * Structured result of parsing a single card SMS.
  *
- * Monetary values are KRW integers (no floating point). `occurredAt` is an
- * absolute instant resolved against the `Asia/Seoul` wall-clock in the message.
- * `confidence` is an integer in `[0, 100]`.
+ * Monetary values are integer **minor units** of `currency` (no floating point):
+ * `major = amount / 10^exponent(currency)`. KRW/JPY have exponent 0 so minor ==
+ * major (₩12,500 → 12500); USD/EUR have exponent 2 ($22.00 → 2200). `occurredAt`
+ * is an absolute instant resolved against the `Asia/Seoul` wall-clock in the
+ * message. `confidence` is an integer in `[0, 100]`.
  */
 export interface CardSmsParseResult {
   /** Card issuer label, e.g. `신한카드` / `KB국민카드`. */
   issuer?: string;
-  /** Approval vs cancellation vs undetermined. */
-  transactionType: 'approval' | 'cancellation' | 'unknown';
-  /** Transaction amount as a KRW integer. */
+  /**
+   * Approval vs cancellation vs declined vs undetermined. `declined`는 승인거절/
+   * 거부/승인실패처럼 실제 체결되지 않은 통지 — 거래로 승격하지 않는다(소비 아님).
+   */
+  transactionType: 'approval' | 'cancellation' | 'declined' | 'unknown';
+  /** Transaction amount as an integer in `currency`'s minor units (see interface doc). */
   amount?: number;
-  /** ISO 4217 currency code; always `KRW` when an amount was parsed. */
+  /** ISO 4217 currency code of `amount` (e.g. `KRW`, `USD`); set whenever an amount was parsed. */
   currency?: string;
   /** Raw merchant / aggregator string exactly as it appeared (never invented). */
   merchantRaw?: string;

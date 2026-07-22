@@ -54,7 +54,7 @@ describe('TossBankCardParser', () => {
     ).toBe(false);
   });
 
-  it('preserves the pipe merchant on foreign-currency variants (no 원 on the pay line)', () => {
+  it('parses foreign-currency variants into minor units + currency (no 원 on the pay line)', () => {
     const result = parser.parse({
       sender: 'kakao',
       content: [
@@ -66,7 +66,10 @@ describe('TossBankCardParser', () => {
       receivedAt: new Date('2026-07-15T09:00:00+09:00'),
     });
 
-    // KRW 금액은 없어(잔액 라인 제외) parse_failed → 검토로 가지만, 가맹점은 보존된다.
+    // 해외 결제: $5.99 → minor units 599, currency=USD. 잔액(109,798원)은 무시.
+    expect(result.transactionType).toBe('approval');
+    expect(result.amount).toBe(599);
+    expect(result.currency).toBe('USD');
     expect(result.merchantRaw).toBe('OPENAI CHATGPT');
   });
 
@@ -120,6 +123,39 @@ describe('TossBankCardParser', () => {
 
     expect(result.amount).toBe(12000);
     expect(result.merchantRaw).toBe('스타벅스 성수점');
+  });
+
+  // 실제 유입 문자 회귀: 자동화가 '펼치지 않은' 토스 알림을 캡처하면 헤더·결제 금액
+  // 라인이 빠진 `<카드> | <가맹점>` + `잔액` 두 줄만 온다. 예전엔 토스 supports()가
+  // '토스뱅크'/'결제' 리터럴을 요구해 인식조차 못 하고 'no matching parser'였다.
+  it('recognizes the collapsed notification variant (card | merchant + 잔액, no amount line)', () => {
+    const content = '공룡통장 카드 | 쿠팡(쿠페이)\n잔액 126,713원';
+    const receivedAt = new Date('2026-07-22T19:49:46+09:00');
+    expect(parser.supports({ sender: '16617654', content, receivedAt })).toBe(true);
+
+    const result = parser.parse({ sender: '16617654', content, receivedAt });
+    expect(result.issuer).toBe('토스뱅크');
+    expect(result.transactionType).toBe('approval');
+    // 결제 금액이 원문에 없으므로 잔액(126,713)을 금액으로 삼지 않는다 → undefined.
+    expect(result.amount).toBeUndefined();
+    // 발급사/가맹점은 채워 검토를 돕는다.
+    expect(result.merchantRaw).toBe('쿠팡(쿠페이)');
+    // 원인이 검토 화면(parseError)에 드러나도록 명시적 warning 을 남긴다.
+    expect(result.warnings).toContain(
+      'payment amount line missing (collapsed notification); expand notification capture',
+    );
+  });
+
+  it('does not misclassify a plain balance/transfer alert as a collapsed card payment', () => {
+    // 파이프(가맹점) 없이 잔액만 있는 입금 알림은 접힌 카드 결제가 아니다.
+    const receivedAt = new Date();
+    expect(
+      parser.supports({
+        sender: '16617654',
+        content: '공룡통장 카드로 50,000원 입금\n잔액 176,713원',
+        receivedAt,
+      }),
+    ).toBe(false);
   });
 
   it('keeps merchant undefined when the pipe segment is missing', () => {

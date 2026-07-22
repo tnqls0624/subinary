@@ -16,12 +16,22 @@
  * 가맹점명('하나로마트', '현대백화점')이 발급사로 오라벨되기 때문. 못 찾으면 일반
  * `카드`로 둔다(가맹점을 지어내지 않는 원칙과 동일).
  */
+import { KNOWN_CURRENCY_CODES } from '../currency.js';
+
 import { buildResult } from './base.parser.js';
 
 import type { CardSmsInput, CardSmsParseResult, CardSmsParser } from '../types.js';
 
-/** 결제성 문자의 최소 조건: 금액 토큰 + 액션 키워드. */
-const AMOUNT_TOKEN_RE = /[\d,]+\s*원/;
+/**
+ * 결제성 문자의 최소 조건: 금액 토큰 + 액션 키워드.
+ * 금액 토큰은 원화(`N원`)뿐 아니라 외화(`USD 22.00` / `22.00 USD`, 해외승인)도
+ * 인정한다 — 이 게이트가 원화만 요구하면 외화 문자가 어떤 파서에도 안 걸려
+ * dispatch가 'no matching parser'로 떨군다(해외승인 parse_failed의 근본 원인).
+ */
+const FX_CODE_ALT = KNOWN_CURRENCY_CODES.filter((code) => code !== 'KRW').join('|');
+const AMOUNT_TOKEN_RE = new RegExp(
+  `[\\d,]+\\s*원|\\b(?:${FX_CODE_ALT})\\s*[\\d,]+(?:\\.\\d+)?|[\\d,]+(?:\\.\\d+)?\\s*(?:${FX_CODE_ALT})\\b`,
+);
 const ACTION_TOKEN_RE = /(승인|취소|결제|매출|매입|환불|정정)/;
 
 /**
