@@ -1,0 +1,1 @@
+ALTER TYPE "public"."card_sms_txn_type" ADD VALUE 'declined' BEFORE 'unknown';

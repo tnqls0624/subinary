@@ -15,6 +15,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -495,10 +496,11 @@ export const cardSmsParseStatus = pgEnum('card_sms_parse_status', [
   'pending_review',
 ]);
 
-/** 카드 거래 종류(승인/취소/미상). */
+/** 카드 거래 종류(승인/취소/거절/미상). declined=승인거절·거부·실패(체결 안 됨, 미승격). */
 export const cardSmsTxnType = pgEnum('card_sms_txn_type', [
   'approval',
   'cancellation',
+  'declined',
   'unknown',
 ]);
 
@@ -822,10 +824,19 @@ export const cardTransactions = pgTable(
       .references(() => cardSmsEvents.id),
     transactionType: txnType('transaction_type').notNull(),
     status: txnStatus('status').notNull(),
+    // amount/netAmount/cancelledAmount는 `currency`의 minor units 정수. 외화 거래는
+    // 승격 시 승인 시점 환율로 KRW 환산해 저장하므로 currency='KRW'가 된다(지출/예산/
+    // 집계에 통합). 원통화 정보는 아래 original_* 로 병기 보존한다(표시·감사용).
     amount: integer('amount').notNull(),
     cancelledAmount: integer('cancelled_amount').notNull().default(0),
     netAmount: integer('net_amount').notNull(),
     currency: text('currency').notNull().default('KRW'),
+    // 외화 원거래(환산 전) — KRW 거래는 전부 null. originalAmount는 originalCurrency의
+    // minor units, exchangeRate는 승격 시점 원통화 1단위당 KRW(추정치, 실제 청구는
+    // 매입 시점 카드사 환율로 확정).
+    originalAmount: integer('original_amount'),
+    originalCurrency: text('original_currency'),
+    exchangeRate: doublePrecision('exchange_rate'),
     merchantRaw: text('merchant_raw'),
     merchantNormalized: text('merchant_normalized'),
     categoryId: uuid('category_id').references(() => expenseCategories.id),
@@ -957,6 +968,88 @@ export const budgets = pgTable(
 
 export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
+
+/**
+ * 예산 사용률 임계(80%/100%) 알림 dedupe 상태.
+ * (예산, 회계월, 임계)당 1행만 존재 → "임계 최초 돌파 시 1회" 발송을 보장한다.
+ */
+export const budgetAlertState = pgTable(
+  'budget_alert_state',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    budgetId: uuid('budget_id')
+      .notNull()
+      .references(() => budgets.id, { onDelete: 'cascade' }),
+    periodMonth: text('period_month').notNull(),
+    threshold: integer('threshold').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('budget_alert_state_budget_period_threshold_unique').on(
+      table.budgetId,
+      table.periodMonth,
+      table.threshold,
+    ),
+  ],
+);
+
+export type BudgetAlertState = typeof budgetAlertState.$inferSelect;
+
+/**
+ * 범용 알림 dedupe — 스케줄 알림(리마인더/주간요약)이 다중 인스턴스·재시작에도
+ * 기간당 1회만 발송되도록 보장한다. dedupeKey 예: `reminder:{userId}:{YYYY-MM-DD}`,
+ * `summary:{userId}:{weekStart}`. onConflictDoNothing 삽입 성공 시에만 발송한다.
+ */
+export const notificationDedupe = pgTable('notification_dedupe', {
+  dedupeKey: text('dedupe_key').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type NotificationDedupe = typeof notificationDedupe.$inferSelect;
+
+/**
+ * 인앱 알림함 이력 — 발송된 모든 알림(거래·예산·리마인더·요약)을 수신자별로 저장한다.
+ * 푸시 선호(무음/최소금액)와 무관하게 수신 대상 전원 저장(푸시를 꺼도 알림함엔 남음).
+ * `sourceKey`로 재시도/재승격 중복을 흡수한다((userId, sourceKey) UNIQUE).
+ */
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    householdId: uuid('household_id').references(() => households.id),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    deepLink: text('deep_link'),
+    sourceKey: text('source_key').notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // 키셋 페이지네이션(userId 스코프, 최신순) 및 안읽음 카운트용.
+    index('notifications_user_created_idx').on(
+      table.userId,
+      table.createdAt,
+      table.id,
+    ),
+    unique('notifications_user_source_key_unique').on(
+      table.userId,
+      table.sourceKey,
+    ),
+  ],
+);
+
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
 
 /* ========================================================================== */
 /* Phase 6 — Slack Import (Phase 6 Build Spec §2)                              */

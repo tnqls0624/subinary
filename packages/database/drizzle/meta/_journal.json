@@ -225,6 +225,41 @@
       "when": 1784445777504,
       "tag": "0031_yummy_magdalene",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784460358943,
+      "tag": "0032_violet_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784464165857,
+      "tag": "0033_unusual_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784464376940,
+      "tag": "0034_mushy_venom",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784472156600,
+      "tag": "0035_clumsy_lila_cheney",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784558276850,
+      "tag": "0036_zippy_layla_miller",
+      "breakpoints": true
     }
   ]
 }
