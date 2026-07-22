@@ -33,6 +33,8 @@ export interface FcmMessage {
   body: string;
   /** data 페이로드(문자열만) — 예: { deepLink: '/transactions?txn=<id>' }. */
   data?: Record<string, string>;
+  /** 안드로이드 알림 채널 id(유형별 분리). 네이티브 createChannel과 일치해야 표시된다. */
+  channelId?: string;
 }
 
 /** 발송 결과. `invalidToken`이면 호출부가 구독을 영구 revoke한다. */
@@ -96,9 +98,18 @@ export class FcmService {
         token: message.token,
         notification: { title: message.title, body: message.body },
         ...(message.data ? { data: message.data } : {}),
-        android: { priority: 'high' as const },
+        android: {
+          priority: 'high' as const,
+          // channel_id는 네이티브에 사전 생성된 채널이어야 표시된다(없으면 기본 채널).
+          notification: message.channelId
+            ? { channel_id: message.channelId }
+            : undefined,
+        },
         apns: {
           headers: { 'apns-priority': '10' },
+          // 백그라운드/종료 알림은 안드로이드와 동일하게 버튼 없이 표시(탭→딥링크).
+          // 플랫폼 UX 통일: 액션 버튼은 양 OS 모두 포그라운드 로컬 알림에서만.
+          // (백그라운드 버튼을 켜려면 여기에 aps.category=channelId를 실으면 됨)
           payload: { aps: { sound: 'default' } },
         },
       },

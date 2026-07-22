@@ -11,7 +11,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  */
 const config: CapacitorConfig = {
   appId: "ai.familymemory.app",
-  appName: "Family Memory",
+  appName: "모아",
   webDir: "../web/out",
   plugins: {
     // 웹 마운트 후 initNative()가 명시적으로 hide() → FOUC 방지.

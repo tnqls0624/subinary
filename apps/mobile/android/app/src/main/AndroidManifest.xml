@@ -53,9 +53,24 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- FCM 알림 기본값(백그라운드/종료 상태에서 OS가 표시할 때 사용).
+             icon: 상태바 흰 실루엣 아이콘, color: 틴트, channel: payload에 channel_id가
+             없을 때의 fallback 채널(앱이 런타임에 같은 id를 HIGH로 재생성해 덮어씀). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_color" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="txn" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ 알림 권한(런타임 요청은 push-notifications requestPermissions 경유). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

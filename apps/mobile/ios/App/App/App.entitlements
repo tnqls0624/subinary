@@ -2,16 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  Universal Links(초대 https 링크로 앱 열기)용 Associated Domains.
-	  활성화 조건(3가지 모두 필요):
-	    1) Xcode > Target > Signing & Capabilities > "+ Capability" > Associated Domains 추가
-	       (이때 이 파일이 CODE_SIGN_ENTITLEMENTS로 자동 연결됨)
-	    2) Apple Developer 포털의 App ID에서 Associated Domains 권한 활성화
-	    3) https://app.subinary.cloud/.well-known/apple-app-site-association 배포
-	  도메인은 실제 소유 도메인으로 교체할 것.
-	  (커스텀 스킴 familymemory:// 는 이 설정 없이도 Info.plist만으로 동작한다.)
-	-->
+	<key>aps-environment</key>
+	<string>development</string>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:app.subinary.cloud</string>

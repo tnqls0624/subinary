@@ -64,3 +64,43 @@ export const notificationPreferencesSchema = z.object({
 export type NotificationPreferences = z.infer<
   typeof notificationPreferencesSchema
 >;
+
+// --- 인앱 알림함 (알림 센터) ---
+
+/** 알림 유형(@family/shared NotificationKind와 일치). */
+export const notificationKindSchema = z.enum([
+  'transaction',
+  'budget',
+  'reminder',
+  'summary',
+]);
+export type NotificationKind = z.infer<typeof notificationKindSchema>;
+
+/** 알림함 항목 1건. */
+export const notificationItemSchema = z.object({
+  id: z.string().uuid(),
+  kind: notificationKindSchema,
+  title: z.string(),
+  body: z.string(),
+  deepLink: z.string().nullable(),
+  readAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type NotificationItem = z.infer<typeof notificationItemSchema>;
+
+/** `GET /v1/notifications` — 커서 페이지네이션 목록(최신순). */
+export const notificationListResponseSchema = z.object({
+  items: z.array(notificationItemSchema),
+  nextCursor: z.string().nullable(),
+});
+export type NotificationListResponse = z.infer<
+  typeof notificationListResponseSchema
+>;
+
+/** `GET /v1/notifications/unread-count`. */
+export const notificationUnreadCountSchema = z.object({
+  count: z.number().int(),
+});
+export type NotificationUnreadCount = z.infer<
+  typeof notificationUnreadCountSchema
+>;

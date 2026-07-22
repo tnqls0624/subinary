@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 알림 강조색(상태바 아이콘 틴트). 웹 시그니처 민트 primary(#35C5F0)와 통일. -->
+    <color name="notification_color">#35C5F0</color>
+</resources>

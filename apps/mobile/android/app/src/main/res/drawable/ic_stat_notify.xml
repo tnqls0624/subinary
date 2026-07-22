@@ -1,0 +1,14 @@
+<!--
+  상태바 알림 아이콘. 안드로이드는 이 아이콘을 흰색 실루엣(알파)만 렌더하고 색은
+  Manifest의 default_notification_color(민트)로 틴트한다. 전용 단색 아이콘이 없으면
+  상태바에 흰 사각형으로 뜨므로 카드 심볼(웹 로고 CreditCard와 통일) 벡터로 제공한다.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M20,4H4C2.89,4 2.01,4.89 2.01,6L2,18c0,1.11 0.89,2 2,2h16c1.11,0 2,-0.89 2,-2V6c0,-1.11 -0.89,-2 -2,-2zM20,18H4v-6h16v6zM20,8H4V6h16v2z" />
+</vector>
