@@ -31,14 +31,29 @@ import {
   assertKrwInteger,
   categorizeByKeyword,
   createLogger,
+  currencyExponent,
   normalizeMerchant,
   QUEUE_NAMES,
+  type NotificationDispatchJob,
 } from '@family/shared';
 import type { Queue } from 'bullmq';
-import { and, desc, eq, gte, inArray, isNull, lt, lte, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 
 import { DB } from '../database/database.module';
+import { FxRateService } from './fx-rate.service';
+
+/**
+ * 외화 환산 결과. KRW 거래는 fx=null. 외화는 amount(KRW 환산 minor units) +
+ * original*(원통화 원본) + rate(승인 시점 환율)를 함께 담는다.
+ */
+interface ConvertedAmount {
+  amount: number;
+  currency: 'KRW';
+  originalAmount: number | null;
+  originalCurrency: string | null;
+  exchangeRate: number | null;
+}
 
 /** 공개 범위(스펙 §2 cardVisibility enum). 카드 없으면 'household'로 상속. */
 type CardVisibility = 'private' | 'household' | 'summary_only';
@@ -84,6 +99,25 @@ interface CancellationOutcome {
   transactionId: string | null;
 }
 
+/** 예산 알림 임계(백분율). 내림차순 — 넘긴 것 중 가장 높은 미발송분을 발송한다. */
+const BUDGET_ALERT_THRESHOLDS = [100, 80] as const;
+
+/** Korea Standard Time은 고정 UTC+9(서머타임 없음). */
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** 현재 Asia/Seoul 회계월 창 `[from, to)`와 `YYYY-MM` 라벨(budget.service와 동일 산식). */
+function currentSeoulMonth(): { from: Date; to: Date; periodMonth: string } {
+  const seoulNow = new Date(Date.now() + KST_OFFSET_MS);
+  const year = seoulNow.getUTCFullYear();
+  const monthIndex = seoulNow.getUTCMonth();
+  const from = new Date(Date.UTC(year, monthIndex, 1) - KST_OFFSET_MS);
+  const to = new Date(Date.UTC(year, monthIndex + 1, 1) - KST_OFFSET_MS);
+  const periodMonth = `${year.toString().padStart(4, '0')}-${(monthIndex + 1)
+    .toString()
+    .padStart(2, '0')}`;
+  return { from, to, periodMonth };
+}
+
 @Injectable()
 export class TransactionPromotionService {
   private readonly logger: ReturnType<typeof createLogger>;
@@ -96,6 +130,8 @@ export class TransactionPromotionService {
     // 새 거래 승격 시 푸시 알림을 트리거하는 notification-dispatch 큐(생산자).
     @InjectQueue(QUEUE_NAMES.NOTIFICATION_DISPATCH)
     private readonly notificationQueue: Queue,
+    // 외화 거래를 승인 시점 환율로 KRW 환산한다.
+    private readonly fxRate: FxRateService,
     configService: ConfigService,
   ) {
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -138,7 +174,8 @@ export class TransactionPromotionService {
       this.logger.info({ cardSmsEventId }, 'promotion skipped: amount missing');
       return;
     }
-    // KRW 정수 불변식(부동소수 차단, PRD §10). 파서 결함을 여기서도 막는다.
+    // minor-units 안전정수 불변식(부동소수 차단, PRD §10). 통화 무관 정수 검증이며,
+    // 스케일/통화 정합은 파서가 보장한다. 파서 결함을 여기서도 막는다.
     assertKrwInteger(amount);
 
     const transactionType = event.transactionType;
@@ -184,11 +221,15 @@ export class TransactionPromotionService {
       merchantNormalized,
     );
 
+    // 5.5. 외화면 승인 시점 환율로 KRW 환산(원화 지출/예산/집계에 통합). 이후 승격은
+    // 전부 converted.amount(KRW minor units) 기준 — 원통화는 original*로 병기 보존.
+    const converted = await this.convertToKrw(event, amount);
+
     // 6/7. 거래유형별 승격.
     if (transactionType === 'approval') {
       const { status, transactionId } = await this.promoteApproval(
         event,
-        amount,
+        converted,
         link,
         merchantNormalized,
         categoryId,
@@ -204,13 +245,20 @@ export class TransactionPromotionService {
       // 새로 승격된 거래는 푸시 알림을 enqueue(수신자/마스킹은 소비자가 결정).
       if (status !== 'already_promoted' && transactionId) {
         await this.enqueueNotification(event.householdId, transactionId);
+        // 이 지출이 예산 임계(80/100%)를 새로 넘겼으면 예산 알림도 enqueue.
+        await this.checkBudgetAlerts({
+          householdId: event.householdId,
+          memberId: event.memberId,
+          cardId: link.cardId ?? null,
+          categoryId,
+        });
       }
       return;
     }
 
     const outcome = await this.promoteCancellation(
       event,
-      amount,
+      converted,
       link,
       merchantNormalized,
       categoryId,
@@ -233,6 +281,48 @@ export class TransactionPromotionService {
   }
 
   /* ---------------------------------------------------------------------- */
+  /* 외화 환산                                                               */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * 외화 거래를 승인 시점 환율로 KRW로 환산한다. KRW 거래는 그대로 통과(fx=null).
+   * 외화는 major = amount/10^exp 로 되돌린 뒤 환율을 곱해 KRW minor units(=원)로
+   * 반올림하고, 원통화 원본(originalAmount/Currency)과 환율을 병기 보존한다. 이렇게
+   * 저장된 거래는 currency='KRW'라 기존 KRW 지출/예산/집계에 자연히 합산된다.
+   */
+  private async convertToKrw(
+    event: schema.CardSmsEvent,
+    amount: number,
+  ): Promise<ConvertedAmount> {
+    const rawCurrency = (event.currency ?? 'KRW').toUpperCase();
+    if (rawCurrency === 'KRW') {
+      return {
+        amount,
+        currency: 'KRW',
+        originalAmount: null,
+        originalCurrency: null,
+        exchangeRate: null,
+      };
+    }
+
+    const rate = await this.fxRate.getRateToKrw(rawCurrency);
+    const major = amount / 10 ** currencyExponent(rawCurrency);
+    const krw = Math.round(major * rate);
+    assertKrwInteger(krw);
+    this.logger.info(
+      { cardSmsEventId: event.id, originalCurrency: rawCurrency, exchangeRate: rate },
+      'foreign amount converted to KRW',
+    );
+    return {
+      amount: krw,
+      currency: 'KRW',
+      originalAmount: amount,
+      originalCurrency: rawCurrency,
+      exchangeRate: rate,
+    };
+  }
+
+  /* ---------------------------------------------------------------------- */
   /* 승인 승격                                                               */
   /* ---------------------------------------------------------------------- */
 
@@ -246,7 +336,7 @@ export class TransactionPromotionService {
    */
   private async promoteApproval(
     event: schema.CardSmsEvent,
-    amount: number,
+    converted: ConvertedAmount,
     link: CardLink,
     merchantNormalized: string | null,
     categoryId: string | null,
@@ -254,16 +344,19 @@ export class TransactionPromotionService {
     status: TransactionStatus | 'already_promoted';
     transactionId: string | null;
   }> {
+    const amount = converted.amount;
     // 모호 매칭은 cardId=null이라 중복 판정 기준(카드)이 없고, '어느 카드인지 미정'
     // 자체가 검토 대상이므로 중복 검사를 건너뛰고 pending_review로 확정한다.
     let status: TransactionStatus;
     if (link.ambiguous) {
       status = 'pending_review';
     } else {
+      // 외화도 승격 시 KRW로 환산돼 저장되므로 중복 비교 통화는 항상 KRW.
       const isDuplicate = await this.isDuplicateApproval(
         event.householdId,
         link.cardId,
         amount,
+        converted.currency,
         merchantNormalized,
         event.occurredAt,
       );
@@ -282,7 +375,10 @@ export class TransactionPromotionService {
         amount,
         cancelledAmount: 0,
         netAmount: amount,
-        currency: event.currency ?? 'KRW',
+        currency: converted.currency,
+        originalAmount: converted.originalAmount,
+        originalCurrency: converted.originalCurrency,
+        exchangeRate: converted.exchangeRate,
         merchantRaw: event.merchantRaw ?? null,
         merchantNormalized,
         categoryId,
@@ -312,6 +408,7 @@ export class TransactionPromotionService {
     householdId: string,
     cardId: string | null,
     amount: number,
+    currency: string,
     merchantNormalized: string | null,
     occurredAt: Date | null,
   ): Promise<boolean> {
@@ -322,10 +419,13 @@ export class TransactionPromotionService {
     const lower = new Date(occurredAt.getTime() - DUPLICATE_TIME_WINDOW_MS);
     const upper = new Date(occurredAt.getTime() + DUPLICATE_TIME_WINDOW_MS);
 
+    // amount는 minor units라 통화가 다르면 값이 같아도 의미가 다르다($22.00=2200 vs
+    // ₩2,200=2200). 반드시 동일 통화 안에서만 중복을 비교한다.
     const conditions: SQL[] = [
       eq(schema.cardTransactions.householdId, householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
       eq(schema.cardTransactions.amount, amount),
+      eq(schema.cardTransactions.currency, currency),
       gte(schema.cardTransactions.approvedAt, lower),
       lte(schema.cardTransactions.approvedAt, upper),
     ];
@@ -362,11 +462,12 @@ export class TransactionPromotionService {
    */
   private async promoteCancellation(
     event: schema.CardSmsEvent,
-    amount: number,
+    converted: ConvertedAmount,
     link: CardLink,
     merchantNormalized: string | null,
     categoryId: string | null,
   ): Promise<CancellationOutcome> {
+    const amount = converted.amount;
     const cancelledAt = event.occurredAt ?? null;
 
     return this.db.transaction(async (tx): Promise<CancellationOutcome> => {
@@ -383,7 +484,10 @@ export class TransactionPromotionService {
           amount,
           cancelledAmount: 0,
           netAmount: 0,
-          currency: event.currency ?? 'KRW',
+          currency: converted.currency,
+          originalAmount: converted.originalAmount,
+          originalCurrency: converted.originalCurrency,
+          exchangeRate: converted.exchangeRate,
           merchantRaw: event.merchantRaw ?? null,
           merchantNormalized,
           categoryId,
@@ -410,9 +514,13 @@ export class TransactionPromotionService {
 
       // 대응 승인 탐색: 같은 household/card, 승인, 미완료(approved|partially_cancelled),
       // (가맹점 일치 시) 동일 merchant, 승인이 취소보다 앞섬. 잔액 조건은 JS에서 판정.
+      // 취소↔승인 잔액 비교(467)·netAmount 재계산(482)이 minor units 뺄셈이므로
+      // 반드시 동일 통화 승인만 후보로 남긴다. 외화도 승격 시 KRW로 환산 저장되므로
+      // 후보 통화는 항상 converted.currency(=KRW).
       const candidateConditions: SQL[] = [
         eq(schema.cardTransactions.householdId, event.householdId),
         eq(schema.cardTransactions.transactionType, 'approval'),
+        eq(schema.cardTransactions.currency, converted.currency),
         inArray(schema.cardTransactions.status, ['approved', 'partially_cancelled']),
       ];
       candidateConditions.push(
@@ -676,17 +784,152 @@ export class TransactionPromotionService {
     transactionId: string,
   ): Promise<void> {
     try {
-      await this.notificationQueue.add(
-        'dispatch',
-        { transactionId, householdId },
-        { jobId: `notif_${transactionId}`, removeOnComplete: true },
-      );
+      const payload: NotificationDispatchJob = {
+        kind: 'transaction',
+        householdId,
+        transactionId,
+      };
+      await this.notificationQueue.add('dispatch', payload, {
+        jobId: `notif_${transactionId}`,
+        removeOnComplete: true,
+      });
     } catch {
       this.logger.warn(
         { transactionId },
         'notification enqueue failed; push skipped (in-app still updates)',
       );
     }
+  }
+
+  /**
+   * 방금 승격된 approval 지출이 영향을 준 예산들의 이번 달 사용률을 재계산해,
+   * 80%/100% 임계를 **새로** 넘긴 예산에 대해 예산 알림을 enqueue 한다.
+   * dedupe는 `budget_alert_state` UNIQUE(예산,월,임계)로 "임계당 1회"를 보장한다.
+   * 한 거래가 여러 임계를 동시에 넘겨도(예: 0→101%) 가장 높은 미발송 임계만 발송하고
+   * 낮은 임계는 마킹만 한다. best-effort(실패해도 승격은 유지).
+   */
+  private async checkBudgetAlerts(params: {
+    householdId: string;
+    memberId: string;
+    cardId: string | null;
+    categoryId: string | null;
+  }): Promise<void> {
+    try {
+      const { householdId, memberId, cardId, categoryId } = params;
+
+      // 이 거래가 영향을 주는 예산만 조회(scope 매칭) — 전체 예산 스캔 회피.
+      const scopeMatches: (SQL | undefined)[] = [
+        eq(schema.budgets.scopeType, 'household'),
+        and(
+          eq(schema.budgets.scopeType, 'member'),
+          eq(schema.budgets.scopeRefId, memberId),
+        ),
+      ];
+      if (categoryId) {
+        scopeMatches.push(
+          and(
+            eq(schema.budgets.scopeType, 'category'),
+            eq(schema.budgets.scopeRefId, categoryId),
+          ),
+        );
+      }
+      if (cardId) {
+        scopeMatches.push(
+          and(
+            eq(schema.budgets.scopeType, 'card'),
+            eq(schema.budgets.scopeRefId, cardId),
+          ),
+        );
+      }
+
+      const matched = await this.db
+        .select()
+        .from(schema.budgets)
+        .where(
+          and(eq(schema.budgets.householdId, householdId), or(...scopeMatches)),
+        );
+      if (matched.length === 0) return;
+
+      const { from, to, periodMonth } = currentSeoulMonth();
+
+      for (const budget of matched) {
+        if (budget.amount <= 0) continue;
+        const spent = await this.budgetScopeSpent(budget, from, to);
+        const usagePct = Math.floor((spent / budget.amount) * 100);
+
+        // 내림차순 임계 중 넘긴 것들. 삽입 성공(최초 돌파) 중 가장 높은 것만 발송.
+        let toSend: number | null = null;
+        for (const threshold of BUDGET_ALERT_THRESHOLDS) {
+          if (usagePct < threshold) continue;
+          const [inserted] = await this.db
+            .insert(schema.budgetAlertState)
+            .values({ budgetId: budget.id, periodMonth, threshold })
+            .onConflictDoNothing({
+              target: [
+                schema.budgetAlertState.budgetId,
+                schema.budgetAlertState.periodMonth,
+                schema.budgetAlertState.threshold,
+              ],
+            })
+            .returning({ id: schema.budgetAlertState.id });
+          if (inserted && toSend === null) toSend = threshold;
+        }
+        if (toSend === null) continue;
+
+        const payload: NotificationDispatchJob = {
+          kind: 'budget',
+          householdId,
+          budgetId: budget.id,
+          budgetName: budget.name ?? '예산',
+          threshold: toSend,
+        };
+        await this.notificationQueue.add('dispatch', payload, {
+          jobId: `notif_budget_${budget.id}_${periodMonth}_${toSend}`,
+          removeOnComplete: true,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        { err: error instanceof Error ? error.message : 'unknown' },
+        'budget alert check failed; skipped (best-effort)',
+      );
+    }
+  }
+
+  /**
+   * 예산 scope의 이번 달 순지출(approval netAmount 합). budget.service.computeSpent와
+   * 동일 규칙이되 **visibility 필터는 제거**(예산 알림은 특정 뷰어가 아닌 스코프
+   * 전체 기준). approvedAt `[from,to)` 창.
+   */
+  private async budgetScopeSpent(
+    budget: schema.Budget,
+    from: Date,
+    to: Date,
+  ): Promise<number> {
+    const conditions: SQL[] = [
+      eq(schema.cardTransactions.householdId, budget.householdId),
+      eq(schema.cardTransactions.transactionType, 'approval'),
+      isNull(schema.cardTransactions.excludedAt),
+      // 예산 통화(minor units)와 같은 통화만 합산 — 외화 지출이 KRW 예산 소진율을
+      // 오염시키지 않게 한다(예산은 단일 통화, 기본 'KRW').
+      eq(schema.cardTransactions.currency, budget.currency),
+      gte(schema.cardTransactions.approvedAt, from),
+      lt(schema.cardTransactions.approvedAt, to),
+    ];
+    if (budget.scopeType === 'member' && budget.scopeRefId) {
+      conditions.push(eq(schema.cardTransactions.memberId, budget.scopeRefId));
+    } else if (budget.scopeType === 'category' && budget.scopeRefId) {
+      conditions.push(eq(schema.cardTransactions.categoryId, budget.scopeRefId));
+    } else if (budget.scopeType === 'card' && budget.scopeRefId) {
+      conditions.push(eq(schema.cardTransactions.cardId, budget.scopeRefId));
+    }
+    const [agg] = await this.db
+      .select({
+        spent: sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`,
+      })
+      .from(schema.cardTransactions)
+      .where(and(...conditions));
+    return Number(agg?.spent ?? 0) || 0;
   }
 }
 
