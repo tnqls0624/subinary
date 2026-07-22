@@ -422,12 +422,11 @@ services:
       GATUS_ALERT_WEBHOOK_URL: ${GATUS_ALERT_WEBHOOK_URL:-}
     volumes:
       - ./infrastructure/gatus/config.yaml:/config/config.yaml:ro
+      - gatus-data:/data   # sqlite 업타임/alert 상태 영속화(재시작 시 resolved 누락 방지)
+    # depends_on 없음(의도적): 감시자는 감시 대상(api/web)보다 먼저·독립적으로 떠야 한다.
+    # api/web에 service_healthy로 묶으면 콜드부트에서 앱이 죽을 때 gatus 자체가 안 떠서
+    # 이 서비스가 닫으려던 사각지대가 재현된다. 부팅 중 대상 미준비는 alerting failure-threshold(3회=90s)가 흡수.
     # 포트 미공개: UI가 필요하면 caddy 라우팅 + Cloudflare Access 뒤에 둔다(직접 publish 금지).
-    depends_on:
-      api:
-        condition: service_healthy
-      web:
-        condition: service_healthy
     logging: *default-logging
     restart: unless-stopped
 
@@ -452,19 +451,20 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # Dozzle: 전 컨테이너 로그 라이브 뷰/검색 + MCP 서버(/api/mcp)로 AI 조사 도구(HolmesGPT 등)에 로그·통계 노출.
-  # socket을 직접 마운트하지 않고 socket-proxy(tcp) 경유. 포트 미공개 — UI/MCP는 내부 전용(노출 시 caddy+Access).
+  # Dozzle: 전 컨테이너 로그 라이브 뷰/검색. socket을 직접 마운트하지 않고 socket-proxy(tcp) 경유.
+  # 전용 internal 망(socket-proxy)에만 둔다 — default 망에 있으면 무인증 :8080이 앱 컨테이너(api/web)에서
+  # 도달돼 침해 시 전 스택 로그가 열람되는 lateral 경로가 된다. UI 노출은 caddy 라우팅+Cloudflare Access로 통제.
   dozzle:
     image: amir20/dozzle:v10.6.11
     environment:
       DOZZLE_REMOTE_HOST: tcp://socket-proxy:2375
-      DOZZLE_ENABLE_MCP: "true"    # /api/mcp: list_containers/get_container_logs/get_container_stats 등
+      # MCP(/api/mcp)는 현재 소비자가 없어(HolmesGPT는 호스트 docker CLI로 로그를 읽음) 순수 공격표면이라 비활성.
+      # AI 에이전트가 실제로 Dozzle MCP를 소비하게 되면 인증/노출 통제와 함께 재활성한다.
       DOZZLE_NO_ANALYTICS: "true"
     depends_on:
       - socket-proxy
     networks:
-      - socket-proxy   # 프록시 도달
-      - default        # 향후 caddy UI 라우팅/에이전트 접근
+      - socket-proxy
     logging: *default-logging
     restart: unless-stopped
 
@@ -476,6 +476,7 @@ volumes:
   caddyconfig:
   backup-replica-state:
   ops-sentinel-state:
+  gatus-data:
 
 networks:
   alert-egress:

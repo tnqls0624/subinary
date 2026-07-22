@@ -7,9 +7,12 @@
 # 배치: 기본 compose 네트워크(내부 서비스 이름 도달) + egress(공개 URL 점검). 인바운드 포트 미공개.
 # 설정은 코드로 관리한다(이 파일을 git으로 리뷰) — Uptime Kuma 대신 Gatus를 택한 이유.
 
-# 업타임 이력을 컨테이너 재시작에도 남기려면 sqlite로 바꾸고 볼륨을 붙인다. 기본은 무상태(메모리).
+# 업타임 이력 + alert 상태 머신(failure counter, triggered 상태)을 재시작에도 보존한다.
+# memory면 재시작 중 진행 장애의 resolved 알림이 누락되거나 threshold를 새로 세어 중복 통지가 간다.
+# 볼륨은 docker-compose.prod.yml의 gatus-data(/data)로 마운트된다.
 storage:
-  type: memory
+  type: sqlite
+  path: /data/data.db
 
 ui:
   title: "subinary — 운영 상태"
