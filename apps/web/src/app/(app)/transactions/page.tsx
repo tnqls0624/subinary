@@ -31,6 +31,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -194,6 +205,16 @@ function errorMessage(error: unknown): string {
 /** 거래 발생 시각(승인 → 취소 → 수신 순 fallback). */
 function occurredAt(txn: TransactionSummary): string {
   return txn.approvedAt ?? txn.cancelledAt ?? txn.createdAt;
+}
+
+/** ISO 인스턴트 → `<input type="datetime-local">` 로컬 값(`YYYY-MM-DDTHH:mm`). */
+function toDateTimeLocal(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
 }
 
 
@@ -490,6 +511,27 @@ export default function TransactionsPage() {
       body: { categoryId: nextCategoryId, applyRule },
     });
   };
+
+  // 금액·날짜 수정(변경된 필드만 PATCH). 빈 body면 no-op.
+  const editFields = (
+    txn: TransactionSummary,
+    body: { amount?: number; occurredAt?: string },
+  ) => {
+    if (body.amount === undefined && body.occurredAt === undefined) return;
+    mutation.mutate({ kind: "update", id: txn.id, body });
+  };
+
+  // 하드 삭제(되돌리기 불가). 성공 시 상세 닫기 + 목록/집계 무효화.
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      authedFetch((token) => api.transactions.remove(token, id)),
+    onSuccess: () => {
+      setActionError(null);
+      setDetailId(null);
+      invalidateTransactionScope(queryClient);
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
 
   // 알맞은 카테고리가 없을 때: 새 커스텀 카테고리를 만들고 곧바로 이 거래에 지정한다.
   const createCategoryMut = useCreateCategory();
@@ -898,7 +940,7 @@ export default function TransactionsPage() {
       {detailTxn ? (
         <TransactionDetailDialog
           txn={detailTxn}
-          busy={mutation.isPending}
+          busy={mutation.isPending || deleteMutation.isPending}
           cardLabel={cardLabelOf(detailTxn)}
           memberName={memberNameOf(detailTxn)}
           cardOptions={cardOptions}
@@ -909,6 +951,7 @@ export default function TransactionsPage() {
           onChangeCategory={(v) => changeCategory(detailTxn, v)}
           onCreateCategory={(name) => handleCreateCategory(detailTxn, name)}
           onChangeVisibility={(v) => changeVisibility(detailTxn, v)}
+          onEditFields={(body) => editFields(detailTxn, body)}
           onOpenMemo={() => setMemoTarget(detailTxn)}
           onOpenLink={() => setLinkTarget(detailTxn)}
           onMarkValid={() =>
@@ -920,6 +963,7 @@ export default function TransactionsPage() {
           onInclude={() =>
             mutation.mutate({ kind: "include", id: detailTxn.id })
           }
+          onDelete={() => deleteMutation.mutate(detailTxn.id)}
           onClose={() => setDetailId(null)}
         />
       ) : null}
@@ -968,11 +1012,13 @@ function TransactionDetailDialog({
   onChangeCategory,
   onCreateCategory,
   onChangeVisibility,
+  onEditFields,
   onOpenMemo,
   onOpenLink,
   onMarkValid,
   onExclude,
   onInclude,
+  onDelete,
   onClose,
 }: Readonly<{
   txn: TransactionSummary;
@@ -987,11 +1033,13 @@ function TransactionDetailDialog({
   onChangeCategory: (categoryId: string) => void;
   onCreateCategory: (name: string) => Promise<void>;
   onChangeVisibility: (visibility: string) => void;
+  onEditFields: (body: { amount?: number; occurredAt?: string }) => void;
   onOpenMemo: () => void;
   onOpenLink: () => void;
   onMarkValid: () => void;
   onExclude: () => void;
   onInclude: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }>) {
   const isCancellation = txn.transactionType === "cancellation";
@@ -1001,6 +1049,31 @@ function TransactionDetailDialog({
     (txn.status === "pending_review" ||
       txn.status === "duplicate_suspected");
   const canLink = isCancellation && txn.parentTransactionId == null;
+  // 금액 수정은 취소 연결이 없는 단순 거래만(서버 규칙과 일치). 날짜는 항상 가능.
+  const canEditAmount =
+    txn.cancelledAmount === 0 && txn.parentTransactionId == null;
+
+  // 금액·날짜 편집 로컬 상태(현재 값으로 초기화, 변경분만 저장).
+  const initialDate = toDateTimeLocal(occurredAt(txn));
+  const [editAmount, setEditAmount] = useState(String(txn.amount));
+  const [editDate, setEditDate] = useState(initialDate);
+  const editDirty =
+    (canEditAmount && editAmount.trim() !== String(txn.amount)) ||
+    editDate !== initialDate;
+  const saveEdits = () => {
+    const body: { amount?: number; occurredAt?: string } = {};
+    if (canEditAmount) {
+      const parsed = Number(editAmount.replace(/[,\s]/g, ""));
+      if (Number.isInteger(parsed) && parsed > 0 && parsed !== txn.amount) {
+        body.amount = parsed;
+      }
+    }
+    if (editDate && editDate !== initialDate) {
+      const d = new Date(editDate);
+      if (!Number.isNaN(d.getTime())) body.occurredAt = d.toISOString();
+    }
+    onEditFields(body);
+  };
 
   // 인라인 '새 카테고리 만들기' 상태.
   const [creatingCategory, setCreatingCategory] = useState(false);
@@ -1089,6 +1162,43 @@ function TransactionDetailDialog({
         </div>
 
         <div className="flex flex-col gap-3">
+          {/* 금액·날짜 수정 — 잘못 등록/입력된 거래 보정 */}
+          <div className="flex flex-col gap-2">
+            <Label>금액·날짜 수정</Label>
+            <div className="flex gap-2">
+              <Input
+                inputMode="numeric"
+                aria-label="금액"
+                value={editAmount}
+                disabled={busy || !canEditAmount}
+                onChange={(e) => setEditAmount(e.target.value)}
+                className="flex-1"
+              />
+              <Input
+                type="datetime-local"
+                aria-label="날짜/시각"
+                value={editDate}
+                disabled={busy}
+                onChange={(e) => setEditDate(e.target.value)}
+                className="flex-1"
+              />
+            </div>
+            {!canEditAmount ? (
+              <p className="text-muted-foreground text-[13px]">
+                취소가 연결된 거래는 금액을 수정할 수 없어요. 날짜만 바꿀 수 있어요.
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              className="w-fit"
+              disabled={busy || !editDirty}
+              onClick={saveEdits}
+            >
+              수정 저장
+            </Button>
+          </div>
+
           {/* 카드 연결/재지정 — 미연결·모호(pending_review) 거래 해소 경로 */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="detail-card">카드</Label>
@@ -1281,6 +1391,39 @@ function TransactionDetailDialog({
                 중복이에요 · 합계에서 빼기
               </Button>
             ) : null}
+
+            {/* 하드 삭제(되돌리기 불가) — 확인 다이얼로그 경유 */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="text-destructive h-11 w-full"
+                  disabled={busy}
+                >
+                  거래 삭제
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>거래를 삭제할까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {merchantLabel(txn)} ·{" "}
+                    {formatMoney(txn.amount, txn.currency)} 거래가 영구
+                    삭제됩니다. 되돌릴 수 없어요. (합계에서만 빼려면 &lsquo;합계에서
+                    빼기&rsquo;를 쓰세요.)
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-white hover:bg-destructive/90"
+                    onClick={onDelete}
+                  >
+                    삭제
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
 
