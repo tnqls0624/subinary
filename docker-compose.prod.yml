@@ -28,6 +28,7 @@ x-image-pins:
   gatus: &gatus-image twinproduction/gatus@sha256:c5f210d095fa78e6efaa20ffeb14803f2ba4f10615e16a6d12087697149617f0             # v5.36.0
   socket-proxy: &socket-proxy-image tecnativa/docker-socket-proxy@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476  # v0.4.2
   dozzle: &dozzle-image amir20/dozzle@sha256:bc1ee4ba8d66c7fc0d03823a78486165fb219809f79eaf54cecf3114d647ab14                     # v10.6.11
+  beszel: &beszel-image henrygd/beszel@sha256:a849ad80814b6a1a3be665304dcace5d4854b3bed7bde4dd1227e8ce1b82d477                    # v0.18.7
 
 x-backup-replica-environment: &backup-replica-environment
   RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
@@ -470,6 +471,23 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
+  # Beszel hub: 시스템 메트릭(CPU/메모리/디스크/온도) 대시보드·경보. 현재 관측의 시계열 공백을 메운다.
+  # profiles로 게이트 — 평시 compose up -d에는 안 뜨고 `--profile observability up -d beszel`로만 기동
+  # (온보딩이 UI 수동 작업이라 준비만 하고 자동 기동하지 않음. UI 노출·agent 설치는 docs/operations/observability-ui.md).
+  # ⚠️ 호스트 실측은 이 컨테이너가 아니라 맥 네이티브 beszel-agent(brew)가 담당(Docker Desktop VM 경계).
+  # hub(VM 내부) → 네이티브 agent는 host.docker.internal:45876. 포트 미공개 — UI는 caddy+Cloudflare Access 뒤.
+  beszel:
+    image: *beszel-image
+    profiles: ["observability"]
+    environment:
+      APP_URL: ${BESZEL_APP_URL:-https://metrics.subinary.cloud}
+    volumes:
+      - beszel-data:/beszel_data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 네이티브 agent 접근용(Docker Desktop은 자동이나 명시)
+    logging: *default-logging
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
@@ -479,6 +497,7 @@ volumes:
   backup-replica-state:
   ops-sentinel-state:
   gatus-data:
+  beszel-data:
 
 networks:
   alert-egress:
