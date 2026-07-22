@@ -21,6 +21,7 @@
     "ops:backup:replica:verify": "docker compose --env-file .env --env-file .env.production -f docker-compose.prod.yml --profile offsite-backup-ops run --rm backup-replica-verify",
     "ops:training-readiness": "sh scripts/ops/training-readiness.sh",
     "ops:training:run": "sh scripts/ops/run-training.sh",
+    "ops:auto-investigate": "sh scripts/ops/auto-investigate.sh",
     "verify:model-promotion:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:ai-pipeline:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:training-runner:isolated": "node scripts/verify-training-runner-isolated.mjs",

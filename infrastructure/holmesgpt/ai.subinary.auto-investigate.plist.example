@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  자동 조사 poller launchd 에이전트 (예시). 반복 LLM 비용 + 상시 백그라운드 실행이라
+  기본 배포에 포함하지 않고 운영자가 명시적으로 설치·활성화한다.
+
+  설치:
+    1) <REPO>, <USER>를 실제 값으로 치환하고 ~/Library/LaunchAgents/ai.subinary.auto-investigate.plist 로 복사
+    2) launchctl load ~/Library/LaunchAgents/ai.subinary.auto-investigate.plist
+    3) kill switch를 켜기 전까지는 poller가 즉시 종료된다(AUTO_INVESTIGATE_ENABLED=true 필요)
+  해제:
+    launchctl unload ~/Library/LaunchAgents/ai.subinary.auto-investigate.plist
+
+  주의: EnvironmentVariables의 GEMINI_API_KEY는 여기 넣지 말고(plist는 평문), poller가
+  .env/.env.production에서 읽게 둔다. AUTO_INVESTIGATE_ENABLED만 여기서 켠다.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.subinary.auto-investigate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string><REPO>/scripts/ops/auto-investigate.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string><REPO></string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AUTO_INVESTIGATE_ENABLED</key>
+    <string>true</string>
+    <key>PATH</key>
+    <string>/Users/<USER>/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string><REPO>/backups/auto-investigate.log</string>
+  <key>StandardErrorPath</key>
+  <string><REPO>/backups/auto-investigate.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
