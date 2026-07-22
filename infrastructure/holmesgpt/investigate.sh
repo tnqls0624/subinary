@@ -14,13 +14,42 @@ cd "$repo_root"
 export PATH="$HOME/.local/bin:$PATH"
 command -v holmes >/dev/null 2>&1 || { echo "holmes 미설치: uv tool install holmesgpt" >&2; exit 127; }
 
-# 환경에 없으면 .env에서 GEMINI_API_KEY만 추출한다(값 미출력).
-if [ -z "${GEMINI_API_KEY:-}" ] && [ -f .env ]; then
-  GEMINI_API_KEY=$(grep -E '^GEMINI_API_KEY=' .env | head -1 | cut -d= -f2-)
+# .env → .env.production 순차 탐색(뒤 파일 우선, prod 관례와 정합). 값은 출력하지 않는다.
+# dotenv처럼 CRLF·양끝 따옴표·'export ' 접두를 정규화한다(compose에선 되고 이 스크립트에선 깨지는 불일치 방지).
+extract_env() {
+  extract_key="$1"; extract_val=""; extract_found=""
+  for extract_file in .env .env.production; do
+    [ -f "$extract_file" ] || continue
+    extract_line=$(grep -E "^(export[[:space:]]+)?${extract_key}=" "$extract_file" | tail -1) || true
+    [ -n "$extract_line" ] || continue
+    extract_raw=$(printf '%s' "${extract_line#*=}" | tr -d '\r')
+    case "$extract_raw" in
+      \"*\") extract_raw=${extract_raw#\"}; extract_raw=${extract_raw%\"} ;;
+      \'*\') extract_raw=${extract_raw#\'}; extract_raw=${extract_raw%\'} ;;
+    esac
+    extract_val="$extract_raw"; extract_found=1
+  done
+  [ -n "$extract_found" ] || return 1
+  printf '%s' "$extract_val"
+}
+
+if [ -z "${GEMINI_API_KEY:-}" ]; then
+  GEMINI_API_KEY=$(extract_env GEMINI_API_KEY) || true
   export GEMINI_API_KEY
 fi
-[ -n "${GEMINI_API_KEY:-}" ] || { echo "GEMINI_API_KEY 미설정(.env 또는 환경변수)" >&2; exit 64; }
+[ -n "${GEMINI_API_KEY:-}" ] || { echo "GEMINI_API_KEY 미설정(.env/.env.production 또는 환경변수)" >&2; exit 64; }
 
-[ "$#" -ge 1 ] || { echo "usage: investigate.sh \"<조사 질문>\"" >&2; exit 64; }
+[ "$#" -ge 1 ] || { echo "usage: investigate.sh \"<조사 질문>\" [holmes 옵션...]" >&2; exit 64; }
 
-exec holmes ask "$@" --config "$script_dir/config.yaml"
+# 타임아웃으로 감싼다(멀티턴 LLM 루프가 지연/행에 걸려도 호출자가 무기한 블록되지 않게).
+# macOS엔 timeout(1)이 없으므로 gtimeout(coreutils)→timeout→perl-alarm 순으로 폴백.
+# perl alarm 타이머는 exec 후에도 유지되어 초과 시 holmes에 SIGALRM을 보낸다.
+timeout_seconds="${INVESTIGATE_TIMEOUT_SECONDS:-600}"
+if command -v gtimeout >/dev/null 2>&1; then
+  exec gtimeout "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+elif command -v timeout >/dev/null 2>&1; then
+  exec timeout "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+else
+  exec perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' \
+    "$timeout_seconds" holmes ask "$@" --config "$script_dir/config.yaml"
+fi

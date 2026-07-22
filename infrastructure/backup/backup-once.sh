@@ -52,12 +52,19 @@ snapshot_name="$timestamp"
 temporary_snapshot="${backup_root}/.incomplete-${timestamp}-$$"
 final_snapshot="${backup_root}/${snapshot_name}"
 
-cleanup() {
+# 스냅샷 publish(mv) 전에 실패하면: (1) dead man's switch에 /fail 통지, (2) 임시 디렉터리 정리.
+# publish 성공 후에는 아래에서 trap을 해제하므로(성공 확정) 이 핸들러가 성공 경로를 오염시키지 않는다.
+# once/daemon 어느 모드든 backup-once.sh가 자기 실패를 스스로 통지 → entrypoint의 중복 /fail 불필요.
+on_exit() {
+  exit_code=$?
+  if [ "$exit_code" -ne 0 ] && [ -n "${HEALTHCHECK_PING_URL:-}" ]; then
+    curl -fsS -m 10 --retry 3 --retry-all-errors -o /dev/null "${HEALTHCHECK_PING_URL}/fail" 2>/dev/null || true
+  fi
   if [ -d "$temporary_snapshot" ]; then
     find "$temporary_snapshot" -depth -delete
   fi
 }
-trap cleanup EXIT HUP INT TERM
+trap on_exit EXIT HUP INT TERM
 
 mkdir -p "$backup_root"
 if [ -e "$final_snapshot" ]; then
@@ -128,7 +135,8 @@ echo "backup completed: snapshot=${snapshot_name} postgresBytes=${database_bytes
 
 # 백업 성공을 dead man's switch(healthchecks.io 등)에 통지한다. 맥 밖의 감시자가 이 핑이 끊기면
 # 경보를 낸다 → ops-sentinel까지 죽는 시나리오도 커버. 미설정이거나 핑 실패는 백업 자체를 실패시키지 않는다.
+# (실패 핑은 위 on_exit trap이 담당 — 성공/실패 대칭)
 if [ -n "${HEALTHCHECK_PING_URL:-}" ]; then
-  curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_PING_URL" \
+  curl -fsS -m 10 --retry 3 --retry-all-errors -o /dev/null "$HEALTHCHECK_PING_URL" \
     || echo "backup warning: healthcheck success ping failed (non-fatal)" >&2
 fi
