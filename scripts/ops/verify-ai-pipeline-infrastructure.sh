@@ -82,7 +82,7 @@ compose config --quiet || fail "production compose configuration is invalid"
 for service_name in postgres redis api worker web backup ops-sentinel; do
   wait_for_state "$service_name" healthy
 done
-for service_name in minio caddy cloudflared gatus; do
+for service_name in minio caddy cloudflared gatus socket-proxy dozzle; do
   wait_for_state "$service_name" running
 done
 assert_completed_service minio-setup
