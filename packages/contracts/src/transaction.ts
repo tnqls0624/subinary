@@ -23,9 +23,16 @@ export type TransactionStatus = z.infer<typeof transactionStatusSchema>;
 
 /**
  * `PATCH /v1/transactions/:id` — edit a transaction's category, merchant,
- * card/member assignment, visibility, or memo. Setting `cardId: null` unlinks
- * the card. When `categoryId` changes and `applyRule` is true, a
+ * card/member assignment, visibility, memo, and (for simple, cancellation-free
+ * rows) its amount or occurred-at instant. Setting `cardId: null` unlinks the
+ * card. When `categoryId` changes and `applyRule` is true, a
  * `merchant_category_rules` entry is upserted so **future** promotions inherit it.
+ *
+ * `amount` is an integer in the transaction's `currency` minor units (KRW = 원).
+ * The server rejects an amount edit on a transaction that has cancellations
+ * linked (either direction) since it would break the netAmount invariant.
+ * `occurredAt` is an ISO-8601 instant; it maps to `approvedAt` (approval) or
+ * `cancelledAt` (cancellation).
  */
 export const transactionUpdateRequestSchema = z.object({
   categoryId: z.string().uuid().optional(),
@@ -34,9 +41,17 @@ export const transactionUpdateRequestSchema = z.object({
   memberId: z.string().uuid().optional(),
   visibility: cardVisibilitySchema.optional(),
   memo: z.string().max(1000).optional(),
+  amount: z.number().int().positive().optional(),
+  occurredAt: z.string().datetime().optional(),
   applyRule: z.boolean().optional(),
 });
 export type TransactionUpdateRequest = z.infer<typeof transactionUpdateRequestSchema>;
+
+/** `DELETE /v1/transactions/:id` — hard-delete a transaction (irreversible). */
+export const transactionDeleteResponseSchema = z.object({
+  deleted: z.literal(true),
+});
+export type TransactionDeleteResponse = z.infer<typeof transactionDeleteResponseSchema>;
 
 /**
  * `POST /v1/transactions/:id/link-cancellation` — manually link a cancellation

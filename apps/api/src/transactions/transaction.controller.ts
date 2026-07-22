@@ -14,6 +14,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -28,6 +29,7 @@ import {
   linkCancellationRequestSchema,
   transactionUpdateRequestSchema,
   type MerchantLabelCandidateListResponse,
+  type TransactionDeleteResponse,
   type TransactionListResponse,
   type TransactionSummary,
   type TransactionSummaryResponse,
@@ -132,6 +134,16 @@ export class TransactionController {
     @Body() dto: TransactionUpdateDto,
   ): Promise<TransactionSummary> {
     return this.transactionService.update(user.userId, id, dto);
+  }
+
+  /** DELETE /v1/transactions/:id — hard-delete a transaction (irreversible). */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<TransactionDeleteResponse> {
+    return this.transactionService.remove(user.userId, id);
   }
 
   /** POST /v1/transactions/:id/link-cancellation — link this cancellation to an approval. */

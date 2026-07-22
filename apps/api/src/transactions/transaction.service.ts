@@ -621,6 +621,26 @@ export class TransactionService {
     if (input.memo !== undefined) {
       updates.memo = input.memo;
     }
+    if (input.amount !== undefined) {
+      // 금액 수정은 취소 연결이 없는 단순 거래에서만(netAmount 불변식 보호).
+      if (current.cancelledAmount !== 0 || current.parentTransactionId !== null) {
+        throw new BadRequestException(
+          '취소가 연결된 거래는 금액을 수정할 수 없어요',
+        );
+      }
+      assertKrwInteger(input.amount);
+      updates.amount = input.amount;
+      // 승인은 net = amount(취소 없음), 취소 행은 net이 항상 0.
+      updates.netAmount = current.transactionType === 'approval' ? input.amount : 0;
+    }
+    if (input.occurredAt !== undefined) {
+      const occurred = new Date(input.occurredAt);
+      if (current.transactionType === 'approval') {
+        updates.approvedAt = occurred;
+      } else {
+        updates.cancelledAt = occurred;
+      }
+    }
 
     // The category change and the (optional) rule upsert are atomic.
     const effectiveMerchant =
@@ -995,6 +1015,80 @@ export class TransactionService {
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
     return buildSummary(row.txn, row.categorySlug, false);
+  }
+
+  /**
+   * 거래를 하드 삭제한다(되돌리기 불가 — 되돌림이 필요하면 exclude 사용).
+   * - 자식 취소가 연결된 승인은 차단(취소를 먼저 처리해야 함).
+   * - 연결된 취소를 삭제하면 부모 승인의 cancelledAmount/netAmount/status를 역산
+   *   복원한다({@link linkCancellation}의 역연산).
+   * source `card_sms_event`는 원문 감사용으로 남긴다. ⚠️ 삭제한 거래의 source를
+   * **수동 재파싱**하면 재생성될 수 있으나(자동 재파싱 경로 없음), 재파싱=소스
+   * 재도출이라 의도된 동작으로 본다.
+   */
+  async remove(userId: string, id: string): Promise<{ deleted: true }> {
+    const current = await this.loadTransaction(id);
+    const actor = await this.requireMembership(current.householdId, userId);
+    this.assertCanMutate(actor, current.memberId);
+
+    if (current.transactionType === 'approval') {
+      const [child] = await this.db
+        .select({ id: schema.cardTransactions.id })
+        .from(schema.cardTransactions)
+        .where(eq(schema.cardTransactions.parentTransactionId, id))
+        .limit(1);
+      if (child) {
+        throw new ConflictException(
+          '연결된 취소 거래가 있어 삭제할 수 없어요. 취소 거래를 먼저 삭제하세요',
+        );
+      }
+    }
+
+    await this.db.transaction(async (tx) => {
+      // 연결된 취소를 지우면 부모 승인 잔액을 역산 복원한다.
+      if (
+        current.transactionType === 'cancellation' &&
+        current.parentTransactionId
+      ) {
+        const [approval] = await tx
+          .select()
+          .from(schema.cardTransactions)
+          .where(eq(schema.cardTransactions.id, current.parentTransactionId))
+          .limit(1);
+        if (approval) {
+          const newCancelled = Math.max(
+            0,
+            approval.cancelledAmount - current.amount,
+          );
+          assertKrwInteger(newCancelled);
+          const newNet = approval.amount - newCancelled;
+          assertKrwInteger(newNet);
+          const newStatus: TxnStatus =
+            newCancelled >= approval.amount
+              ? 'cancelled'
+              : newCancelled > 0
+                ? 'partially_cancelled'
+                : 'approved';
+          await tx
+            .update(schema.cardTransactions)
+            .set({
+              cancelledAmount: newCancelled,
+              netAmount: newNet,
+              status: newStatus,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.cardTransactions.id, approval.id));
+        }
+      }
+
+      await tx
+        .delete(schema.cardTransactions)
+        .where(eq(schema.cardTransactions.id, id));
+    });
+
+    // 삭제를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
+    void this.realtimePublisher.publish(current.householdId);
+    return { deleted: true };
   }
 
   /* ---------------------------------------------------------------------- */

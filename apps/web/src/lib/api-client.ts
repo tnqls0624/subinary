@@ -464,6 +464,11 @@ export const api = {
         body,
         accessToken,
       }),
+    remove: (accessToken: AccessToken, id: string) =>
+      apiFetch<{ deleted: true }>(`/v1/transactions/${id}`, {
+        method: "DELETE",
+        accessToken,
+      }),
     linkCancellation: (
       accessToken: AccessToken,
       id: string,
