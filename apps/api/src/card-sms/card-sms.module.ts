@@ -19,10 +19,16 @@ import { CardSmsEventsController } from './card-sms-events.controller';
 import { CardSmsIngestService } from './card-sms-ingest.service';
 import { CardSmsQueryService } from './card-sms-query.service';
 import { CardSmsController } from './card-sms.controller';
+import { ManualEntryController } from './manual-entry.controller';
+import { ManualEntryService } from './manual-entry.service';
 
 @Module({
   imports: [DevicesModule, StorageModule],
-  controllers: [CardSmsController, CardSmsEventsController],
-  providers: [CardSmsIngestService, CardSmsQueryService],
+  controllers: [
+    CardSmsController,
+    CardSmsEventsController,
+    ManualEntryController,
+  ],
+  providers: [CardSmsIngestService, CardSmsQueryService, ManualEntryService],
 })
 export class CardSmsModule {}

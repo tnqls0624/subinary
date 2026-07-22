@@ -121,15 +121,21 @@ export class CardSmsParseProcessor extends WorkerHost {
       receivedAt: event.receivedAt,
     });
 
-    // 금액은 KRW 정수만 허용(부동소수 금지, PRD §10). 파서 결함을 여기서 차단한다.
+    // 금액은 minor units 정수만 허용(부동소수 금지, PRD §10). 파서 결함을 차단한다.
     const amount = result.amount ?? null;
+    const currency = result.currency ?? null;
     if (amount !== null && !Number.isInteger(amount)) {
-      throw new Error(`parsed amount must be an integer (cardSmsEventId=${cardSmsEventId})`);
+      throw new Error(
+        `parsed amount must be a minor-units integer (cardSmsEventId=${cardSmsEventId})`,
+      );
     }
 
-    // 거래유형이 식별되고 금액이 있으면 신뢰도로 parsed/pending_review 분기,
-    // 그 외(미식별·금액 없음)는 parse_failed 로 처리하고 warnings 를 parseError 에 남긴다.
-    const isParseable = result.transactionType !== 'unknown' && amount !== null;
+    // 거래유형이 식별되고 금액+통화가 함께 있으면 신뢰도로 parsed/pending_review 분기.
+    // minor units에서 통화는 금액의 스케일/의미를 정하는 필수값이라, amount만 있고
+    // currency가 없으면(파서 결함) 승격 가능으로 보지 않는다. 미식별·금액/통화 결손은
+    // parse_failed 로 처리하고 warnings 를 parseError 에 남긴다.
+    const isParseable =
+      result.transactionType !== 'unknown' && amount !== null && currency !== null;
     let parseStatus: CardSmsParseStatus;
     let parseError: string | null;
     if (isParseable) {
@@ -149,7 +155,7 @@ export class CardSmsParseProcessor extends WorkerHost {
         issuer: result.issuer ?? null,
         transactionType: result.transactionType,
         amount,
-        currency: result.currency ?? null,
+        currency,
         merchantRaw: result.merchantRaw ?? null,
         occurredAt: result.occurredAt ?? null,
         maskedCardNumber: result.maskedCardNumber ?? null,
@@ -178,7 +184,12 @@ export class CardSmsParseProcessor extends WorkerHost {
     // 파싱 성공(또는 사람 검토 필요) 건은 같은 잡 안에서 거래로 승격한다(스펙 §1.1/§6).
     // parse_failed는 승격 대상이 아니다. 승격 실패는 잡을 재시도하게 두되, 멱등
     // (sourceEventId UNIQUE)이라 재승격이 안전하다.
-    if (parseStatus === 'parsed' || parseStatus === 'pending_review') {
+    // declined(승인거절/거부/실패)는 실제 체결이 아니므로 sms 기록만 남기고 거래로
+    // 승격하지 않는다 — 승격하면 소비 집계·목록에 유령 거래가 잡힌다.
+    const promotable =
+      (parseStatus === 'parsed' || parseStatus === 'pending_review') &&
+      result.transactionType !== 'declined';
+    if (promotable) {
       await this.promotionService.promote(cardSmsEventId);
     }
 
