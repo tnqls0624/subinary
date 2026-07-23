@@ -476,6 +476,13 @@ services:
     ports:
       # 127.0.0.1 전용. internal 망만으론 host publish가 안 돼 전용 observability 망을 통해 노출.
       - "127.0.0.1:8081:8080"
+    healthcheck:
+      # dozzle 내장 서브커맨드(GET /healthcheck 자체 호출). distroless라 셸/curl 불가 → 바이너리 직접 호출.
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging: *default-logging
     restart: unless-stopped
 
