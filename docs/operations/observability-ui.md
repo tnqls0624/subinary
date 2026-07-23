@@ -19,9 +19,9 @@
 
 ## A. Beszel 메트릭 온보딩
 
-Beszel은 hub(대시보드, 컨테이너)와 agent(수집기)로 나뉜다. **핵심: agent는 맥 네이티브(brew)로 설치**해야
-Docker Desktop의 Linux VM이 아니라 진짜 맥 호스트(CPU/메모리/디스크/온도)를 측정한다. hub는 프로필 게이트라
-평시 `compose up -d`에는 뜨지 않는다.
+Beszel은 hub(대시보드, 컨테이너)와 agent(수집기)로 나뉜다. **핵심: agent는 맥 네이티브(prebuilt 바이너리 또는
+brew)로 설치**해야 Docker Desktop의 Linux VM이 아니라 진짜 맥 호스트(CPU/메모리/디스크/온도)를 측정한다.
+hub는 프로필 게이트라 평시 `compose up -d`에는 뜨지 않는다.
 
 ### 1) hub 기동
 ```sh
@@ -34,25 +34,44 @@ docker compose --env-file .env --env-file .env.production -f docker-compose.prod
 ### 2) 관리자 계정 생성
 첫 접속 시 UI가 admin 계정 생성을 요구한다. 가족 이메일로 생성.
 
-### 3) 맥 네이티브 agent 설치(brew)
+### 3) 맥 네이티브 agent 설치
+agent는 반드시 맥 네이티브로 설치한다(컨테이너는 VM만 측정). 설치 방법 두 가지:
+
+**(a) prebuilt 바이너리 — 권장(Command Line Tools 상관없음)**
 ```sh
-brew install henrygd/beszel/beszel-agent   # tap 자동
+curl -fsSL -o /tmp/ba.tgz \
+  https://github.com/henrygd/beszel/releases/download/v0.18.7/beszel-agent_darwin_arm64.tar.gz
+tar xzf /tmp/ba.tgz -C /tmp && install -m 0755 /tmp/beszel-agent ~/.local/bin/beszel-agent
 ```
-hub UI에서 **Add System** → 표시되는 `KEY`(공개키)와 포트(기본 45876)를 확인한다.
-agent를 서비스로 등록(로그인 시 자동 시작):
+**(b) brew** — Xcode Command Line Tools가 최신일 때만(구버전이면 소스 빌드 실패):
 ```sh
-# ~/.config/beszel-agent 또는 brew services 환경에 설정. KEY는 hub가 발급한 값.
-KEY="<hub가 표시한 공개키>" PORT=45876 brew services start beszel-agent
-```
-agent가 `DOCKER_HOST`로 socket-proxy를 가리키면 컨테이너별 stats도 수집한다(선택):
-```sh
-DOCKER_HOST=tcp://127.0.0.1:2375 ...   # socket-proxy를 호스트에 임시 노출했을 때만. 기본은 호스트 시스템 메트릭만.
+brew install henrygd/beszel/beszel-agent   # 실패 시 (a)로. sudo xcode-select --install 후 재시도 가능.
 ```
 
-### 4) hub에 시스템 등록
-hub는 컨테이너(Docker Desktop VM 내부)이고 agent는 맥 네이티브다. hub가 agent에 닿는 주소는
-**`host.docker.internal:45876`**(compose에 `extra_hosts`로 명시됨). Add System 대화상자의 Host/IP에
-`host.docker.internal`, 포트 `45876`, KEY를 넣는다. 테이블이 초록색이면 연결 성공.
+### 4) hub에 시스템 등록 + agent 연결 (토큰/WebSocket 방식)
+Beszel v0.18은 **토큰(WebSocket)** 방식이 기본이자 이 구성(hub=컨테이너, agent=native)에 가장 간단하다
+— agent가 hub로 나가 붙으므로 hub가 맥으로 되돌아오는 연결이 불필요하다.
+
+1. hub UI **Add System**: Name(예 `mac-homeserver`) 입력. Host/IP·Port는 토큰 방식이면 실제로 안 쓰이지만
+   UI가 요구하면 `host.docker.internal` / `45876`을 넣어도 무방. 저장하면 **토큰(UUID)**이 나온다 → 복사.
+2. agent는 토큰 외에 **hub의 SSH 공개키**도 필요하다. 공개키는 hub 데이터 볼륨의 개인키에서 유도한다:
+   ```sh
+   docker run --rm -v family-memory-ai_beszel-data:/d alpine:latest sh -c \
+     'apk add -q openssh-keygen 2>/dev/null; ssh-keygen -y -f /d/id_ed25519'
+   # → ssh-ed25519 AAAA... (이 값이 --key)
+   ```
+3. LaunchAgent로 등록(재부팅에도 자동 시작). `~/Library/LaunchAgents/ai.subinary.beszel-agent.plist`:
+   ProgramArguments = `~/.local/bin/beszel-agent --key "<위 공개키>" --token <UUID> --url http://localhost:8090`,
+   `RunAtLoad`/`KeepAlive` true, 로그 `~/Library/Logs/beszel-agent.log`, 권한 600(토큰 포함).
+   ```sh
+   launchctl load -w ~/Library/LaunchAgents/ai.subinary.beszel-agent.plist
+   beszel-agent health   # → ok
+   ```
+   로그에 `WebSocket connected host=localhost:8090`이 뜨고, hub UI에서 시스템이 초록색이면 성공.
+   중지·제거: `launchctl unload ~/Library/LaunchAgents/ai.subinary.beszel-agent.plist`.
+
+> 대안(SSH 방식): Add System에서 SSH 공개키(KEY)가 나오면 agent를 `--key "<KEY>" --listen 45876`로 띄우고
+> Host/IP=`host.docker.internal`, Port=`45876`로 등록한다(hub→agent 역방향, compose의 `extra_hosts`가 이를 지원).
 
 ### 5) 경보(선택)
 ops-sentinel이 이미 디스크를 감시하므로 **중복을 피해 CPU/메모리 임계만** Beszel 경보로 설정한다.
