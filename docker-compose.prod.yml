@@ -251,6 +251,9 @@ services:
       OPS_SENTINEL_BACKUP_MAX_AGE_SECONDS: ${OPS_SENTINEL_BACKUP_MAX_AGE_SECONDS:-90000}
       OPS_SENTINEL_DISK_MIN_FREE_BYTES: ${OPS_SENTINEL_DISK_MIN_FREE_BYTES:-42949672960}
       OPS_SENTINEL_DISK_MIN_FREE_PERCENT: ${OPS_SENTINEL_DISK_MIN_FREE_PERCENT:-10}
+      # 외부(맥 밖) DMS 핑 URL. 성공 사이클=base, 실패=/fail. 미설정 시 무동작.
+      # backup의 HEALTHCHECK_PING_URL과 별개 체크로 등록 — ops-sentinel이 죽으면 disk_low 감시 유실을 맥 밖에서 감지.
+      OPS_SENTINEL_HEARTBEAT_URL: ${OPS_SENTINEL_HEARTBEAT_URL:-}
     volumes:
       - type: bind
         source: ${BACKUP_DIR:-./backups}

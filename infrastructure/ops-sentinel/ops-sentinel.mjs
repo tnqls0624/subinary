@@ -31,6 +31,7 @@ const MAX_CLOCK_SKEW_SECONDS = 300;
  * @property {number} diskMinFreePercent
  * @property {string} backupRoot
  * @property {string} stateFile
+ * @property {string | null} heartbeatUrl
  */
 
 /**
@@ -171,6 +172,9 @@ export function parseSentinelConfig(env) {
     backupRoot:
       env.OPS_SENTINEL_BACKUP_ROOT?.trim() || '/monitored/backups',
     stateFile: env.OPS_SENTINEL_STATE_FILE?.trim() || '/state/state.json',
+    // 외부(맥 밖) dead-man's-switch 핑 URL. 미설정이면 무동작. webhook(enabled)과 독립 —
+    // ops-sentinel(맥 안 감시자)이 통째로 죽으면 이 핑이 끊겨 맥 밖에서 감지된다(disk_low 사각지대 폐쇄).
+    heartbeatUrl: env.OPS_SENTINEL_HEARTBEAT_URL?.trim() || null,
   };
 }
 
@@ -297,6 +301,13 @@ export async function collectSentinelConditions(config, adapters = {}) {
     );
     const availablePercent =
       Math.floor((availableBytes / totalBytes) * 10_000) / 100;
+    // ⚠️ Docker Desktop(맥) 주의: 이 컨테이너는 virtiofs/gRPC-FUSE bind-mount를 statfs하므로
+    // availableBytes/totalBytes는 진짜 맥 APFS가 아니라 VM 가상 디스크값(예: total ~126TB)을 반환한다.
+    // 따라서 diskMinFreeBytes(절대 바이트) 절은 사실상 죽은 조건 — VM이 늘 거대한 여유를 보고해 절대 발화 안 함.
+    // 반면 virtiofs가 채움 비율(%)은 그대로 통과시켜 availablePercent는 실제 맥 여유를 정확히 반영한다.
+    // → 실효 가드는 diskMinFreePercent(퍼센트)다. OR 조합이라 죽은 바이트 절은 거짓 경보를 내지 않아 무해하며,
+    //   BACKUP_DIR이 진짜 passthrough 볼륨인 non-Docker-Desktop 환경에선 바이트 절도 정상 동작한다(그래서 유지).
+    //   절대 바이트 실측이 필요하면 맥 네이티브 beszel-agent가 올바른 소유자(진짜 APFS). 근거: docs GAP-3 감사.
     diskCondition = {
       firing:
         availableBytes < config.diskMinFreeBytes ||
@@ -700,6 +711,31 @@ function errorCode(error) {
   return error instanceof Error && error.name ? error.name : 'UnknownError';
 }
 
+/**
+ * 외부 dead-man's-switch(healthchecks.io 등)에 하트비트를 보낸다. 성공 사이클마다 base URL로,
+ * 사이클 실패 시 `${url}/fail`로 POST한다. ops-sentinel(맥 안)이 통째로 죽으면 핑이 끊겨 맥 밖에서 감지된다.
+ * 생존 신호일 뿐이므로 best-effort다 — 전송 실패는 절대 감시 루프를 중단시키지 않고 삼킨다(다음 사이클 재시도).
+ * backup 서비스의 HEALTHCHECK_PING_URL과 동일한 규약(성공=base, 실패=/fail).
+ * @param {SentinelConfig} config
+ * @param {boolean} ok 직전 사이클 성공 여부
+ * @param {{ fetch?: typeof fetch }} [adapters]
+ * @returns {Promise<boolean>} 핑 성공 여부(테스트용)
+ */
+export async function pingHeartbeat(config, ok, adapters = {}) {
+  if (!config.heartbeatUrl) return false;
+  const fetchFn = adapters.fetch ?? fetch;
+  const url = ok ? config.heartbeatUrl : `${config.heartbeatUrl}/fail`;
+  try {
+    const response = await fetchFn(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    });
+    return response.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** @param {number} milliseconds @param {AbortSignal} signal */
 function wait(milliseconds, signal) {
   return new Promise((resolve) => {
@@ -757,6 +793,8 @@ async function main() {
     try {
       const summary = await runSentinelCycle(config);
       console.log(JSON.stringify({ event: 'ops_sentinel_cycle', ...summary }));
+      // 성공 사이클 = 감시가 실제로 돌았다는 생존 신호. 경보 발화 여부와 무관하게 핑(sentinel은 정상 동작).
+      await pingHeartbeat(config, true);
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -764,6 +802,8 @@ async function main() {
           errorCode: errorCode(error),
         }),
       );
+      // 사이클 자체 실패(측정 오류 등) → /fail 핑으로 외부 DMS 즉시 경보.
+      await pingHeartbeat(config, false);
     }
     await wait(config.intervalMs, controller.signal);
   }

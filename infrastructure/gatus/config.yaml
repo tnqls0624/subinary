@@ -45,15 +45,18 @@ endpoints:
       - type: custom
         description: "API readiness (내부) — DB/Redis/스토리지 의존성 포함"
 
-  - name: worker-live
+  - name: worker-ready
     group: internal
-    url: "http://worker:3002/v1/health/live"
+    # /live(프로세스 생존)가 아니라 /ready를 친다: worker는 프로세스가 살아도 redis/db 연결만 죽는
+    # degraded-but-alive가 가능한데, /live만 보면 이 상태가 어떤 계층에도 안 잡힌다(api-ready는 api 의존성만 봄).
+    # worker의 redis+db down이면 503 → 경보. (컨테이너 자가치유는 별개로 Docker healthcheck의 /live가 담당.)
+    url: "http://worker:3002/v1/health/ready"   # redis ping + db checkConnection, 하나라도 down이면 503
     interval: 30s
     conditions:
       - "[STATUS] == 200"
     alerts:
       - type: custom
-        description: "Worker liveness (내부)"
+        description: "Worker readiness (내부) — Redis/DB 의존성 포함"
 
   - name: web-health
     group: internal

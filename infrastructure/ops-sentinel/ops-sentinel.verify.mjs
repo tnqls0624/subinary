@@ -11,6 +11,7 @@ import {
   createInitialSentinelState,
   deliverPendingAlerts,
   parseSentinelConfig,
+  pingHeartbeat,
   runSentinelCycle,
 } from './ops-sentinel.mjs';
 
@@ -61,6 +62,14 @@ describe('ops sentinel 설정', () => {
 
     assert.equal(config.enabled, false);
     assert.equal(config.webhookUrl, null);
+  });
+
+  it('heartbeatUrl은 미설정 시 null, 설정 시 trim되어 파싱된다', () => {
+    assert.equal(parseSentinelConfig(validEnv()).heartbeatUrl, null);
+    const config = parseSentinelConfig(
+      validEnv({ OPS_SENTINEL_HEARTBEAT_URL: '  https://hc.example.com/ping/uuid  ' }),
+    );
+    assert.equal(config.heartbeatUrl, 'https://hc.example.com/ping/uuid');
   });
 
   it('비 HTTPS URL과 범위를 벗어난 숫자를 거부한다', () => {
@@ -497,5 +506,60 @@ describe('ops sentinel 전체 cycle', () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('ops sentinel 외부 하트비트(DMS)', () => {
+  it('heartbeatUrl이 없으면 no-op — fetch를 호출하지 않고 false를 반환한다', async () => {
+    const config = parseSentinelConfig(validEnv());
+    let called = false;
+    const result = await pingHeartbeat(config, true, {
+      fetch: async () => {
+        called = true;
+        return { ok: true };
+      },
+    });
+    assert.equal(called, false);
+    assert.equal(result, false);
+  });
+
+  it('성공 사이클은 base URL로, 실패 사이클은 /fail로 POST한다', async () => {
+    const config = parseSentinelConfig(
+      validEnv({ OPS_SENTINEL_HEARTBEAT_URL: 'https://hc.example.com/ping/uuid' }),
+    );
+    /** @type {{url: string, method: string}[]} */
+    const calls = [];
+    const fetchFn = async (url, init) => {
+      calls.push({ url, method: init.method });
+      return { ok: true };
+    };
+    assert.equal(await pingHeartbeat(config, true, { fetch: fetchFn }), true);
+    assert.equal(await pingHeartbeat(config, false, { fetch: fetchFn }), true);
+    assert.deepEqual(calls, [
+      { url: 'https://hc.example.com/ping/uuid', method: 'POST' },
+      { url: 'https://hc.example.com/ping/uuid/fail', method: 'POST' },
+    ]);
+  });
+
+  it('전송 오류를 삼켜 false를 반환하고 절대 throw하지 않는다(감시 루프 보호)', async () => {
+    const config = parseSentinelConfig(
+      validEnv({ OPS_SENTINEL_HEARTBEAT_URL: 'https://hc.example.com/ping/uuid' }),
+    );
+    const result = await pingHeartbeat(config, true, {
+      fetch: async () => {
+        throw new Error('network down');
+      },
+    });
+    assert.equal(result, false);
+  });
+
+  it('non-2xx 응답은 false로 취급한다(재시도는 다음 사이클)', async () => {
+    const config = parseSentinelConfig(
+      validEnv({ OPS_SENTINEL_HEARTBEAT_URL: 'https://hc.example.com/ping/uuid' }),
+    );
+    const result = await pingHeartbeat(config, true, {
+      fetch: async () => ({ ok: false, status: 503 }),
+    });
+    assert.equal(result, false);
   });
 });

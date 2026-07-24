@@ -46,7 +46,7 @@
 ### 관측·운영 계층
 | 서비스 | 역할 | 포트 | 게이트 | 특이점 |
 |---|---|---|---|---|
-| **ops-sentinel** | 백업 신선도 + 호스트 디스크 여유 감시 → webhook | — | 평시 | read-only·`cap_drop ALL`·no-new-privileges·64m 하드닝. DB/socket 없이 파일시스템만 |
+| **ops-sentinel** | 백업 신선도 + 백업 마운트 여유(%) 감시 → webhook | — | 평시 | read-only·`cap_drop ALL`·no-new-privileges·64m 하드닝. DB/socket 없이 파일시스템만. ⚠️ Docker Desktop에선 **퍼센트 임계만 실효**(바이트 임계는 VM 가상값이라 무효 — 절대 바이트 실측은 맥 네이티브 beszel-agent 영역) |
 | **gatus** | 외형 감시(내부 app health + 공개 터널 URL 능동점검) | 8080 | 평시 | **`depends_on` 없음(의도)** — 감시자는 대상보다 먼저·독립적으로 떠야 사각지대를 안 만든다 |
 | **socket-proxy** | read-only Docker API 프록시(GET만, `POST=0`) | — | 평시 | Docker socket을 만지는 **유일 지점**, internal 망 격리 |
 | **dozzle** | 전 컨테이너 로그 라이브 뷰/검색 | 8081 | 평시 | socket-proxy 경유(raw socket 미마운트). ✅ health(`/dozzle healthcheck`) |
@@ -118,6 +118,31 @@ alert-egress         : ops-sentinel 만          (경보 송신 전용)
 - **socket-proxy는 internal** → 인터넷 egress 없음. Docker API를 읽는 컨테이너를 외부에서 격리.
 - **ops-sentinel은 alert-egress 전용** → 경보 송신 외 내부망 접근 없음(DB·socket 미접근 하드닝과 정합).
 - `*` backup은 default에 붙어 postgres/minio에 도달(백업 대상 접근용).
+
+---
+
+## 5. 설계 노트 — 자주 오해하는 관측 계층 결정
+겉보기 "중복"을 감사(2026-07)한 결과 전부 의도된 목적 분리로 확인됐다. 아래는 코드/설정에만 드러나 있어
+후임자가 "중복이니 제거"로 오판하기 쉬운 결정들 — **지우기 전에 이 노트를 볼 것.**
+
+1. **Docker healthcheck는 경보 채널이 아니다.** healthcheck 결과의 소비처는 오직 `restart`(자가치유)와
+   `depends_on`(부팅 게이트)다. **컨테이너 `unhealthy`는 그 자체로 아무에게도 통지되지 않는다.** 앱 계열의
+   실제 경보는 Gatus가, 호스트/백업은 ops-sentinel이 담당한다. "healthcheck 있으니 감시된다"는 오해 주의.
+2. **api는 `/live`(Docker) vs `/ready`(Gatus)로 엔드포인트를 의도적으로 나눴다.** Docker는 liveness(항상 200,
+   일시적 DB 블립에 컨테이너 churn 방지), Gatus는 readiness(의존성 down 시 503 경보). 복붙이면 같은 URL이었을 것.
+3. **worker도 Gatus가 `/ready`를 친다(2026-07 수정).** worker는 프로세스는 살아도 redis/db 연결만 죽는
+   degraded-but-alive가 가능한데 `/live`만 보면 이 상태가 어디에도 안 잡혔다(GAP-1). 지금은 `/ready`로 감시.
+4. **ops-sentinel 디스크 경보는 Docker Desktop에서 퍼센트만 실효.** 컨테이너가 statfs하는 값이 진짜 APFS가
+   아니라 VM 가상 디스크(~126TB)라 **바이트 임계는 절대 발화하지 않는다**(GAP-3). 퍼센트 임계가 유일한 실효 가드.
+   절대 바이트 실측이 필요하면 맥 네이티브 beszel-agent가 올바른 소유자.
+5. **ops-sentinel은 외부 하트비트(DMS)로 이중화된다.** `OPS_SENTINEL_HEARTBEAT_URL` 설정 시 매 성공 사이클마다
+   healthchecks.io로 핑 → ops-sentinel(맥 안)이 통째로 죽으면 핑이 끊겨 맥 밖에서 감지(GAP-2, disk_low 사각지대 폐쇄).
+   backup의 `HEALTHCHECK_PING_URL`과 **별개 체크로** 등록할 것.
+6. **Beszel 디스크 경보는 OFF로 유지한다.** 디스크 경보 소유권은 ops-sentinel 단독(위 4·5). Beszel의 디스크
+   지표는 시각화 전용 — Beszel 온보딩 시 디스크 경보를 켜지 말 것(observability-ui.md §경보). 이중 경보 방지.
+7. **HolmesGPT는 Dozzle의 로그를 쓰지 않는다.** AI 조사는 호스트 docker CLI로 직접 read-only 조회한다.
+   Dozzle MCP를 AI 로그원으로 붙이면 공격표면·이중 로그원이 생기므로 의도적으로 비활성(compose dozzle 주석).
+   "Dozzle MCP 재활성" 유혹 시 이 결정을 먼저 볼 것.
 
 ---
 
