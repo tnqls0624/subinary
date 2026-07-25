@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto';
  * 구분된다. 새 발급사 문구를 추가하면 기존 지문이 바뀌므로(캐시 무효화) 레시피
  * 재유도가 필요하다는 점만 유의한다.
  */
-const TEMPLATE_KEYWORDS: ReadonlySet<string> = new Set([
+export const TEMPLATE_KEYWORDS: ReadonlySet<string> = new Set([
   'Web발신',
   '승인',
   '승인거절',

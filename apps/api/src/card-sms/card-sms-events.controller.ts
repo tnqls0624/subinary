@@ -6,11 +6,14 @@
  * principal is passed to the service as `actorUserId`; the service enforces
  * household membership and returns a 403 to non-members (PRD §26).
  */
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { createZodDto } from 'nestjs-zod';
 
-import type {
-  CardSmsEventDetail,
-  CardSmsEventSummary,
+import {
+  cardSmsReviewRequestSchema,
+  type CardSmsEventDetail,
+  type CardSmsEventSummary,
+  type CardSmsReviewResponse,
 } from '@family/contracts';
 
 import {
@@ -18,10 +21,16 @@ import {
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
 import { CardSmsQueryService } from './card-sms-query.service';
+import { CardSmsReviewService } from './card-sms-review.service';
+
+class CardSmsReviewDto extends createZodDto(cardSmsReviewRequestSchema) {}
 
 @Controller('card-sms-events')
 export class CardSmsEventsController {
-  constructor(private readonly queryService: CardSmsQueryService) {}
+  constructor(
+    private readonly queryService: CardSmsQueryService,
+    private readonly reviewService: CardSmsReviewService,
+  ) {}
 
   /**
    * GET /v1/card-sms-events?householdId=&status=&limit=&cursor= — list event
@@ -51,5 +60,19 @@ export class CardSmsEventsController {
     @Param('id') id: string,
   ): Promise<CardSmsEventDetail> {
     return this.queryService.get(user.userId, id);
+  }
+
+  /**
+   * POST /v1/card-sms-events/:id/review — 격리·실패 건을 사람이 확인·교정해 확정한다
+   * (ADR-0023 S3). 거래를 만들고 동시에 학습 라벨(`human_confirmed`)을 남긴다.
+   */
+  @Post(':id/review')
+  @HttpCode(HttpStatus.OK)
+  review(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CardSmsReviewDto,
+  ): Promise<CardSmsReviewResponse> {
+    return this.reviewService.review(user.userId, id, dto);
   }
 }

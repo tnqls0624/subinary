@@ -17,7 +17,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, lt, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, type SQL } from 'drizzle-orm';
 
 import type {
   CardSmsEventDetail,
@@ -74,7 +74,7 @@ export class CardSmsQueryService {
       eq(schema.cardSmsEvents.householdId, householdId),
     ];
     if (statusFilter) {
-      conditions.push(eq(schema.cardSmsEvents.parseStatus, statusFilter));
+      conditions.push(inArray(schema.cardSmsEvents.parseStatus, statusFilter));
     }
     if (keyset) {
       const after = or(
@@ -159,14 +159,22 @@ export class CardSmsQueryService {
   }
 
   /** Validates the optional parse-status filter against the known enum. */
-  private parseStatus(status: string | undefined): ParseStatus | undefined {
-    if (status === undefined) {
+  private parseStatus(status: string | undefined): ParseStatus[] | undefined {
+    if (status === undefined || status === '') {
       return undefined;
     }
-    if (!PARSE_STATUSES.includes(status as ParseStatus)) {
+    // 쉼표 구분 다중 상태를 허용한다 — 검토 화면이 quarantined(LLM 추론)와
+    // parse_failed(규칙 실패)를 한 목록으로 보여줘야 하기 때문(ADR-0023 S3).
+    const requested = status.split(',').map((value) => value.trim()).filter((v) => v !== '');
+    if (requested.length === 0) {
       throw new BadRequestException('invalid status filter');
     }
-    return status as ParseStatus;
+    for (const value of requested) {
+      if (!PARSE_STATUSES.includes(value as ParseStatus)) {
+        throw new BadRequestException('invalid status filter');
+      }
+    }
+    return [...new Set(requested)] as ParseStatus[];
   }
 
   /** Decodes an opaque `base64url("<epochMs>:<uuid>")` keyset cursor. */

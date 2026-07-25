@@ -45,6 +45,8 @@ export const MODEL_SERVING_TASKS = {
   RAG_RERANKER: 'rag-reranker',
   RAG_ANSWER: 'rag-answer',
   MERCHANT_CATEGORY: 'merchant-category',
+  /** 카드 문자 span 추출(ADR-0023) — LLM은 원문 인용만 하고 값은 만들지 않는다. */
+  CARD_SMS_EXTRACT: 'card-sms-extract',
 } as const;
 
 /** 운영 제어 평면의 기본 named alias. */

@@ -488,12 +488,21 @@ export const sourceKind = pgEnum('source_kind', [
   'manual',
 ]);
 
-/** 카드 문자 파싱 상태(pending→parsed/parse_failed/pending_review). */
+/**
+ * 카드 문자 파싱 상태(pending→parsed/parse_failed/pending_review/quarantined).
+ *
+ * `quarantined`(ADR-0023 §6)는 **승격을 막는 유일한 상태**다. `pending_review`는
+ * 이름과 달리 사람 게이트가 아니라 그대로 승격된다(promotion.service가
+ * parsed·pending_review를 모두 수용) — 즉 "검토가 필요하다"는 표시일 뿐이다.
+ * LLM이 추론한 결과처럼 사람 확인 전에는 거래로 만들면 안 되는 건을 여기 둔다.
+ * 승격 경로가 parsed·pending_review만 허용하므로 이 값은 **자동으로 비승격**이다.
+ */
 export const cardSmsParseStatus = pgEnum('card_sms_parse_status', [
   'pending',
   'parsed',
   'parse_failed',
   'pending_review',
+  'quarantined',
 ]);
 
 /** 카드 거래 종류(승인/취소/거절/미상). declined=승인거절·거부·실패(체결 안 됨, 미승격). */
@@ -610,6 +619,49 @@ export const cardSmsEvents = pgTable(
       table.householdId,
       table.parseStatus,
     ),
+  ],
+);
+
+/**
+ * 카드 문자 템플릿 추출 레시피 (ADR-0023 S4).
+ *
+ * 사람이 확정한 **한 건**에서 유도한 "필드별 몇 번째 후보인가" 규칙을 지문 단위로
+ * 저장한다. 같은 레이아웃의 다음 문자는 이 레시피로 결정적으로 추출되어 **LLM을 타지
+ * 않는다**.
+ *
+ * **가구 스코프가 아니다(전역).** 카드사 문자 레이아웃은 사용자와 무관하므로 한 번
+ * 확정하면 모두가 쓴다. 개인정보 관점에서 안전한 이유: `recipe`는 후보 **인덱스**만
+ * 담고, `skeleton`은 고정 어휘를 제외한 모든 토큰이 슬롯(`@`)으로 접혀 있어 가맹점·
+ * 이름·금액이 남지 않는다.
+ */
+export const cardSmsTemplates = pgTable(
+  'card_sms_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** sha256(sender \0 skeleton). 조회 키. */
+    fingerprint: text('fingerprint').notNull(),
+    sender: text('sender').notNull(),
+    /** 슬롯으로 접힌 레이아웃(PII 없음). 감사·디버깅용. */
+    skeleton: text('skeleton').notNull(),
+    /** `TemplateRecipe`(card-parsers) 직렬화. 후보 인덱스만 담는다. */
+    recipe: jsonb('recipe').$type<Record<string, unknown>>().notNull(),
+    /** 이 레시피를 만든 확정 건(계보 추적). */
+    sourceEventId: uuid('source_event_id')
+      .references(() => cardSmsEvents.id, { onDelete: 'set null' }),
+    confirmedBy: uuid('confirmed_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    /** 레시피가 실제로 적용된 횟수(효과 관측용). */
+    hitCount: integer('hit_count').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('card_sms_templates_fingerprint_unique').on(table.fingerprint),
   ],
 );
 

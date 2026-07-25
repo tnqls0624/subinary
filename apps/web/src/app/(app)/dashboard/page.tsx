@@ -22,7 +22,12 @@ import {
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
-import { useQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import type {
   BudgetScopeType,
@@ -33,6 +38,14 @@ import type {
 } from "@family/contracts";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Card,
   CardAction,
@@ -57,7 +70,7 @@ import {
   type BarListItem,
 } from "@/components/widgets";
 import { MonthlyInsightsCard } from "@/components/monthly-insights-card";
-import { ApiError, apiFetch } from "@/lib/api-client";
+import { api, ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
   currentMonth,
@@ -85,7 +98,7 @@ import { cn } from "@/lib/utils";
 /** 처리 대기 건수 집계 시 한 번에 가져올 상한(초과 시 'N+' 표기). */
 const REVIEW_SCAN_LIMIT = 100;
 
-/** '읽지 못한 문자'는 건별로 이 기간(3일)만 홈에 노출한다(지난 건은 자동 숨김). */
+/** '확인이 필요한 문자'는 건별로 이 기간(3일)만 홈에 노출한다(지난 건은 자동 숨김). */
 const PARSE_FAILED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** BarList 상위 노출 개수(구성원/카드/카테고리 공통). */
@@ -163,9 +176,9 @@ export default function DashboardPage() {
     poll,
   );
 
-  // 파싱 실패 문자 이벤트(전용 훅/클라이언트 함수가 없어 apiFetch 직접 사용).
+  // 검토 대기 문자(파싱 실패 + LLM 격리). 전용 훅이 없어 apiFetch 직접 사용.
   const parseFailedQuery = useQuery({
-    queryKey: ["card-sms-events", householdId, "parse_failed"],
+    queryKey: ["card-sms-events", householdId, "review-inbox"],
     enabled: householdId != null,
     refetchInterval: REALTIME_POLL_MS,
     queryFn: () =>
@@ -173,7 +186,7 @@ export default function DashboardPage() {
         apiFetch<CardSmsEventSummary[]>(
           `/v1/card-sms-events?householdId=${encodeURIComponent(
             householdId as string,
-          )}&status=parse_failed&limit=${REVIEW_SCAN_LIMIT}`,
+          )}&status=parse_failed,quarantined&limit=${REVIEW_SCAN_LIMIT}`,
           { accessToken: token },
         ),
       ),
@@ -261,7 +274,7 @@ export default function DashboardPage() {
     Boolean(pendingReviewQuery.data?.nextCursor) ||
     Boolean(duplicateQuery.data?.nextCursor);
 
-  // 읽지 못한 문자: 건별로 최근 3일 이내 수신 건만 노출(3일 지난 실패 건은 자동 숨김).
+  // 확인 필요 문자: 건별로 최근 3일 이내 수신 건만 노출(3일 지난 건은 자동 숨김).
   // 데이터/DB는 그대로 두고 표시만 필터한다(receivedAt 기준, 클라이언트 계산).
   const parseFailedRecent = useMemo(() => {
     const cutoff = Date.now() - PARSE_FAILED_WINDOW_MS;
@@ -357,7 +370,7 @@ export default function DashboardPage() {
       {/* AI 인사이트(있을 때만 렌더). 자연어 질의는 하단 탭 중앙 'AI'(/ai)로 분리. */}
       <MonthlyInsightsCard month={month} />
 
-      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·읽지 못한 문자가 모두 없으면 숨김. */}
+      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·확인 필요 문자가 모두 없으면 숨김. */}
       {showReviewCard ? (
         <Card className="gap-0 py-2">
           <CardContent className="px-3">
@@ -402,13 +415,13 @@ export default function DashboardPage() {
             }
             icon={<MailWarning />}
             iconClassName="bg-warning/15 text-warning"
-            title="읽지 못한 문자"
+            title="확인이 필요한 문자"
             subtitle={
               parseFailedQuery.isError
                 ? "건수를 불러오지 못했어요"
                 : parseFailedCount > 0
-                  ? "탭하면 어떤 문자가 실패했는지 볼 수 있어요"
-                  : "파싱에 실패한 카드 문자예요"
+                  ? "탭하면 원문을 보고 바로 확정할 수 있어요"
+                  : "자동으로 읽지 못했거나 확인이 필요한 문자예요"
             }
             value={
               <span
@@ -694,8 +707,8 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* 읽지 못한 문자 상세(원문) 다이얼로그 — 네이티브/웹 공통. */}
-      <ParseFailedDialog
+      {/* 확인 필요 문자 검토(원문+교정) 다이얼로그 — 네이티브/웹 공통. */}
+      <ReviewInboxDialog
         open={parseFailedOpen}
         events={parseFailedRecent}
         onClose={() => setParseFailedOpen(false)}
@@ -705,11 +718,18 @@ export default function DashboardPage() {
 }
 
 /**
- * 파싱 실패 카드 문자 목록 다이얼로그. 요약 목록엔 원문이 없어 열릴 때 각 이벤트의
- * 상세(GET /v1/card-sms-events/:id)를 받아 발신자·수신시각·원문·실패사유를 보여준다.
- * 어떤 문자가 왜 실패했는지 확인하고 수동 대응(재등록/무시)할 수 있게 한다.
+ * 검토 대기 카드 문자 다이얼로그 (ADR-0023 S3).
+ *
+ * 두 종류를 한 목록으로 보여준다:
+ *  - `parse_failed` — 규칙 파서가 못 읽은 문자(값이 비어 있다).
+ *  - `quarantined`  — LLM이 원문에서 추출했지만 **사람 확인 전이라 거래로 승격되지
+ *                     않은** 건. 값이 미리 채워져 있어 확인만 하면 된다.
+ *
+ * 요약 목록엔 원문이 없어 열릴 때 상세(GET /v1/card-sms-events/:id)를 받아 원문을
+ * 보여주고, 그 자리에서 교정·확정할 수 있게 한다. 확정하면 거래가 만들어지고
+ * 동시에 학습 라벨(`human_confirmed`)이 기록된다.
  */
-function ParseFailedDialog({
+function ReviewInboxDialog({
   open,
   events,
   onClose,
@@ -740,10 +760,10 @@ function ParseFailedDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>읽지 못한 문자</DialogTitle>
+          <DialogTitle>확인이 필요한 문자</DialogTitle>
           <DialogDescription>
-            파싱에 실패한 카드 문자예요. 원문을 확인해 직접 처리하거나, 카드
-            등록·발신번호를 점검해 주세요.
+            자동으로 읽지 못했거나, 읽었지만 확인이 필요한 문자예요. 내용을
+            확인하고 맞으면 확정해 주세요.
           </DialogDescription>
         </DialogHeader>
         {detailsQuery.isLoading ? (
@@ -757,27 +777,160 @@ function ParseFailedDialog({
         ) : (
           <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
             {details.map((d) => (
-              <div key={d.id} className="bg-muted rounded-lg p-3">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="text-[13px] font-medium">{d.sender}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {formatDate(d.receivedAt)}
-                  </span>
-                </div>
-                <p className="text-foreground/90 text-[13px] break-words whitespace-pre-wrap">
-                  {d.rawContent}
-                </p>
-                {d.parseError ? (
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    실패 사유: {d.parseError}
-                  </p>
-                ) : null}
-              </div>
+              <ReviewEventCard key={d.id} detail={d} />
             ))}
           </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** `datetime-local` 입력용 로컬 시각 문자열(YYYY-MM-DDTHH:mm). */
+function toLocalInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(
+    at.getHours(),
+  )}:${pad(at.getMinutes())}`;
+}
+
+/**
+ * 문자 한 건의 원문 + 교정 폼. 값은 파싱 결과로 미리 채워지며(quarantined는 LLM이
+ * 뽑은 값), 사용자가 고친 뒤 확정하면 거래가 생성된다.
+ */
+function ReviewEventCard({ detail }: { detail: CardSmsEventDetail }) {
+  const { authedFetch } = useAuth();
+  const queryClient = useQueryClient();
+  const [transactionType, setTransactionType] = useState<
+    "approval" | "cancellation" | "declined"
+  >(
+    detail.transactionType === "cancellation" ||
+      detail.transactionType === "declined"
+      ? detail.transactionType
+      : "approval",
+  );
+  const [amount, setAmount] = useState(
+    detail.amount != null ? String(detail.amount) : "",
+  );
+  const [merchant, setMerchant] = useState(detail.merchantRaw ?? "");
+  const [occurredAt, setOccurredAt] = useState(
+    toLocalInputValue(detail.occurredAt ?? detail.receivedAt),
+  );
+
+  const declined = transactionType === "declined";
+  const parsedAmount = Number(amount);
+  const canSubmit =
+    declined ||
+    (Number.isInteger(parsedAmount) &&
+      parsedAmount > 0 &&
+      merchant.trim().length > 0 &&
+      occurredAt !== "");
+
+  const reviewMutation = useMutation({
+    mutationFn: () =>
+      authedFetch((token) =>
+        api.cardSms.review(token, detail.id, {
+          transactionType,
+          currency: detail.currency ?? "KRW",
+          ...(declined
+            ? {}
+            : {
+                amount: parsedAmount,
+                merchantRaw: merchant.trim(),
+                occurredAt: new Date(occurredAt).toISOString(),
+              }),
+        }),
+      ),
+    onSuccess: () => {
+      toast.success(declined ? "거절 건으로 정리했어요" : "거래로 등록했어요");
+      // 검토 목록·거래·집계가 함께 바뀐다.
+      void queryClient.invalidateQueries({ queryKey: ["card-sms-events"] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      void queryClient.invalidateQueries({ queryKey: ["budgets"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "확정하지 못했어요",
+      );
+    },
+  });
+
+  return (
+    <div className="bg-muted rounded-lg p-3">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium">{detail.sender}</span>
+        <span className="text-muted-foreground text-xs">
+          {formatDate(detail.receivedAt)}
+        </span>
+      </div>
+      <p className="text-foreground/90 text-[13px] break-words whitespace-pre-wrap">
+        {detail.rawContent}
+      </p>
+      {detail.parseError ? (
+        <p className="text-muted-foreground mt-1 text-xs">
+          {detail.parseStatus === "quarantined" ? "참고" : "실패 사유"}:{" "}
+          {detail.parseError}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-col gap-2">
+        <Select
+          value={transactionType}
+          onValueChange={(v) =>
+            setTransactionType(v as "approval" | "cancellation" | "declined")
+          }
+        >
+          <SelectTrigger className="h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="approval">결제(승인)</SelectItem>
+            <SelectItem value="cancellation">취소</SelectItem>
+            <SelectItem value="declined">거절 — 거래 아님</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {declined ? (
+          <p className="text-muted-foreground text-xs">
+            승인되지 않은 문자예요. 확정하면 거래를 만들지 않고 정리만 해요.
+          </p>
+        ) : (
+          <>
+            <Input
+              className="h-9"
+              inputMode="numeric"
+              placeholder="금액"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))}
+            />
+            <Input
+              className="h-9"
+              placeholder="가맹점"
+              value={merchant}
+              onChange={(e) => setMerchant(e.target.value)}
+            />
+            <Input
+              className="h-9"
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(e) => setOccurredAt(e.target.value)}
+            />
+          </>
+        )}
+
+        <Button
+          size="sm"
+          disabled={!canSubmit || reviewMutation.isPending}
+          onClick={() => reviewMutation.mutate()}
+        >
+          {reviewMutation.isPending ? "확정하는 중…" : "확정하기"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

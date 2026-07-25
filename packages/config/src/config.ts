@@ -113,6 +113,20 @@ export const configSchema = z.object({
         .min(1)
         .max(500)
         .default(50),
+      /**
+       * 카드 문자 LLM span 폴백 모드 (ADR-0023 S2). 기본 `off` — 카드 문자 **원문**이
+       * 외부로 나가는 경로라 명시적으로 켜야 한다.
+       *
+       * - `off`: 규칙 파서 실패는 그대로 parse_failed(현행 동작).
+       * - `shadow`: LLM을 호출해 결과를 기록하지만 파싱 상태는 바꾸지 않는다(품질 관찰용).
+       * - `on`: LLM 결과를 `quarantined`로 적재한다 — 사람 확인 전에는 승격되지 않는다.
+       *
+       * ⚠️ Gemini 무료 티어는 전송 콘텐츠를 모델 학습에 사용한다. 켜기 전에 해당
+       * 프로젝트의 Cloud Billing 활성화(유료 티어 = 학습 미사용)를 확인할 것.
+       */
+      cardSmsLlmMode: z.enum(['off', 'shadow', 'on']).default('off'),
+      /** 카드 문자 LLM 호출 일일 상한. 초과분은 호출 없이 사람 검토로 보낸다. */
+      cardSmsLlmDailyBudget: z.coerce.number().int().min(0).max(10_000).default(50),
     })
     .superRefine((value, context) => {
       const identityFields = [
@@ -237,6 +251,8 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       modelCanaryMonitorEnabled: env.AI_MODEL_CANARY_MONITOR_ENABLED,
       modelCanaryMonitorIntervalMs: env.AI_MODEL_CANARY_MONITOR_INTERVAL_MS,
       modelCanaryMonitorBatchSize: env.AI_MODEL_CANARY_MONITOR_BATCH_SIZE,
+      cardSmsLlmMode: env.CARD_SMS_LLM_MODE,
+      cardSmsLlmDailyBudget: env.CARD_SMS_LLM_DAILY_BUDGET,
     },
     observability: {
       alertWebhookUrl: optionalEnvValue(env.PIPELINE_ALERT_WEBHOOK_URL),

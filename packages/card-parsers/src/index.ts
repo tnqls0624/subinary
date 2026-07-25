@@ -23,7 +23,14 @@ export {
 } from './parsers/base.parser.js';
 
 export { maskForLlm } from './mask.js';
-export { templateFingerprint, templateSkeleton } from './template.js';
+export { TEMPLATE_KEYWORDS, templateFingerprint, templateSkeleton } from './template.js';
+export {
+  applyRecipe,
+  deriveRecipe,
+  fieldCandidates,
+  merchantCandidates,
+} from './recipe.js';
+export type { ConfirmedFields, FieldRecipe, TemplateRecipe } from './recipe.js';
 export {
   assertParseInvariants,
   buildResultFromSpans,

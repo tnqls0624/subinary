@@ -11,6 +11,8 @@ import { RealtimePublisherService } from '../realtime/realtime-publisher.service
 import { FcmService } from '../notifications/fcm.service';
 import { NotificationSchedulerService } from '../notifications/notification-scheduler.service';
 import { StorageModule } from '../storage/storage.module';
+import { LlmSpanExtractorService } from '../card-sms/llm-span-extractor.service';
+import { TemplateRecipeService } from '../card-sms/template-recipe.service';
 import { CardSmsParseProcessor } from './card-sms-parse.processor';
 import { CategorySuggestProcessor } from './category-suggest.processor';
 import { GraphExtractProcessor } from './graph-extract.processor';
@@ -59,6 +61,10 @@ import { TestProcessor } from './test.processor';
   providers: [
     TestProcessor,
     CardSmsParseProcessor,
+    // L1: 사람이 확정한 템플릿 레시피로 LLM 없이 추출(ADR-0023 S4).
+    TemplateRecipeService,
+    // L2: 레시피도 없는 미지 레이아웃만 LLM span 추출로 넘긴다(기본 off, ADR-0023).
+    LlmSpanExtractorService,
     TransactionPromotionService,
     // 외화 거래 승격 시 승인 시점 환율로 KRW 환산(원화 지출/예산 통합).
     FxRateService,

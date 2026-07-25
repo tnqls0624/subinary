@@ -260,6 +260,20 @@
       "when": 1784558276850,
       "tag": "0036_zippy_layla_miller",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1784989639722,
+      "tag": "0037_military_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784991232643,
+      "tag": "0038_gigantic_sunspot",
+      "breakpoints": true
     }
   ]
 }

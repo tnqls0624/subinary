@@ -18,6 +18,7 @@ import { StorageModule } from '../storage/storage.module';
 import { CardSmsEventsController } from './card-sms-events.controller';
 import { CardSmsIngestService } from './card-sms-ingest.service';
 import { CardSmsQueryService } from './card-sms-query.service';
+import { CardSmsReviewService } from './card-sms-review.service';
 import { CardSmsController } from './card-sms.controller';
 import { ManualEntryController } from './manual-entry.controller';
 import { ManualEntryService } from './manual-entry.service';
@@ -29,6 +30,12 @@ import { ManualEntryService } from './manual-entry.service';
     CardSmsEventsController,
     ManualEntryController,
   ],
-  providers: [CardSmsIngestService, CardSmsQueryService, ManualEntryService],
+  providers: [
+    CardSmsIngestService,
+    CardSmsQueryService,
+    // 격리·실패 건의 사람 확정 → 거래 승격 + 학습 라벨 생산(ADR-0023 S3).
+    CardSmsReviewService,
+    ManualEntryService,
+  ],
 })
 export class CardSmsModule {}

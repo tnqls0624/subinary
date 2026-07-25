@@ -1,0 +1,1 @@
+ALTER TYPE "public"."card_sms_parse_status" ADD VALUE 'quarantined';

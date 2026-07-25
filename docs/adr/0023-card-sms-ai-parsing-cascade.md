@@ -9,7 +9,11 @@
 
 ## 상태
 
-승인 대기 (2026-07-25 설계). 단계 S1~S4로 나눠 구현하며 S5는 조건부 보류.
+2026-07-25 설계 · **S1~S4 구현 완료(미배포)** · S5 조건부 보류.
+
+배포 전 확인: 마이그레이션 `0037`(enum `quarantined`)·`0038`(`card_sms_templates`)
+미적용. `CARD_SMS_LLM_MODE`는 기본 `off`라 배포해도 동작이 바뀌지 않는다. `on`으로
+올리기 전에 ① 마이그레이션 적용 ② Gemini Cloud Billing 활성화가 선행되어야 한다.
 
 ## 배경
 
@@ -163,13 +167,23 @@ const redact = (m: string) => '•'.repeat(m.length - 4) + m.slice(-4); // 매�
 
 ## 구현 단계
 
-| 단계 | 내용 | 공수 |
+| 단계 | 내용 | 상태 |
 | --- | --- | --- |
-| **S1** | 골든 픽스처(기존 34 테스트 승격) · `card-parsers` 순수함수 export · 길이보존 마스킹 · `spans.ts` · 불변식 검사(amount>0, 통화 확정, 날짜 범위) | 3~4일 |
-| **S2** | 승격 차단 상태 신설 + L2 LLM span 폴백(`parse_failed`/`unknown` 한정) · `CARD_SMS_LLM_MODE` 플래그 · 일일 상한 · 싱글플라이트 | 3~4일 |
-| **S3** | 검토·수정 UI(원문 하이라이트 + 필드 인라인 수정) · `feedback_events` 기록 · 교정률 위젯 | 4~5일 |
-| **S4** | `card_sms_templates` 지문→레시피. S3에서 확정된 1건이 레시피가 되어 이후 동일 템플릿 LLM 0회 | 3~4일 |
-| **S5** | (조건부, 지금 만들지 않음) 템플릿 20종+ **또는** 월 1,000건+ 도달 시 학습 파이프라인 재검토 | — |
+| **S1** | `mask.ts`(길이보존 마스킹) · `template.ts`(지문) · `spans.ts`(quote 확정·불변식) · `card-parsers` 순수함수 export · 테스트 34종 | ✅ 완료 |
+| **S2** | `quarantined` 상태(마이그레이션 0037) · `llm-span-extractor.service.ts` · `CARD_SMS_LLM_MODE` 3단 플래그 · 일일 상한 · 지문 단일화 · 프로세서 캐스케이드 | ✅ 완료 |
+| **S3** | `POST /v1/card-sms-events/:id/review` · `card-sms-review.service.ts`(동기 승격 + `feedback_events` 라벨) · status 다중 필터 · 홈 검토 다이얼로그(원문 + 인라인 교정) | ✅ 완료 |
+| **S4** | `recipe.ts`(후보 열거·`deriveRecipe`·`applyRecipe`) · `card_sms_templates`(마이그레이션 0038, 전역) · 검토 확정 시 레시피 자동 유도 · 워커 L1 계층 | ✅ 완료 |
+| **S5** | (조건부, 지금 만들지 않음) 템플릿 20종+ **또는** 월 1,000건+ 도달 시 학습 파이프라인 재검토 | 보류 |
+
+S4 실측(운영 52건): 2건 이상인 템플릿 8종에서 첫 건을 확정값으로 삼아 레시피를
+유도하고 나머지 30건에 적용한 결과 **규칙 파서와 100% 일치**했다. 검증 과정에서
+토스뱅크처럼 본문에 시각이 없는 레이아웃은 `receivedAt` 근사 폴백이 필요하다는 것이
+드러나 `applyRecipe`에 반영했다(`toss.parser.ts`와 같은 규약).
+
+S3의 라벨은 `feedback_events(targetType:'card-sms-parse', source:'human_confirmed',
+labelSchemaVersion:'card-sms-parse-v1')`에 **템플릿 지문과 함께** 저장된다 — 지문이
+없으면 S4가 레이아웃 단위로 레시피를 만들 수 없다. 교정 전 파서 결과(`previous`)도
+같이 남겨 무엇이 틀렸는지 추적한다.
 
 합계 약 2.5~3.5주. S3(검토 UI)는 "나중에"가 아니다 — L2가 검토 대기를 생산하는데 소비자가 없으면
 큐가 적체되고 플라이휠이 즉시 멈춘다.

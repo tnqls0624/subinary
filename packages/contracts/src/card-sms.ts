@@ -1,11 +1,17 @@
 import { z } from 'zod';
 
-/** Card-SMS parsing lifecycle (PRD §31 Phase 3; mirrors DB `cardSmsParseStatus`). */
+/**
+ * Card-SMS parsing lifecycle (PRD §31 Phase 3; mirrors DB `cardSmsParseStatus`).
+ *
+ * `quarantined`는 LLM(span 추출)이 만든 결과로, 사람이 확인하기 전에는 거래로
+ * 승격되지 않는다(ADR-0023 §6). `pending_review`는 이름과 달리 승격을 막지 않는다.
+ */
 export const cardSmsParseStatusSchema = z.enum([
   'pending',
   'parsed',
   'parse_failed',
   'pending_review',
+  'quarantined',
 ]);
 export type CardSmsParseStatus = z.infer<typeof cardSmsParseStatusSchema>;
 
@@ -176,3 +182,34 @@ export const manualFieldsEntryRequestSchema = z.object({
   categoryId: z.string().uuid().optional(),
 });
 export type ManualFieldsEntryRequest = z.infer<typeof manualFieldsEntryRequestSchema>;
+
+/**
+ * 격리된(quarantined) 또는 파싱 실패한 카드 문자를 사람이 확인·교정해 확정하는 요청
+ * (ADR-0023 S3).
+ *
+ * 확정된 값은 곧 학습 라벨이 된다 — `feedback_events(source:'human_confirmed')`로
+ * 기록되고, 템플릿 지문과 함께 저장되어 이후 같은 레이아웃의 추출 레시피가 된다.
+ */
+export const cardSmsReviewRequestSchema = z.object({
+  /** 승인/취소/거절. `declined`는 거래를 만들지 않는다(실제 체결이 아님). */
+  transactionType: z.enum(['approval', 'cancellation', 'declined']),
+  /** 통화의 minor units 정수(KRW는 원 그대로). declined면 생략 가능. */
+  amount: z.number().int().nonnegative().optional(),
+  currency: z.string().min(3).max(3).default('KRW'),
+  merchantRaw: z.string().min(1).max(200).optional(),
+  occurredAt: z.string().datetime().optional(),
+  issuer: z.string().max(50).optional(),
+  installmentMonths: z.number().int().positive().max(60).optional(),
+  cardId: z.string().uuid().optional(),
+  categoryId: z.string().uuid().optional(),
+});
+export type CardSmsReviewRequest = z.infer<typeof cardSmsReviewRequestSchema>;
+
+/** 검토 확정 결과. `transaction`은 declined일 때 null이다. */
+export const cardSmsReviewResponseSchema = z.object({
+  cardSmsEventId: z.string().uuid(),
+  parseStatus: cardSmsParseStatusSchema,
+  /** 승격된 거래(있을 때). declined는 거래를 만들지 않으므로 null. */
+  transactionId: z.string().uuid().nullable(),
+});
+export type CardSmsReviewResponse = z.infer<typeof cardSmsReviewResponseSchema>;

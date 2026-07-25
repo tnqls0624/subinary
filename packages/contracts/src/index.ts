@@ -233,6 +233,8 @@ export {
   manualTextEntryRequestSchema,
   manualTextEntryResponseSchema,
   manualFieldsEntryRequestSchema,
+  cardSmsReviewRequestSchema,
+  cardSmsReviewResponseSchema,
 } from './card-sms.js';
 export type {
   CardSmsParseStatus,
@@ -247,6 +249,8 @@ export type {
   ManualTextEntryRequest,
   ManualTextEntryResponse,
   ManualFieldsEntryRequest,
+  CardSmsReviewRequest,
+  CardSmsReviewResponse,
 } from './card-sms.js';
 
 export {
