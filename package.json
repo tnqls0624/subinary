@@ -27,6 +27,7 @@
     "verify:model-promotion:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:ai-pipeline:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:training-runner:isolated": "node scripts/verify-training-runner-isolated.mjs",
+    "verify:card-sms:isolated": "node scripts/verify-card-sms-ingest-isolated.mjs",
     "test:auth-validation": "pnpm --filter @family/contracts build && node --test scripts/lib/auth-validation-messages.test.mjs",
     "test:config-validation": "pnpm --filter @family/config build && node --test scripts/lib/config-validation.test.mjs",
     "test:verification-db-guard": "node --test scripts/lib/verification-database-guard.test.mjs",
