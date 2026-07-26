@@ -191,7 +191,10 @@ export class CardSmsIngestService {
         await tx
           .update(schema.registeredDevices)
           .set({
-            firstEventAt: sql`coalesce(${schema.registeredDevices.firstEventAt}, ${receivedAt})`,
+            // ⚠️ sql 템플릿에 Date를 그대로 보간하면 드라이버가 직렬화하지 못한다
+            // (컬럼 타입 매퍼를 안 거침) — ISO 문자열 + 명시적 캐스트로 넘긴다.
+            // lastEventAt처럼 평범한 컬럼 대입은 드리즐이 매퍼를 태우므로 무관하다.
+            firstEventAt: sql`coalesce(${schema.registeredDevices.firstEventAt}, ${receivedAt.toISOString()}::timestamptz)`,
             lastEventAt: receivedAt,
           })
           .where(eq(schema.registeredDevices.id, device.deviceId));
