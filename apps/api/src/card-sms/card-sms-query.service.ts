@@ -19,6 +19,7 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, or, type SQL } from 'drizzle-orm';
 
+import { cardSmsParseStatusSchema } from '@family/contracts';
 import type {
   CardSmsEventDetail,
   CardSmsEventSummary,
@@ -31,13 +32,14 @@ import { DB } from '../database/database.constants';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
-/** Valid parse-status filter values (spec §2 `cardSmsParseStatus`). */
-const PARSE_STATUSES = [
-  'pending',
-  'parsed',
-  'parse_failed',
-  'pending_review',
-] as const;
+/**
+ * 유효한 parse-status 필터 값.
+ *
+ * **계약 스키마에서 파생한다** — 하드코딩 사본을 두면 DB enum·계약과 조용히 어긋난다.
+ * 실제로 `quarantined`(ADR-0023)를 추가했을 때 이 목록만 갱신되지 않아 검토 화면이
+ * 400 `invalid status filter`로 죽었고, 타입체크는 사본이 자기완결적이라 통과했다.
+ */
+const PARSE_STATUSES = cardSmsParseStatusSchema.options;
 type ParseStatus = (typeof PARSE_STATUSES)[number];
 
 /** Decoded keyset cursor: order by `(createdAt desc, id desc)`. */
