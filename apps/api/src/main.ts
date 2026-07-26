@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 
 import fastifyCookie from '@fastify/cookie';
 import fastifyMultipart from '@fastify/multipart';
+import fastifyRateLimit from '@fastify/rate-limit';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import {
@@ -18,6 +19,12 @@ import { createLogger } from '@family/shared';
 import { AppModule } from './app.module';
 
 const DEFAULT_API_PORT = 3001;
+
+/**
+ * 무차별 대입 위험이 큰 인증 경로. 별도 rate-limit 버킷(10회/분)을 쓴다.
+ * refresh는 제외한다 — 정상 사용에서 다중 탭·앱 복귀로 빈번히 호출된다.
+ */
+const AUTH_RATE_LIMITED_PATHS = /^\/v1\/auth\/(login|register|change-password)\b/;
 
 /**
  * JSON 문자열 리터럴 안의 raw 제어문자(개행/탭 등)를 이스케이프해 "거의 JSON"을
@@ -130,6 +137,31 @@ async function bootstrap(): Promise<void> {
       stream.receivedEncodedLength = buf.byteLength;
       done(null, stream);
     });
+  });
+
+  // 무차별 대입·자원 고갈 방어. 이 API는 Cloudflare Tunnel로 인터넷에 열려 있고
+  // argon2id 검증이 CPU를 많이 쓰므로, 인증 경로에 리밋이 없으면 로그인 시도만으로
+  // 홈서버가 눕는다. 전역 기본값을 깔고 인증 라우트는 컨트롤러에서 더 조인다.
+  //
+  // keyGenerator가 x-forwarded-for를 보는 이유: 실제 클라이언트 IP가 Cloudflare →
+  // cloudflared → caddy를 거쳐 오므로 소켓 IP는 항상 내부 프록시 주소다(전원이 한
+  // 버킷을 공유하게 됨). 헤더는 위조 가능하지만, 신뢰 경계 밖에서 오는 트래픽은
+  // 전부 Cloudflare를 통과하므로 이 환경에서는 이 값이 최선의 근사다.
+  await app.register(fastifyRateLimit, {
+    global: true,
+    timeWindow: '1 minute',
+    // 인증 경로는 별도 버킷 + 훨씬 낮은 상한. 버킷을 나누지 않으면 정상 사용
+    // (대시보드 폴링·SSE)이 로그인 시도와 같은 카운터를 공유해 서로를 굶긴다.
+    keyGenerator: (req) => {
+      const forwarded = req.headers['x-forwarded-for'];
+      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+      const ip = first?.split(',')[0]?.trim() || req.ip;
+      return `${AUTH_RATE_LIMITED_PATHS.test(req.url) ? 'auth' : 'general'}:${ip}`;
+    },
+    // 가족 전원이 같은 공인 IP(가정 회선)를 공유하므로 일반 상한은 넉넉해야 한다 —
+    // 대시보드 15초 폴링 × 여러 탭 × 여러 기기가 정상 트래픽이다. 비싼 경로(argon2)는
+    // 위 auth 버킷이 따로 막으므로 여기서 조일 실익이 없다.
+    max: (req) => (AUTH_RATE_LIMITED_PATHS.test(req.url) ? 10 : 600),
   });
 
   // HttpOnly refresh-token 쿠키 지원(Fastify 어댑터). listen 이전에 등록.

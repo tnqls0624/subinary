@@ -45,8 +45,11 @@ export class CategoryController {
 
   /** GET /v1/categories?householdId=... — system + household categories. */
   @Get()
-  list(@Query() query: CategoryListQueryDto): Promise<CategorySummary[]> {
-    return this.categoryService.listCategories(query.householdId);
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: CategoryListQueryDto,
+  ): Promise<CategorySummary[]> {
+    return this.categoryService.listCategories(user.userId, query.householdId);
   }
 
   /** POST /v1/categories — create a household custom category (any active member). */

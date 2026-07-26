@@ -47,8 +47,24 @@ export class CategoryService {
   /**
    * Lists system categories plus the given household's custom categories.
    * System first, then custom, each ordered by slug for stability.
+   *
+   * 쓰기 경로(create/update/delete)와 동일하게 **멤버십을 강제한다** — 이전에는 읽기만
+   * 검사가 빠져 있어 인증된 사용자가 임의 householdId로 남의 커스텀 카테고리 이름을
+   * 조회할 수 있었다(households가 1개뿐이라 표면화되지 않았을 뿐).
    */
-  async listCategories(householdId: string): Promise<CategorySummary[]> {
+  async listCategories(
+    userId: string,
+    householdId: string,
+  ): Promise<CategorySummary[]> {
+    await this.requireMembership(householdId, userId);
+    return this.queryCategories(householdId);
+  }
+
+  /**
+   * 인가 없이 카탈로그만 읽는 내부 조회. 이미 멤버십을 확인한 호출자
+   * (`listCategories`, `assertNameAvailable`)만 사용한다.
+   */
+  private async queryCategories(householdId: string): Promise<CategorySummary[]> {
     const rows = await this.db
       .select()
       .from(schema.expenseCategories)
@@ -216,7 +232,7 @@ export class CategoryService {
     excludeId?: string,
   ): Promise<void> {
     const norm = (s: string) => s.trim().toLowerCase();
-    const existing = await this.listCategories(householdId);
+    const existing = await this.queryCategories(householdId);
     const clash = existing.some(
       (c) => c.id !== excludeId && norm(c.name) === norm(name),
     );

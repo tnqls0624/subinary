@@ -7,8 +7,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreditCard, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
 import { useForm } from "react-hook-form";
 
 import { registerRequestSchema, type RegisterRequest } from "@family/contracts";
@@ -27,8 +27,23 @@ import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
+/**
+ * `useSearchParams`는 Suspense 경계가 필요하다(정적 export 포함). 초대 링크에서
+ * 넘어온 `?invite=` 토큰을 그대로 가입 요청에 실어야 서버의 invite 가입 게이트를
+ * 통과한다 — 초대받은 사람만 계정을 만들 수 있다.
+ */
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite") ?? undefined;
   const { register, status } = useAuth();
 
   const form = useForm<RegisterRequest>({
@@ -42,8 +57,11 @@ export default function RegisterPage() {
 
   async function onSubmit(values: RegisterRequest) {
     try {
-      await register(values);
-      router.replace("/dashboard");
+      await register({ ...values, ...(inviteToken ? { inviteToken } : {}) });
+      // 초대로 들어왔으면 가입 직후 수락 화면으로 되돌려 보낸다(가구 참여까지 한 번에).
+      router.replace(
+        inviteToken ? `/join?token=${encodeURIComponent(inviteToken)}` : "/dashboard",
+      );
     } catch (err) {
       form.setError("email", {
         message:

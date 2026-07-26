@@ -10,6 +10,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "test": "turbo run test",
     "ops:infra:bootstrap": "sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh",
     "ops:infra:verify": "sh scripts/ops/verify-ai-pipeline-infrastructure.sh",
     "ops:alert:test": "node --test infrastructure/ops-sentinel/ops-sentinel.verify.mjs",

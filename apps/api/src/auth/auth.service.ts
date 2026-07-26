@@ -1,9 +1,11 @@
 import {
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import type {
@@ -13,6 +15,7 @@ import type {
   RegisterRequest,
   UserSummary,
 } from '@family/contracts';
+import type { AppConfig } from '@family/config';
 import { schema, type Db } from '@family/database';
 
 import { DB } from '../database/database.constants';
@@ -70,6 +73,7 @@ export class AuthService {
     @Inject(DB) private readonly db: Db,
     private readonly tokenService: TokenService,
     private readonly passwordService: PasswordService,
+    private readonly configService: ConfigService,
   ) {}
 
   /** Creates an account, then opens an authenticated session. */
@@ -78,6 +82,8 @@ export class AuthService {
     userAgent?: string,
     extendedTtl = false,
   ): Promise<AuthSessionResult> {
+    await this.assertRegistrationAllowed(input.inviteToken);
+
     const email = this.normalizeEmail(input.email);
 
     const existing = await this.db
@@ -364,6 +370,49 @@ export class AuthService {
   }
 
   /** Lowercases + trims an email for canonical storage/lookup. */
+  /**
+   * 가입 개방 정책을 강제한다(config `auth.registrationMode`).
+   *
+   * 기본 `invite`에서는 **유효한 pending 초대 토큰**이 있어야 계정을 만들 수 있다.
+   * 여기서 초대를 소비(수락)하지는 않는다 — 가입은 신원 생성, 수락은 가구 참여로
+   * 분리돼 있고 수락은 기존 `/join` 흐름이 담당한다. 소비하면 링크를 재사용하는
+   * 정상 흐름(가입 후 수락)이 깨진다.
+   *
+   * 토큰 유무를 응답으로 구분하지 않는다 — 유효/무효 모두 같은 403이라 초대 토큰
+   * 존재 여부를 탐지하는 오라클이 되지 않는다.
+   */
+  private async assertRegistrationAllowed(inviteToken?: string): Promise<void> {
+    const mode =
+      this.configService.get<AppConfig['auth']>('auth')?.registrationMode ?? 'invite';
+    if (mode === 'open') return;
+    if (mode === 'closed') {
+      throw new ForbiddenException('registration is closed');
+    }
+
+    if (!inviteToken) {
+      throw new ForbiddenException('an invitation is required to register');
+    }
+    const tokenHash = this.tokenService.hashToken(inviteToken);
+    const [invitation] = await this.db
+      .select({
+        status: schema.householdInvitations.status,
+        expiresAt: schema.householdInvitations.expiresAt,
+        revokedAt: schema.householdInvitations.revokedAt,
+      })
+      .from(schema.householdInvitations)
+      .where(eq(schema.householdInvitations.tokenHash, tokenHash))
+      .limit(1);
+
+    const usable =
+      invitation !== undefined &&
+      invitation.status === 'pending' &&
+      invitation.revokedAt === null &&
+      invitation.expiresAt.getTime() > Date.now();
+    if (!usable) {
+      throw new ForbiddenException('an invitation is required to register');
+    }
+  }
+
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
   }

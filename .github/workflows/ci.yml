@@ -37,6 +37,12 @@ jobs:
       - name: Build packages
         run: pnpm build:packages
 
+      # 순수 패키지 vitest 스위트(card-parsers/shared/rag/ai-providers/slack-parser).
+      # `turbo run test`가 test 스크립트를 가진 workspace만 실행한다 — DB/외부 서비스 불요.
+      # 이게 없던 동안 200여 개 단위 테스트가 CI에서 한 번도 돌지 않았다.
+      - name: Package unit tests
+        run: pnpm test
+
       # docker/DB/외부 서비스가 필요 없는 단위·검증 테스트만.
       - name: Unit & verification tests
         run: |

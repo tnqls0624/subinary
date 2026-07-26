@@ -115,7 +115,9 @@ function JoinInner() {
               <Link href="/login">로그인하기</Link>
             </Button>
             <Button asChild variant="ghost" size="lg" className="w-full">
-              <Link href="/register">회원가입하기</Link>
+              <Link href={`/register?invite=${encodeURIComponent(token)}`}>
+                회원가입하기
+              </Link>
             </Button>
           </div>
         </div>

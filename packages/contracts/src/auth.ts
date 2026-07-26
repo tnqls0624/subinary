@@ -30,6 +30,12 @@ export const registerRequestSchema = z.object({
   email: emailInputSchema,
   password: newPasswordSchema,
   name: userNameInputSchema,
+  /**
+   * 가족 초대 링크의 원본 토큰(선택). 서버가 `invite` 가입 모드일 때 **필수**가 되며,
+   * 유효한 pending 초대가 있어야 계정이 생성된다. 여기서 초대를 소비하지는 않는다 —
+   * 수락은 기존 `/join` 흐름이 계속 담당한다(가입=신원, 수락=가구 참여).
+   */
+  inviteToken: z.string().min(16).max(200).optional(),
 });
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 

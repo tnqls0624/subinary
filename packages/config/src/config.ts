@@ -177,6 +177,15 @@ export const configSchema = z.object({
       .int()
       .positive()
       .default(31536000),
+    /**
+     * 회원가입 개방 정책. 기본 `invite` — 이 API는 Cloudflare Tunnel로 인터넷 전체에
+     * 열려 있어 무게이트 가입은 곧 공개 무료 계정 발급기가 된다.
+     *
+     * - `invite`: 유효한 가족 초대 토큰이 있어야 가입(지인 배포의 정상 경로)
+     * - `closed`: 가입 전면 차단(초대도 불가 — 운영 잠금용)
+     * - `open`: 누구나 가입(로컬 개발·검증 스크립트용)
+     */
+    registrationMode: z.enum(['invite', 'closed', 'open']).default('invite'),
   }),
   device: z.object({
     secretEncKey: z.string().regex(/^[0-9a-fA-F]{64}$/),
@@ -270,6 +279,7 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       accessTtlSec: env.JWT_ACCESS_TTL_SEC,
       refreshTtlSec: env.JWT_REFRESH_TTL_SEC,
       refreshTtlMobileSec: env.JWT_REFRESH_TTL_MOBILE_SEC,
+      registrationMode: env.AUTH_REGISTRATION_MODE,
     },
     device: {
       secretEncKey: env.DEVICE_SECRET_ENC_KEY,
