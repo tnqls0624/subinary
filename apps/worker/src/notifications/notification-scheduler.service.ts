@@ -258,6 +258,7 @@ export class NotificationSchedulerService
       .select({
         id: schema.registeredDevices.id,
         householdId: schema.registeredDevices.householdId,
+        lastSeenAt: schema.registeredDevices.lastSeenAt,
         lastEventAt: schema.registeredDevices.lastEventAt,
       })
       .from(schema.registeredDevices)
@@ -265,7 +266,13 @@ export class NotificationSchedulerService
         and(
           eq(schema.registeredDevices.status, 'active'),
           isNotNull(schema.registeredDevices.firstEventAt),
-          lt(schema.registeredDevices.lastEventAt, threshold),
+          // **lastSeenAt** 기준인 이유: lastEventAt만 보면 "자동화가 죽음"과
+          // "그동안 카드를 안 씀"을 구분할 수 없다(첫 실전 사례에서 확인됨 —
+          // 41시간 무유입이 둘 중 무엇인지 서버 데이터만으로 판별 불가였다).
+          // 자동화가 주기적으로 `POST /v1/mobile-events/ping-token`을 치면
+          // lastSeenAt이 갱신되므로, 이 값이 멈춘 것 = 자동화가 죽은 것이다.
+          // 하트비트를 설정하지 않은 장치는 lastSeenAt == lastEventAt이라 종전과 동일하게 동작한다.
+          lt(schema.registeredDevices.lastSeenAt, threshold),
         ),
       );
 
@@ -287,6 +294,9 @@ export class NotificationSchedulerService
           details: {
             deviceId: device.id,
             householdId: device.householdId,
+            // 둘을 함께 실어야 수신자가 "하트비트도 끊김"(자동화 사망)과
+            // "하트비트는 오는데 결제만 없음"을 구분할 수 있다.
+            lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
             lastEventAt: device.lastEventAt?.toISOString() ?? null,
             thresholdHours: COLLECTION_GAP_HOURS,
           },

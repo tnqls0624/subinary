@@ -51,6 +51,7 @@ const SAFE_DETAIL_KEYS: Readonly<
   card_sms_collection_gap: new Set([
     'deviceId',
     'householdId',
+    'lastSeenAt',
     'lastEventAt',
     'thresholdHours',
   ]),
