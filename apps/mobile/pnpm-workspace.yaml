@@ -1,2 +1,11 @@
+# apps/mobile은 **의도적으로 루트 워크스페이스에서 분리**돼 있다. Capacitor/sharp 등
+# 네이티브 툴체인 의존성이 무거워, 루트에 편입하면 운영 Docker 이미지 빌드
+# (`pnpm install`)까지 그 비용을 떠안기 때문이다.
+#
+# 다만 이 파일에 `packages`가 없으면 pnpm 10+가 "packages field missing or empty"로
+# 여기서의 `pnpm install`조차 거부한다 — 워크스페이스 루트로 인식하면서 설치는 못 하는
+# 상태가 된다. 빈 목록을 명시해 "이 디렉터리 자체만 있는 워크스페이스"임을 알린다.
+packages: []
+
 allowBuilds:
   sharp: set this to true or false

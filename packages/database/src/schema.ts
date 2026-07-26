@@ -291,7 +291,12 @@ export const notificationPreferences = pgTable('notification_preferences', {
   minAmount: integer('min_amount'),
   quietStartMinute: integer('quiet_start_minute'),
   quietEndMinute: integer('quiet_end_minute'),
-  notifyOwnCollected: boolean('notify_own_collected').notNull().default(true),
+  /**
+   * 본인이 결제한 건도 푸시로 알릴지. **기본 꺼짐** — 카드사가 이미 같은 결제로
+   * 문자를 보내므로 앱 알림은 같은 사건의 두 번째 통지다(실측 미열람률 45%).
+   * 가족 구성원의 결제는 이 설정과 무관하게 알린다.
+   */
+  notifyOwnCollected: boolean('notify_own_collected').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

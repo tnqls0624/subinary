@@ -11,8 +11,8 @@
  *     · private    → 소유자(memberId→userId)에게만
  *     · summary_only → 전원, 단 소유자 외에는 가맹점 마스킹
  *   pending_review/duplicate_suspected(불확정)는 가족 방송 대신 소유자에게만.
- * - **선호 필터**: pushEnabled·minAmount·무음시간대·notifyOwnCollected(자기
- *   기기 수집분 알림 여부). 행이 없으면 기본값(전부 켬)으로 간주.
+ * - **선호 필터**: pushEnabled·minAmount·무음시간대·notifyOwnCollected(본인 결제
+ *   알림 여부, 기본 꺼짐 — 카드사 문자와 중복이므로). 행이 없으면 기본값으로 간주.
  * - **토큰 위생**: FCM이 UNREGISTERED/INVALID면 즉시 revoke. 5xx/429는 잡 재시도.
  *   토큰별 발송을 격리(allSettled)해 한 기기 실패가 전체를 실패시키지 않는다.
  * - FCM 미설정(dev/mock)이면 조기 종료(no-op).
@@ -388,7 +388,18 @@ export class NotificationDispatchProcessor extends WorkerHost {
         ) {
           continue;
         }
-        // 본인 수집(자기 카드) 거래도 항상 발송한다 — 정책상 알림을 끄지 않는다.
+        // 본인이 결제한 건은 기본적으로 보내지 않는다. 카드사가 이미 같은 결제로
+        // 문자를 보냈으므로 앱 알림은 **같은 사건의 두 번째 통지**이고, 실제로 운영
+        // 데이터에서 거래 알림 65건 중 29건(45%)이 읽히지 않았다. 가족 구성원의
+        // 결제는 카드사 문자가 나에게 오지 않으므로 계속 알린다 — 그게 이 앱만
+        // 줄 수 있는 정보다. 원하면 설정에서 다시 켤 수 있다(notifyOwnCollected).
+        if (
+          opts.ownerUserId !== undefined &&
+          opts.ownerUserId === userId &&
+          !pref.notifyOwnCollected
+        ) {
+          continue;
+        }
         if (isQuietNow(pref.quietStartMinute, pref.quietEndMinute, nowMinute)) {
           continue;
         }

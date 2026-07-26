@@ -43,6 +43,8 @@ export default function NotificationSettingsPage() {
   const update = useUpdateNotificationPreferences();
 
   const [pushEnabled, setPushEnabled] = useState(true);
+  // 기본 꺼짐 — 카드사 문자와 중복이라 본인 결제는 알리지 않는다(가족 결제는 항상 알림).
+  const [notifyOwn, setNotifyOwn] = useState(false);
   const [minAmount, setMinAmount] = useState<string>(""); // 빈 문자열 = 제한 없음(null)
   const [quietEnabled, setQuietEnabled] = useState(false);
   const [quietStart, setQuietStart] = useState("22:00");
@@ -52,6 +54,7 @@ export default function NotificationSettingsPage() {
   useEffect(() => {
     if (!data) return;
     setPushEnabled(data.pushEnabled);
+    setNotifyOwn(data.notifyOwnCollected);
     setMinAmount(data.minAmount != null ? String(data.minAmount) : "");
     const hasQuiet =
       data.quietStartMinute != null && data.quietEndMinute != null;
@@ -84,8 +87,7 @@ export default function NotificationSettingsPage() {
     update.mutate(
       {
         pushEnabled,
-        // 본인 수집 거래도 항상 수신(설정에서 끄지 않는 정책) — 계약 필드는 true 고정.
-        notifyOwnCollected: true,
+        notifyOwnCollected: notifyOwn,
         minAmount: parsedMin,
         quietStartMinute: startMin,
         quietEndMinute: endMin,
@@ -123,6 +125,22 @@ export default function NotificationSettingsPage() {
                   checked={pushEnabled}
                   onCheckedChange={setPushEnabled}
                   aria-label="푸시 알림"
+                />
+              </div>
+
+              {/* 본인 결제 알림 — 카드사 문자와 중복이라 기본 꺼짐 */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-[15px] font-medium">내 결제도 알림</span>
+                  <span className="text-muted-foreground text-[13px]">
+                    카드사 문자로 이미 받으니 기본은 꺼져 있어요. 가족이 쓴 건
+                    이 설정과 상관없이 알려드려요
+                  </span>
+                </span>
+                <Switch
+                  checked={notifyOwn}
+                  onCheckedChange={setNotifyOwn}
+                  aria-label="내 결제도 알림"
                 />
               </div>
 

@@ -27,13 +27,16 @@ import { DB } from '../database/database.constants';
 const NOTIFICATIONS_DEFAULT_LIMIT = 30;
 const NOTIFICATIONS_MAX_LIMIT = 100;
 
-/** 선호 행이 없을 때 응답할 기본값(전부 켬, 임계/무음 없음). */
+/**
+ * 선호 행이 없을 때 응답할 기본값. `notifyOwnCollected`만 꺼짐 — 본인 결제는
+ * 카드사 문자로 이미 통지되므로 앱 알림이 같은 사건의 두 번째 통지가 된다.
+ */
 const DEFAULT_PREFERENCES: NotificationPreferences = {
   pushEnabled: true,
   minAmount: null,
   quietStartMinute: null,
   quietEndMinute: null,
-  notifyOwnCollected: true,
+  notifyOwnCollected: false,
 };
 
 @Injectable()
