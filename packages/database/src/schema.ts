@@ -380,7 +380,15 @@ export const registeredDevices = pgTable(
     name: text('name').notNull(),
     platform: devicePlatform('platform').notNull(),
     status: deviceStatus('status').notNull().default('active'),
+    /**
+     * 마지막으로 이 장치가 **인증에 성공**한 시각(수집 POST·ping 포함).
+     * 아래 lastEventAt과 함께 보면 "인증은 되는데 문자 트리거가 안 걸림"을 구분할 수 있다.
+     */
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    /** 이 장치에서 카드 문자가 **처음** 도착한 시각. 온보딩 완주 판정(활성화)에 쓴다. */
+    firstEventAt: timestamp('first_event_at', { withTimezone: true }),
+    /** 이 장치에서 카드 문자가 **마지막으로** 도착한 시각. 수집 생존 판정에 쓴다. */
+    lastEventAt: timestamp('last_event_at', { withTimezone: true }),
     collectTokenHash: text('collect_token_hash'),
     createdBy: uuid('created_by')
       .notNull()
@@ -2083,6 +2091,12 @@ export const operationalAlertKind = pgEnum('operational_alert_kind', [
   'outbox_quarantined',
   'canary_rolled_back',
   'canary_suspended',
+  /**
+   * 등록된 장치에서 카드 문자가 N시간 이상 도착하지 않음. 카드 문자는 **재전송이
+   * 없어** 자동화가 조용히 멈추면 그 사이 결제가 영구 유실되고 아무도 모른다.
+   * 유입 공백 자체가 유일한 감지 신호다.
+   */
+  'card_sms_collection_gap',
 ]);
 
 export const operationalAlertSeverity = pgEnum(

@@ -21,7 +21,7 @@ import {
   type NotificationDispatchJob,
 } from '@family/shared';
 import type { Queue } from 'bullmq';
-import { and, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
 
@@ -32,6 +32,16 @@ const REMINDER_HOUR = 20;
 /** 주간 요약: 일요일(0) 이 시각(KST) 이후 1회. */
 const SUMMARY_HOUR = 20;
 const SUMMARY_DOW = 0;
+
+/**
+ * 수집 공백 경보 임계(시간). 카드 문자는 **재전송이 없다** — 자동화(MacroDroid/단축어)가
+ * 배터리 최적화·토큰 회전·앱 종료로 조용히 멈추면 그 사이 결제가 영구 유실되고 아무도
+ * 모른다. 유입이 끊긴 것 자체가 유일한 감지 신호다.
+ *
+ * 36시간인 이유: 하루쯤 카드를 안 쓰는 것은 정상이므로 24시간은 오탐이 잦고, 48시간은
+ * 주말을 통째로 놓친다. 하루+반나절이면 "안 쓴 것"과 "끊긴 것"이 실무적으로 갈린다.
+ */
+const COLLECTION_GAP_HOURS = 36;
 
 /** KST 벽시계 기준 'YYYY-MM-DD'. (인자는 이미 +9h 보정된 Date) */
 function seoulDateStr(shifted: Date): string {
@@ -85,6 +95,7 @@ export class NotificationSchedulerService
       if (dow === SUMMARY_DOW && hour >= SUMMARY_HOUR) {
         await this.runWeeklySummary(seoul);
       }
+      await this.runCollectionGapCheck();
     } catch (error) {
       this.logger.warn(
         { err: error instanceof Error ? error.message : 'unknown' },
@@ -229,6 +240,67 @@ export class NotificationSchedulerService
   }
 
   /** dedupe 선점 — 삽입 성공(=이 기간 첫 발송)이면 true. */
+  /**
+   * 한 번이라도 문자를 받은 적 있는 활성 장치 중, 마지막 수신이
+   * {@link COLLECTION_GAP_HOURS}를 넘긴 것을 운영 경보로 올린다.
+   *
+   * 아직 한 건도 못 받은 장치(`firstEventAt IS NULL`)는 제외한다 — 그건 "끊긴 것"이
+   * 아니라 "온보딩 미완주"이고 성격이 다른 문제다(장치 화면이 이미 표시한다).
+   *
+   * 사용자 알림(FCM)이 아니라 `operational_alerts`로 보내는 이유: 지금 수신자는
+   * 운영자 한 명이고, 새 알림 kind를 추가하면 shared 타입·dispatch·웹 렌더링까지
+   * 표면이 넓어진다. 사용자가 늘면 사용자향 알림으로 승격한다.
+   * (public — 검증에서 수동 트리거 가능)
+   */
+  async runCollectionGapCheck(): Promise<number> {
+    const threshold = new Date(Date.now() - COLLECTION_GAP_HOURS * 60 * 60 * 1000);
+    const stale = await this.db
+      .select({
+        id: schema.registeredDevices.id,
+        householdId: schema.registeredDevices.householdId,
+        lastEventAt: schema.registeredDevices.lastEventAt,
+      })
+      .from(schema.registeredDevices)
+      .where(
+        and(
+          eq(schema.registeredDevices.status, 'active'),
+          isNotNull(schema.registeredDevices.firstEventAt),
+          lt(schema.registeredDevices.lastEventAt, threshold),
+        ),
+      );
+
+    let raised = 0;
+    for (const device of stale) {
+      // 같은 장치의 같은 공백을 하루 한 번만 올린다(계속 끊겨 있으면 매일 재알림).
+      const day = new Date().toISOString().slice(0, 10);
+      const dedupeKey = `card-sms-gap:${device.id}:${day}`;
+      const [inserted] = await this.db
+        .insert(schema.operationalAlerts)
+        .values({
+          dedupeKey,
+          kind: 'card_sms_collection_gap',
+          severity: 'warning',
+          sourceType: 'device',
+          sourceId: device.id,
+          summary: `card-sms collection stalled for ${COLLECTION_GAP_HOURS}h+`,
+          occurredAt: new Date(),
+          details: {
+            deviceId: device.id,
+            householdId: device.householdId,
+            lastEventAt: device.lastEventAt?.toISOString() ?? null,
+            thresholdHours: COLLECTION_GAP_HOURS,
+          },
+        })
+        .onConflictDoNothing({ target: schema.operationalAlerts.dedupeKey })
+        .returning({ id: schema.operationalAlerts.id });
+      if (inserted) raised += 1;
+    }
+    if (raised > 0) {
+      this.logger.warn({ raised }, 'card-sms collection gap alerts raised');
+    }
+    return raised;
+  }
+
   private async claimDedupe(dedupeKey: string): Promise<boolean> {
     const [inserted] = await this.db
       .insert(schema.notificationDedupe)

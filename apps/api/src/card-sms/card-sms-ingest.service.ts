@@ -17,7 +17,7 @@
 import { createHash } from 'node:crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import type { CardSmsIngestRequest, CardSmsIngestResponse } from '@family/contracts';
 import { isUniqueViolation, schema, type Db } from '@family/database';
@@ -184,6 +184,18 @@ export class CardSmsIngestService {
           payload: { cardSmsEventId: event.id },
           occurredAt: receivedAt,
         });
+
+        // 수집 건강 지표(온보딩 완주·수집 생존). lastSeenAt은 인증만 성공해도 갱신되므로
+        // "인증은 되는데 문자 트리거가 안 걸림"을 구분하려면 별도 타임스탬프가 필요하다.
+        // firstEventAt은 최초 1회만 박고(coalesce), lastEventAt은 매번 갱신한다.
+        await tx
+          .update(schema.registeredDevices)
+          .set({
+            firstEventAt: sql`coalesce(${schema.registeredDevices.firstEventAt}, ${receivedAt})`,
+            lastEventAt: receivedAt,
+          })
+          .where(eq(schema.registeredDevices.id, device.deviceId));
+
         return event;
       });
     } catch (error) {

@@ -4,6 +4,8 @@ export type OperationalAlertKind =
   | 'outbox_quarantined'
   | 'canary_rolled_back'
   | 'canary_suspended'
+  /** 등록 장치에서 카드 문자 유입이 임계 시간 이상 끊김(재전송 없음 → 유실 위험). */
+  | 'card_sms_collection_gap'
   | 'backup_stale'
   | 'disk_low'
   | 'receiver_test';
@@ -43,6 +45,14 @@ const SAFE_DETAIL_KEYS: Readonly<
     'eventType',
     'publishAttempts',
     'errorCode',
+  ]),
+  // 장치·가구 식별자와 시각만. 카드 문자 원문·가맹점·금액은 절대 넣지 않는다
+  // (경보는 외부 webhook으로 나간다).
+  card_sms_collection_gap: new Set([
+    'deviceId',
+    'householdId',
+    'lastEventAt',
+    'thresholdHours',
   ]),
   canary_rolled_back: new Set([
     'task',

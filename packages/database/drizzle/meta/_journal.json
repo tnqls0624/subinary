@@ -274,6 +274,13 @@
       "when": 1784991232643,
       "tag": "0038_gigantic_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785037016865,
+      "tag": "0039_icy_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }
