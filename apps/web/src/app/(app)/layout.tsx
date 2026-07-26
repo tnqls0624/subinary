@@ -29,6 +29,7 @@ import {
   useActivityStore,
 } from "@/components/activity-provider";
 import { Onboarding } from "@/components/onboarding";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
@@ -277,8 +278,9 @@ export default function AppLayout({
       {/* 하단 탭바 높이(safe-area 포함)만큼 pb 확보 + 여유 1.5rem.
           고정값(pb-28=112px)은 iPhone(inset 34px)에서 탭바 총높이(114px)보다 작아
           마지막 콘텐츠가 탭바 밑에 깔렸다 — 변수 참조로 기기별 편차를 흡수한다. */}
+      {/* 당겨서 새로고침 — 화면의 활성 쿼리만 다시 가져온다(전역 1회 배선). */}
       <main className="flex-1 px-4 pt-6 pb-[calc(var(--app-tabbar-h)+1.5rem)]">
-        {householdId ? children : <Onboarding />}
+        <PullToRefresh>{householdId ? children : <Onboarding />}</PullToRefresh>
       </main>
 
       {/* 전역 결제 활동 레이어 — SSE/폴링으로 새 거래를 감지해 무효화+토스트+배지. */}

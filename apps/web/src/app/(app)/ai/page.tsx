@@ -135,7 +135,12 @@ export default function AiPage() {
     // main 패딩·보더 1px 오차 등으로 페이지 전체가 스크롤되는 문제가 없다.
     // bottom의 max(): iOS 사파리 웹에서만 --kb-inset(키보드 높이)이 탭바 높이를
     // 이겨 입력바를 키보드 위로 올린다. 그 외 환경에선 --kb-inset=0.
-    <div className="bg-background fixed inset-x-0 top-[var(--app-header-h)] bottom-[max(var(--app-tabbar-h),var(--kb-inset))] z-10">
+    <div
+      // 당겨서 새로고침 제외 — 이 패널은 fixed라 조상 transform이 걸리면
+      // 기준이 뷰포트에서 그 조상으로 바뀌어 헤더/탭바 정렬이 깨진다.
+      data-no-pull-refresh
+      className="bg-background fixed inset-x-0 top-[var(--app-header-h)] bottom-[max(var(--app-tabbar-h),var(--kb-inset))] z-10"
+    >
       <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-4">
         {/* 대화 영역(스크롤) — overscroll-contain: 끝 바운스가 바디로 번지지 않게 */}
         <div
