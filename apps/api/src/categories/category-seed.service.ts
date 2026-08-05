@@ -13,7 +13,7 @@ import {
   Logger,
   type OnModuleInit,
 } from '@nestjs/common';
-import { isNull } from 'drizzle-orm';
+import { isNull, sql } from 'drizzle-orm';
 
 import { DEFAULT_CATEGORIES } from '@family/shared';
 import { schema, type Db } from '@family/database';
@@ -33,6 +33,7 @@ export class CategorySeedService implements OnModuleInit {
         slug: category.slug,
         name: category.name,
         isSystem: true,
+        isTransfer: category.isTransfer ?? false,
       }),
     );
 
@@ -40,9 +41,14 @@ export class CategorySeedService implements OnModuleInit {
       await this.db
         .insert(schema.expenseCategories)
         .values(rows)
-        .onConflictDoNothing({
+        // `isTransfer`는 conflict 시에도 동기화한다 — `DEFAULT_CATEGORIES`가 SSOT여야
+        // 기존 시스템 카테고리에 플래그를 소급 적용할 수 있다(신규 삽입만 하면 이미
+        // 존재하는 카테고리는 영원히 false로 남는다). 시스템 카테고리는 사용자가 수정할
+        // 수 없으므로(category.service가 403) 덮어써도 사용자 편집을 잃지 않는다.
+        .onConflictDoUpdate({
           target: schema.expenseCategories.slug,
-          where: isNull(schema.expenseCategories.householdId),
+          targetWhere: isNull(schema.expenseCategories.householdId),
+          set: { isTransfer: sql`excluded.is_transfer` },
         });
       this.logger.log(
         `system expense categories ensured (${rows.length} defaults)`,

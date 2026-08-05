@@ -13,6 +13,8 @@ export const NOTIFICATION_CHANNELS = {
   budget: 'budget',
   reminder: 'reminder',
   summary: 'summary',
+  /** 결제가 반복 거절됨 — 사용자가 결제수단/한도를 손대야 하는 사건. */
+  decline: 'decline',
 } as const;
 
 export type NotificationKind = keyof typeof NOTIFICATION_CHANNELS;
@@ -30,6 +32,11 @@ export const NOTIFICATION_CHANNEL_META: readonly NotificationChannelMeta[] = [
   { id: NOTIFICATION_CHANNELS.budget, name: '예산 알림', description: '예산 사용률 경고' },
   { id: NOTIFICATION_CHANNELS.reminder, name: '확인 리마인더', description: '확인이 필요한 거래 알림' },
   { id: NOTIFICATION_CHANNELS.summary, name: '소비 요약', description: '주간 소비 요약' },
+  {
+    id: NOTIFICATION_CHANNELS.decline,
+    name: '결제 실패',
+    description: '반복 거절된 결제 알림',
+  },
 ];
 
 /**
@@ -62,6 +69,23 @@ export type NotificationDispatchJob =
       sentTokenIds?: string[];
     }
   | {
+      /**
+       * 같은 가맹점·금액 결제가 반복 거절됐다. 카드사는 정기결제 실패를 매일 재시도하므로
+       * 낱개가 아니라 묶음으로 알린다(실측: OO피트니스 99,000원 7일 연속).
+       */
+      kind: 'decline';
+      householdId: string;
+      /** 표시용 가맹점명(원문). 없으면 null. */
+      merchant: string | null;
+      /** 거절 금액(minor units). 없으면 null. */
+      amount: number | null;
+      /** 누적 거절 시도 횟수. */
+      attempts: number;
+      /** 거절 사유 코드. 문구를 못 알아봤으면 'unknown', 미파싱이면 null. */
+      reason: string | null;
+      sentTokenIds?: string[];
+    }
+  | {
       kind: 'summary';
       householdId: string;
       userId: string;
@@ -82,6 +106,8 @@ export function notificationDeepLink(job: NotificationDispatchJob): string {
       return '/budgets';
     case 'reminder':
       return '/transactions?status=pending_review';
+    case 'decline':
+      return '/declines';
     case 'summary':
       return '/dashboard';
   }

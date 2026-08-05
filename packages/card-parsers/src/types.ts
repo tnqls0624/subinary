@@ -29,6 +29,25 @@ export interface CardSmsInput {
  * is an absolute instant resolved against the `Asia/Seoul` wall-clock in the
  * message. `confidence` is an integer in `[0, 100]`.
  */
+/**
+ * 승인거절 사유. **사유마다 사용자가 할 일이 다르기 때문에** 별도 필드로 남긴다 —
+ * `lost_or_stolen`은 정기결제 수단을 갱신해야 하고, `insufficient_balance`는 입금하면
+ * 되고, `limit_exceeded`는 한도를 올리거나 다른 카드를 써야 한다. "거절됨"만 알려주면
+ * 사용자는 카드사 앱을 따로 열어봐야 한다.
+ *
+ * 실측 계기(2026-07): `분실카드 승인거절 ... OO피트니스 99,000원`이 7일 연속(매일 15:00)
+ * 발생했다 — 분실 신고한 카드로 정기결제가 계속 시도되다 가맹점이 포기한 것인데,
+ * 앱은 이 사실을 한 번도 보여주지 못했다.
+ */
+export type CardSmsDeclineReason =
+  | 'lost_or_stolen'
+  | 'limit_exceeded'
+  | 'insufficient_balance'
+  | 'expired_card'
+  | 'suspended'
+  | 'invalid_credential'
+  | 'unknown';
+
 export interface CardSmsParseResult {
   /** Card issuer label, e.g. `신한카드` / `KB국민카드`. */
   issuer?: string;
@@ -37,6 +56,11 @@ export interface CardSmsParseResult {
    * 거부/승인실패처럼 실제 체결되지 않은 통지 — 거래로 승격하지 않는다(소비 아님).
    */
   transactionType: 'approval' | 'cancellation' | 'declined' | 'unknown';
+  /**
+   * `transactionType === 'declined'`일 때의 사유. 문구를 못 알아보면 `'unknown'`이고,
+   * 거절이 아닌 문자에서는 `undefined`다(둘을 구분해야 "사유 파싱 실패"를 셀 수 있다).
+   */
+  declineReason?: CardSmsDeclineReason;
   /** Transaction amount as an integer in `currency`'s minor units (see interface doc). */
   amount?: number;
   /** ISO 4217 currency code of `amount` (e.g. `KRW`, `USD`); set whenever an amount was parsed. */

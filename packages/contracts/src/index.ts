@@ -235,6 +235,9 @@ export {
   manualFieldsEntryRequestSchema,
   cardSmsReviewRequestSchema,
   cardSmsReviewResponseSchema,
+  cardSmsDeclineReasonSchema,
+  cardSmsDeclineGroupSchema,
+  cardSmsDeclineListResponseSchema,
 } from './card-sms.js';
 export type {
   CardSmsParseStatus,
@@ -251,6 +254,9 @@ export type {
   ManualFieldsEntryRequest,
   CardSmsReviewRequest,
   CardSmsReviewResponse,
+  CardSmsDeclineReason,
+  CardSmsDeclineGroup,
+  CardSmsDeclineListResponse,
 } from './card-sms.js';
 
 export {
@@ -305,6 +311,23 @@ export type {
   MerchantLabelCandidateListResponse,
   TransactionSummaryResponse,
 } from './transaction.js';
+
+export {
+  merchantSummarySchema,
+  merchantListResponseSchema,
+  merchantAliasCreateRequestSchema,
+  merchantAliasSummarySchema,
+  merchantAliasCreateResponseSchema,
+  merchantAliasDeleteResponseSchema,
+} from './merchant.js';
+export type {
+  MerchantSummary,
+  MerchantListResponse,
+  MerchantAliasCreateRequest,
+  MerchantAliasSummary,
+  MerchantAliasCreateResponse,
+  MerchantAliasDeleteResponse,
+} from './merchant.js';
 
 export {
   analyticsPeriodSchema,

@@ -51,7 +51,7 @@ import type {
   TransactionSummaryResponse,
   TransactionUpdateRequest,
 } from '@family/contracts';
-import { revokeTrainingRuns, schema, type Db } from '@family/database';
+import { revokeTrainingRuns, schema, type Db, notTransferCategory } from '@family/database';
 import {
   assertKrwInteger,
   createMerchantCategoryTargetId,
@@ -315,6 +315,8 @@ export class TransactionService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // '중복이라 제외' 확정 거래는 요약 합계에서도 뺀다(analytics/budgets와 동일).
       isNull(schema.cardTransactions.excludedAt),
+      // 자산 이동도 지출 요약에서 뺀다(같은 규칙).
+      notTransferCategory(),
       // 요약 합계는 KRW 전용(amount=minor units라 외화 혼입 시 오염). 응답에도
       // currency:'KRW' 마커를 내려 클라이언트가 ₩ 포맷을 확정하게 한다.
       eq(schema.cardTransactions.currency, 'KRW'),

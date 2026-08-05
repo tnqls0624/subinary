@@ -24,6 +24,11 @@
 export interface CategoryDef {
   slug: string;
   name: string;
+  /**
+   * 소비가 아니라 자산 이동(현금 인출·선불 충전)인 카테고리.
+   * `expense_categories.is_transfer`로 시드되고, 지출 집계에서 제외된다.
+   */
+  isTransfer?: boolean;
 }
 
 /** A single keyword -> system-category-slug rule. */
@@ -48,6 +53,8 @@ export const DEFAULT_CATEGORIES: CategoryDef[] = [
   { slug: 'telecom', name: '통신' },
   { slug: 'subscription', name: '구독' },
   { slug: 'etc', name: '기타' },
+  // 소비가 아닌 자산 이동. 지출 집계에서 빠지되 이력은 남는다(PRD §15 확장).
+  { slug: 'transfer', name: '자산이동', isTransfer: true },
 ];
 
 /**
@@ -61,6 +68,19 @@ export const DEFAULT_CATEGORIES: CategoryDef[] = [
  * (Phase 4 spec §1.3, PRD §15 — never fabricate a merchant/category).
  */
 export const CATEGORY_KEYWORD_RULES: CategoryKeywordRule[] = [
+  // transfer (자산 이동 — 소비가 아니라 현금/잔액 이동)
+  //
+  // 맨 앞에 두는 이유: 실측 `모바일티머니선불`(30,000원 × 2)이 `티머니` 키워드에 걸려
+  // 교통비로 계상됐다. 충전은 쓴 게 아니라 옮긴 것이고, 그 잔액을 실제로 쓸 때 다시
+  // 잡히면 이중 계상이 된다.
+  //
+  // `충전소`(전기차·수소)는 실제 소비이므로 transfer보다 **먼저** 걸러낸다.
+  { keyword: '충전소', slug: 'transport' },
+  { keyword: 'atm', slug: 'transfer' },
+  { keyword: '현금서비스', slug: 'transfer' },
+  { keyword: '선불', slug: 'transfer' },
+  { keyword: '충전', slug: 'transfer' },
+
   // cafe
   { keyword: '스타벅스', slug: 'cafe' },
   { keyword: 'starbucks', slug: 'cafe' },
@@ -224,6 +244,22 @@ const AGGREGATOR_SUFFIX_RE =
 /** Bracketed carrier / channel headers such as `[Web발신]`. */
 const BRACKET_RE = /\[[^\]]*\]/g;
 
+/**
+ * 소괄호 부가표기 — 결제수단(`쿠팡(쿠페이)`), 영문 병기(`지에스(GS)25`),
+ * 법인격(`(주)벤디스`). 카드 문자는 가맹점명을 **자르기** 때문에 닫는 괄호가
+ * 없는 형태(`카카오T일반택시(`)도 흔하다 → 닫는 괄호를 optional로 둔다.
+ *
+ * 전각 괄호도 포함한다(카드사별로 섞여 온다).
+ */
+const PARENTHETICAL_RE = /[(（][^)）]*[)）]?/g;
+
+/**
+ * 법인격 표기. 접두(`주식회사팀오투`)와 접미(`애플코리아유한회사`) 모두 나타나고,
+ * 카드 문자 길이 제한에 잘린 꼬리(`유한회`, `주식회`)로도 온다 —
+ * 실측된 `애플코리아유한회`가 그 예다. 긴 형태를 먼저 두어 부분 매치를 막는다.
+ */
+const CORPORATE_FORM_RE = /(주식회사|유한회사|㈜|주식회|유한회)/g;
+
 /** Explicit multi-syllable branch markers. */
 const EXPLICIT_BRANCH_RE = /(직영점|본점|지점)$/;
 
@@ -237,6 +273,23 @@ const DISTRICT_BRANCH_RE = /[가-힣]{2}점$/;
 /** Strip a trailing payment-aggregator tag, keeping the aggregator when alone. */
 function stripAggregatorSuffix(name: string): string {
   const stripped = name.replace(AGGREGATOR_SUFFIX_RE, '').trim();
+  return stripped.length >= 2 ? stripped : name;
+}
+
+/**
+ * Strip parenthetical annotations, keeping the original when the brand itself was
+ * inside the parens (`(쿠페이)` alone must not collapse to an empty key).
+ */
+function stripParenthetical(name: string): string {
+  // 빈 문자열로 치환한다(공백 아님) — 괄호가 이름 **중간**에 삽입된 실측 형태
+  // `지에스(GS)25여의캐`에서 공백을 넣으면 `지에스 25여의캐`로 갈라지기 때문이다.
+  const stripped = name.replace(PARENTHETICAL_RE, '').replace(/\s+/g, ' ').trim();
+  return stripped.length >= 2 ? stripped : name;
+}
+
+/** Strip corporate-form markers, keeping the original when that was the whole name. */
+function stripCorporateForm(name: string): string {
+  const stripped = name.replace(CORPORATE_FORM_RE, '').replace(/\s+/g, ' ').trim();
   return stripped.length >= 2 ? stripped : name;
 }
 
@@ -255,11 +308,18 @@ function stripBranchSuffix(name: string): string {
 /**
  * Normalize a raw merchant string into a stable exact-match key.
  *
- * Steps: strip bracketed headers -> collapse whitespace -> trim aggregator
- * suffix -> trim store-branch suffix. Korean is preserved as-is (no
- * lower-casing). Deterministic: identical input always yields identical output,
- * which is the invariant `merchant_category_rules(householdId, merchantPattern)`
- * relies on across re-promotions.
+ * Steps: strip bracketed headers -> collapse whitespace -> strip parenthetical
+ * annotations -> strip corporate-form markers -> trim aggregator suffix -> trim
+ * store-branch suffix. Korean is preserved as-is (no lower-casing).
+ * Deterministic: identical input always yields identical output, which is the
+ * invariant `merchant_category_rules(householdId, merchantPattern)` relies on
+ * across re-promotions.
+ *
+ * 괄호·법인격 단계가 있는 이유: 이것들이 빠져 있어 같은 브랜드가 여러 키로 쪼개졌고
+ * (`쿠팡` vs `쿠팡(쿠페이)`), 그 파편마다 `merchant_category_rules`가 따로 학습돼
+ * 사용자가 같은 가맹점을 반복 확정해야 했다. 로마자↔한글 표기 차이(`GS25` vs
+ * `지에스25`)는 여기서 다루지 않는다 — 임의 음차 매핑은 결정적으로 만들 수 없어
+ * 사용자가 확정하는 별칭(`merchant_aliases`)의 몫이다.
  *
  * Returns an empty string for empty / whitespace-only / non-string input.
  */
@@ -267,7 +327,9 @@ export function normalizeMerchant(raw: string): string {
   if (typeof raw !== 'string') return '';
   const collapsed = raw.replace(BRACKET_RE, ' ').replace(/\s+/g, ' ').trim();
   if (collapsed.length === 0) return '';
-  return stripBranchSuffix(stripAggregatorSuffix(collapsed));
+  return stripBranchSuffix(
+    stripAggregatorSuffix(stripCorporateForm(stripParenthetical(collapsed))),
+  );
 }
 
 /**

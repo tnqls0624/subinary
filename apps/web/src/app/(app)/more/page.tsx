@@ -11,11 +11,13 @@
  * ------------------------------------------------------------------------- */
 import {
   Activity,
+  AlertTriangle,
   Bell,
   ChevronRight,
   CreditCard,
   Fingerprint,
   Smartphone,
+  Store,
   Tags,
   Users,
   type LucideIcon,
@@ -65,6 +67,18 @@ const ITEMS: ReadonlyArray<MoreItem> = [
     icon: Tags,
     title: "카테고리 관리",
     description: "우리 가족만의 지출 카테고리를 만들고 정리해요",
+  },
+  {
+    href: "/declines",
+    icon: AlertTriangle,
+    title: "실패한 결제",
+    description: "거절된 결제와 그 이유를 확인해요",
+  },
+  {
+    href: "/more/merchants",
+    icon: Store,
+    title: "가맹점 정리",
+    description: "같은 가게가 여러 이름으로 나뉘어 있으면 하나로 묶어요",
   },
   {
     href: "/more/notifications",

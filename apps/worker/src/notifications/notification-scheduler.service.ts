@@ -14,16 +14,18 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { schema, type Db } from '@family/database';
+import { schema, type Db, notTransferCategory } from '@family/database';
 import {
   createLogger,
+  normalizeMerchant,
   QUEUE_NAMES,
   type NotificationDispatchJob,
 } from '@family/shared';
 import type { Queue } from 'bullmq';
-import { and, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, notExists, or, sql, type SQL } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
+import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const TICK_MS = 60_000;
@@ -42,6 +44,33 @@ const SUMMARY_DOW = 0;
  * 주말을 통째로 놓친다. 하루+반나절이면 "안 쓴 것"과 "끊긴 것"이 실무적으로 갈린다.
  */
 const COLLECTION_GAP_HOURS = 36;
+
+/**
+ * 승격 정체 경보 임계(분). 파싱과 승격은 **같은 잡** 안에서 연달아 실행되고
+ * (`card-sms-parse.processor`), 실패해도 `QUEUE_DEFAULT_JOB_OPTIONS`(attempts 3,
+ * exponential 5s)가 ~35초 안에 재시도를 끝낸다. 따라서 정상 경로에서 파싱 후
+ * 1시간이 지나도록 승격되지 않은 이벤트는 **잡이 유실된 것**이다.
+ *
+ * 실제 사례(2026-07-30): 4건이 `parsed`인 채 승격되지 않아 119,693원이 집계에서
+ * 조용히 빠졌고, 감지 장치가 없어 아무도 몰랐다. `collection_gap`은 유입이 끊긴
+ * 것만 보므로 이 구멍을 덮지 못한다.
+ */
+const PROMOTION_STALL_MINUTES = 60;
+
+/**
+ * 정체 조회 상한(일). 이보다 오래된 것은 자동 복구 대상이 아니다 — 매일 재시도해도
+ * 안 되는 건 코드/데이터 문제라 사람이 봐야 하고, 무한히 쌓이면 tick이 무거워진다.
+ */
+const PROMOTION_STALL_LOOKBACK_DAYS = 30;
+
+/**
+ * 반복 거절 알림 임계(횟수). 1회 거절은 흔한 일시적 오류(잔액 일시부족·통신)라 알리면
+ * 노이즈가 된다. 2회부터는 스스로 해결되지 않는 구조적 문제로 본다.
+ */
+const DECLINE_ALERT_MIN_ATTEMPTS = 2;
+
+/** 반복 거절 조회 창(일). 이 안의 시도만 한 사건으로 묶는다. */
+const DECLINE_ALERT_WINDOW_DAYS = 7;
 
 /** KST 벽시계 기준 'YYYY-MM-DD'. (인자는 이미 +9h 보정된 Date) */
 function seoulDateStr(shifted: Date): string {
@@ -67,6 +96,9 @@ export class NotificationSchedulerService
     @Inject(DB) private readonly db: Db,
     @InjectQueue(QUEUE_NAMES.NOTIFICATION_DISPATCH)
     private readonly notificationQueue: Queue,
+    // 정체 이벤트의 자동 복구용. promote()는 sourceEventId UNIQUE로 멱등하므로
+    // 재호출이 안전하다(파싱 프로세서와 같은 진입점을 쓴다).
+    private readonly promotionService: TransactionPromotionService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -96,6 +128,8 @@ export class NotificationSchedulerService
         await this.runWeeklySummary(seoul);
       }
       await this.runCollectionGapCheck();
+      await this.runPromotionStallCheck();
+      await this.runDeclineAlertCheck();
     } catch (error) {
       this.logger.warn(
         { err: error instanceof Error ? error.message : 'unknown' },
@@ -184,6 +218,8 @@ export class NotificationSchedulerService
         and(
           eq(schema.cardTransactions.transactionType, 'approval'),
           isNull(schema.cardTransactions.excludedAt),
+          // 자산 이동은 소비가 아니므로 주간 요약 지출에서 뺀다(analytics와 동일 규칙).
+          notTransferCategory(),
           // 요약은 KRW로 표기되므로 KRW 거래만 합산(외화 minor units 혼입 방지).
           eq(schema.cardTransactions.currency, 'KRW'),
           gte(schema.cardTransactions.approvedAt, weekFrom),
@@ -309,6 +345,243 @@ export class NotificationSchedulerService
       this.logger.warn({ raised }, 'card-sms collection gap alerts raised');
     }
     return raised;
+  }
+
+  /**
+   * 파싱은 끝났는데 거래로 승격되지 않고 {@link PROMOTION_STALL_MINUTES} 이상 멈춘
+   * 이벤트를 경보로 올리고, 같은 tick에서 자동 복구를 1회 시도한다.
+   *
+   * 경보를 **먼저** 선점하는 이유: dedupeKey 삽입이 성공한 tick만 복구를 시도하므로
+   * 매 분 재시도가 폭주하지 않는다(이벤트·일자당 1회). 복구가 성공하면 다음 tick
+   * 조회에서 자연히 빠지고, 실패하면 다음 날 다시 경보가 올라간다 — 반복 자체가
+   * "자동 복구로는 안 되는 문제"라는 신호다.
+   *
+   * `declined`는 제외한다(체결이 아니라 승격 대상이 아님 — 파싱 프로세서와 동일 판정).
+   * `parse_failed`/`quarantined`는 parseStatus 필터에서 자연히 빠진다.
+   * (public — 검증에서 수동 트리거 가능)
+   */
+  async runPromotionStallCheck(): Promise<number> {
+    const now = Date.now();
+    const threshold = new Date(now - PROMOTION_STALL_MINUTES * 60 * 1000);
+    const lookbackFrom = new Date(
+      now - PROMOTION_STALL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const day = new Date(now).toISOString().slice(0, 10);
+
+    const stalled = await this.db
+      .select({
+        id: schema.cardSmsEvents.id,
+        householdId: schema.cardSmsEvents.householdId,
+        parseStatus: schema.cardSmsEvents.parseStatus,
+        transactionType: schema.cardSmsEvents.transactionType,
+        parsedAt: schema.cardSmsEvents.parsedAt,
+      })
+      .from(schema.cardSmsEvents)
+      .where(
+        and(
+          inArray(schema.cardSmsEvents.parseStatus, ['parsed', 'pending_review']),
+          inArray(schema.cardSmsEvents.transactionType, [
+            'approval',
+            'cancellation',
+          ]),
+          isNotNull(schema.cardSmsEvents.parsedAt),
+          lt(schema.cardSmsEvents.parsedAt, threshold),
+          gte(schema.cardSmsEvents.parsedAt, lookbackFrom),
+          notExists(
+            this.db
+              .select({ one: sql`1` })
+              .from(schema.cardTransactions)
+              .where(
+                eq(
+                  schema.cardTransactions.sourceEventId,
+                  schema.cardSmsEvents.id,
+                ),
+              ),
+          ),
+        ),
+      );
+
+    let raised = 0;
+    for (const event of stalled) {
+      const dedupeKey = `card-sms-promo-stall:${event.id}:${day}`;
+      const parsedAtMs = event.parsedAt?.getTime() ?? now;
+      const [inserted] = await this.db
+        .insert(schema.operationalAlerts)
+        .values({
+          dedupeKey,
+          kind: 'card_sms_promotion_stalled',
+          severity: 'warning',
+          sourceType: 'card_sms_event',
+          sourceId: event.id,
+          summary: `card-sms parsed but not promoted for ${PROMOTION_STALL_MINUTES}m+`,
+          occurredAt: new Date(now),
+          details: {
+            cardSmsEventId: event.id,
+            householdId: event.householdId,
+            parseStatus: event.parseStatus,
+            transactionType: event.transactionType,
+            parsedAt: event.parsedAt?.toISOString() ?? null,
+            stalledMinutes: Math.round((now - parsedAtMs) / 60_000),
+            thresholdMinutes: PROMOTION_STALL_MINUTES,
+            autoRecoveryAttempted: true,
+          },
+        })
+        .onConflictDoNothing({ target: schema.operationalAlerts.dedupeKey })
+        .returning({ id: schema.operationalAlerts.id });
+      if (!inserted) continue;
+      raised += 1;
+
+      // 자동 복구 — 실패해도 tick을 멈추지 않는다(경보는 이미 올라갔다).
+      try {
+        await this.promotionService.promote(event.id);
+        this.logger.warn(
+          { cardSmsEventId: event.id },
+          'stalled card-sms promotion re-driven',
+        );
+      } catch (error) {
+        this.logger.error(
+          {
+            cardSmsEventId: event.id,
+            err: error instanceof Error ? error.message : 'unknown',
+          },
+          'stalled card-sms promotion recovery failed',
+        );
+      }
+    }
+    if (raised > 0) {
+      this.logger.warn({ raised }, 'card-sms promotion stall alerts raised');
+    }
+    return raised;
+  }
+
+  /**
+   * 최근 {@link DECLINE_ALERT_WINDOW_DAYS}일 안에 같은 `(가맹점, 금액)`으로
+   * {@link DECLINE_ALERT_MIN_ATTEMPTS}회 이상 거절됐고 **아직 승인되지 않은** 결제를
+   * 사용자 알림으로 올린다.
+   *
+   * 왜 스케줄러인가: 파싱 프로세서에 넣으면 문자 도착마다 집계·중복판정이 붙어 수집
+   * 경로가 무거워지고, "그 뒤 승인됐는지"를 알 수 없다(승인은 나중에 온다). 최대 1분
+   * 지연은 이 사건의 성격상 무해하다.
+   *
+   * 묶음 키에 `merchant_raw`를 쓰는 이유: 거절 문자는 같은 정기결제가 같은 문구로
+   * 반복되므로 원문이 동일하다(실측 확인). 정규화·별칭까지 끌어오면 worker가 api의
+   * 조회 로직을 복제해야 하고 이득이 없다.
+   *
+   * dedupe는 주 단위다 — 카드사가 **매일** 재시도하므로 일 단위면 7일 연속 거절에 알림이
+   * 7번 간다. 지속 노출은 앱 내 실패 화면이 담당하고, 푸시는 주 1회로 족하다.
+   * (public — 검증에서 수동 트리거 가능)
+   */
+  async runDeclineAlertCheck(): Promise<number> {
+    const since = new Date(
+      Date.now() - DECLINE_ALERT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const lastAtExpr = sql<Date>`max(coalesce(${schema.cardSmsEvents.occurredAt}, ${schema.cardSmsEvents.createdAt}))`;
+    const groups = await this.db
+      .select({
+        householdId: schema.cardSmsEvents.householdId,
+        merchantRaw: schema.cardSmsEvents.merchantRaw,
+        amount: schema.cardSmsEvents.amount,
+        attempts: sql<string>`count(*)`,
+        lastAt: lastAtExpr,
+        // 최신 시도의 사유. `max()`는 알파벳 순 최댓값이라 사유가 바뀐 경우
+        // (한도초과 → 분실신고) 옛 사유를 보여준다.
+        reason: sql<
+          string | null
+        >`(array_agg(${schema.cardSmsEvents.declineReason}::text order by coalesce(${schema.cardSmsEvents.occurredAt}, ${schema.cardSmsEvents.createdAt}) desc))[1]`,
+      })
+      .from(schema.cardSmsEvents)
+      .where(
+        and(
+          eq(schema.cardSmsEvents.transactionType, 'declined'),
+          gte(schema.cardSmsEvents.createdAt, since),
+        ),
+      )
+      .groupBy(
+        schema.cardSmsEvents.householdId,
+        schema.cardSmsEvents.merchantRaw,
+        schema.cardSmsEvents.amount,
+      )
+      .having(sql`count(*) >= ${DECLINE_ALERT_MIN_ATTEMPTS}`);
+
+    // 별칭 맵을 한 번만 로드한다(가구 수가 적고 그룹마다 조회하면 N+1이 된다).
+    const aliasRows = await this.db
+      .select({
+        alias: schema.merchantAliases.alias,
+        canonical: schema.merchantAliases.canonical,
+      })
+      .from(schema.merchantAliases);
+    const aliasMap = new Map(aliasRows.map((a) => [a.alias, a.canonical]));
+
+    let enqueued = 0;
+    for (const g of groups) {
+      const attempts = Number(g.attempts) || 0;
+      if (attempts < DECLINE_ALERT_MIN_ATTEMPTS) continue;
+      const lastAt = g.lastAt ? new Date(g.lastAt) : null;
+      if (!lastAt) continue;
+
+      // 마지막 거절 이후 **같은 가맹점** 승인이 있으면 스스로 해결된 것이다(재승인 케이스).
+      // 가맹점 조건을 빼면 다른 데서 커피 한 잔 사도 해결로 오판한다.
+      //
+      // 거래에 저장된 `merchantNormalized`는 정규화 + 사용자 별칭까지 적용된 값이므로,
+      // 거절 원문도 같은 변환을 거쳐야 비교가 성립한다.
+      const declinedMerchant = g.merchantRaw
+        ? (aliasMap.get(normalizeMerchant(g.merchantRaw)) ??
+          normalizeMerchant(g.merchantRaw))
+        : null;
+      if (declinedMerchant) {
+        const [approved] = await this.db
+          .select({ id: schema.cardTransactions.id })
+          .from(schema.cardTransactions)
+          .where(
+            and(
+              eq(schema.cardTransactions.householdId, g.householdId),
+              eq(schema.cardTransactions.transactionType, 'approval'),
+              // 카드사가 거절/승인에서 가맹점명을 다르게 쓴다(거절엔 가맹점 코드가 붙는다):
+              // 실측 `STEAMGAMES.COM425952`(거절) vs `STEAMGAMES`(승인). 완전 일치로
+              // 비교하면 해결된 실패에 계속 알림이 간다. 4자 이상이면 접두 매칭 허용.
+              declinedMerchant.length >= 4
+                ? (or(
+                    eq(
+                      schema.cardTransactions.merchantNormalized,
+                      declinedMerchant,
+                    ),
+                    sql`${schema.cardTransactions.merchantNormalized} like ${declinedMerchant.replace(/([\\%_])/g, '\\$1') + '%'}`,
+                    sql`${declinedMerchant} like ${schema.cardTransactions.merchantNormalized} || '%'`,
+                  ) as SQL)
+                : eq(
+                    schema.cardTransactions.merchantNormalized,
+                    declinedMerchant,
+                  ),
+              isNotNull(schema.cardTransactions.approvedAt),
+              gte(schema.cardTransactions.approvedAt, lastAt),
+            ),
+          )
+          .limit(1);
+        if (approved) continue;
+      }
+
+      const weekBucket = Math.floor(
+        lastAt.getTime() / (7 * 24 * 60 * 60 * 1000),
+      );
+      const key = `decline:${g.householdId}:${g.merchantRaw ?? ''}:${g.amount ?? ''}:${weekBucket}`;
+      if (!(await this.claimDedupe(key))) continue;
+      await this.enqueue(
+        {
+          kind: 'decline',
+          householdId: g.householdId,
+          merchant: g.merchantRaw,
+          amount: g.amount,
+          attempts,
+          reason: g.reason ?? null,
+        },
+        key,
+      );
+      enqueued += 1;
+    }
+    if (enqueued > 0) {
+      this.logger.warn({ enqueued }, 'repeated card decline alerts enqueued');
+    }
+    return enqueued;
   }
 
   private async claimDedupe(dedupeKey: string): Promise<boolean> {

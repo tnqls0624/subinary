@@ -288,6 +288,27 @@
       "when": 1785040174552,
       "tag": "0040_useful_liz_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1785848462446,
+      "tag": "0041_parched_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1785848811665,
+      "tag": "0042_soft_cloak",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1785852137012,
+      "tag": "0043_dear_carnage",
+      "breakpoints": true
     }
   ]
 }

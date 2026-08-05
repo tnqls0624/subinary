@@ -1,4 +1,9 @@
-export type { CardSmsInput, CardSmsParseResult, CardSmsParser } from './types.js';
+export type {
+  CardSmsDeclineReason,
+  CardSmsInput,
+  CardSmsParseResult,
+  CardSmsParser,
+} from './types.js';
 export { parseCardSms } from './dispatch.js';
 export { BaseCardParser } from './parsers/base.parser.js';
 export { ShinhanCardParser } from './parsers/shinhan.parser.js';
@@ -14,6 +19,7 @@ export { TossBankCardParser } from './parsers/toss.parser.js';
  */
 export {
   computeConfidence,
+  detectDeclineReason,
   detectTransactionType,
   extractMerchant,
   parseAmount,

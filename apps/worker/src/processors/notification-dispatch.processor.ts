@@ -257,6 +257,24 @@ export class NotificationDispatchProcessor extends WorkerHost {
       };
     }
 
+    if (data.kind === 'decline') {
+      // 실패 알림은 가족 활성 구성원 전원 대상 — 결제수단을 손댈 수 있는 사람이
+      // 카드 소유자가 아닐 수 있고(가족 공용 카드), 놓치면 서비스가 끊긴다.
+      const candidateUserIds = await this.householdMemberUserIds(data.householdId);
+      const message = composeDecline(
+        data.merchant,
+        data.amount,
+        data.attempts,
+        data.reason,
+      );
+      return {
+        candidateUserIds,
+        channelId: NOTIFICATION_CHANNELS.decline,
+        deepLink,
+        composeFor: () => message,
+      };
+    }
+
     // reminder / summary — 지정 사용자 1인 대상.
     if (data.kind === 'reminder') {
       return {
@@ -480,6 +498,38 @@ function composeBudget(
     body: `${name} 예산을 ${threshold}% ${over ? '초과했어요' : '썼어요'}`,
   };
 }
+
+/**
+ * 반복 거절 문구. 사유를 함께 실어 **무엇을 해야 하는지**까지 전달한다 —
+ * "거절됐어요"만으로는 카드사 앱을 따로 열어봐야 한다.
+ */
+function composeDecline(
+  merchant: string | null,
+  amount: number | null,
+  attempts: number,
+  reason: string | null,
+): { title: string; body: string } {
+  const who = merchant ?? '어떤 가맹점';
+  const howMuch = amount === null ? '' : `${formatMoney(amount, 'KRW')}이 `;
+  const hint = DECLINE_REASON_HINTS[reason ?? 'unknown'] ?? null;
+  return {
+    title: '결제가 계속 실패해요',
+    body: `${who}에서 ${howMuch}${attempts}번 거절됐어요${hint ? ` · ${hint}` : ''}`,
+  };
+}
+
+/**
+ * 사유 → 사용자가 할 일. 사유 코드를 그대로 보여주면 아무 의미가 없으므로 조치로 번역한다.
+ * 미등록 사유는 힌트 없이 건수만 알린다(문구를 추측해 잘못 안내하지 않는다).
+ */
+const DECLINE_REASON_HINTS: Record<string, string> = {
+  lost_or_stolen: '분실 신고된 카드예요, 결제수단을 바꿔주세요',
+  limit_exceeded: '한도를 넘었어요',
+  insufficient_balance: '잔액이 부족해요',
+  expired_card: '유효기간이 지났어요',
+  suspended: '정지된 카드예요',
+  invalid_credential: '카드 정보가 맞지 않아요',
+};
 
 /** 확인 필요 리마인더 문구. */
 function composeReminder(count: number): { title: string; body: string } {

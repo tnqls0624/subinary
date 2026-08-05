@@ -36,7 +36,7 @@ import type {
   MerchantBreakdown,
   MonthlyAnalytics,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { schema, type Db, notTransferCategory } from '@family/database';
 import { assertKrwInteger, DEFAULT_TIMEZONE } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -422,6 +422,9 @@ export class AnalyticsService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // 사용자가 '중복이라 제외' 확정한 거래는 모든 합계/브레이크다운에서 뺀다.
       isNull(schema.cardTransactions.excludedAt),
+      // 자산 이동(현금 인출·선불 충전)은 소비가 아니라 잔액 이동이므로 지출에서 뺀다.
+      // 이 초크포인트 하나로 monthly/categories/members/cards/merchants가 함께 정화된다.
+      notTransferCategory(),
       // 모든 analytics 집계는 KRW 전용이다. amount는 minor units라 외화($22.00=2200)와
       // 원화(₩2,200=2200)가 정수로 구분되지 않으므로, 이 단일 초크포인트에서 통화를
       // 걸러 monthly/categories/members/cards/merchants/sumNet 전부를 정화한다.
@@ -510,6 +513,8 @@ export class AnalyticsService {
           // 이미 '중복 제외'된 행은 합계에 애초에 없으므로 '권한으로 제외된 건수'에서도
           // 빼야 이중 집계가 안 된다(다른 집계의 isNull(excludedAt)와 정렬).
           isNull(schema.cardTransactions.excludedAt),
+          // 자산 이동도 합계에 없으므로 같은 이유로 이 카운트에서 뺀다.
+          notTransferCategory(),
           this.periodWindow(period.from, period.to),
           ne(schema.cardTransactions.memberId, actorMemberId),
           eq(schema.cardTransactions.visibility, 'private'),

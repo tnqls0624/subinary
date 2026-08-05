@@ -26,7 +26,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '@family/config';
-import { schema, type Db } from '@family/database';
+import { schema, type Db, notTransferCategory } from '@family/database';
 import {
   assertKrwInteger,
   categorizeByKeyword,
@@ -209,10 +209,13 @@ export class TransactionPromotionService {
       event.issuer,
     );
 
-    // 4. 가맹점 정규화(원문 없으면 null).
-    const merchantNormalized = event.merchantRaw
-      ? normalizeMerchant(event.merchantRaw)
-      : null;
+    // 4. 가맹점 정규화(원문 없으면 null) → 사용자가 확정한 별칭으로 치환.
+    //    별칭 해석을 카테고리 조회보다 **먼저** 해야 규칙이 대표 이름 하나로 모인다
+    //    (안 하면 GS25처럼 한 브랜드가 6개 키로 쪼개져 규칙도 6번 학습된다).
+    const merchantNormalized = await this.resolveMerchantAlias(
+      event.householdId,
+      event.merchantRaw ? normalizeMerchant(event.merchantRaw) : null,
+    );
 
     // 5. 카테고리: 사용자 규칙 → 키워드(시스템 카테고리) → null.
     const categoryId = await this.resolveCategoryId(
@@ -686,6 +689,33 @@ export class TransactionPromotionService {
    * 2) 키워드(categorizeByKeyword → slug → 시스템 expense_categories id)
    * 3) 미분류(null).
    */
+  /**
+   * 사용자가 확정한 가맹점 별칭을 **1단계** 해석한다(`merchant_aliases`).
+   * 등록되지 않았으면 입력을 그대로 돌려주므로 별칭이 없는 가구는 종전과 동일하다.
+   *
+   * 체인(`A->B`, `B->C`)을 따라가지 않는 이유: 등록 API가 저장 시점에 평탄화하므로
+   * 여기서 재귀할 필요가 없고, 재귀는 순환 데이터에 무한 루프로 취약하다.
+   */
+  private async resolveMerchantAlias(
+    householdId: string,
+    merchantNormalized: string | null,
+  ): Promise<string | null> {
+    if (merchantNormalized === null || merchantNormalized.length === 0) {
+      return merchantNormalized;
+    }
+    const [row] = await this.db
+      .select({ canonical: schema.merchantAliases.canonical })
+      .from(schema.merchantAliases)
+      .where(
+        and(
+          eq(schema.merchantAliases.householdId, householdId),
+          eq(schema.merchantAliases.alias, merchantNormalized),
+        ),
+      )
+      .limit(1);
+    return row?.canonical ?? merchantNormalized;
+  }
+
   private async resolveCategoryId(
     householdId: string,
     merchantRaw: string | null,
@@ -910,6 +940,8 @@ export class TransactionPromotionService {
       eq(schema.cardTransactions.householdId, budget.householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
       isNull(schema.cardTransactions.excludedAt),
+      // 자산 이동(현금 인출·선불 충전)은 예산을 소진시키지 않는다(api budget.service와 동일 규칙).
+      notTransferCategory(),
       // 예산 통화(minor units)와 같은 통화만 합산 — 외화 지출이 KRW 예산 소진율을
       // 오염시키지 않게 한다(예산은 단일 통화, 기본 'KRW').
       eq(schema.cardTransactions.currency, budget.currency),

@@ -213,3 +213,61 @@ export const cardSmsReviewResponseSchema = z.object({
   transactionId: z.string().uuid().nullable(),
 });
 export type CardSmsReviewResponse = z.infer<typeof cardSmsReviewResponseSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* 결제 실패(declined) 추적                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 승인거절 사유. **사유마다 사용자 조치가 다르다** — `lost_or_stolen`은 정기결제 수단
+ * 갱신, `insufficient_balance`는 입금, `limit_exceeded`는 한도 조정/카드 변경.
+ * `unknown`은 사유 문구를 못 알아본 경우로, 거절 사실 자체는 확실하다.
+ */
+export const cardSmsDeclineReasonSchema = z.enum([
+  'lost_or_stolen',
+  'limit_exceeded',
+  'insufficient_balance',
+  'expired_card',
+  'suspended',
+  'invalid_credential',
+  'unknown',
+]);
+export type CardSmsDeclineReason = z.infer<typeof cardSmsDeclineReasonSchema>;
+
+/**
+ * 실패한 결제 한 묶음 — 같은 `(가맹점, 금액)`의 반복 시도를 하나로 모은다.
+ *
+ * 왜 묶는가: 카드사는 정기결제 실패를 **매일 재시도**한다(실측: OO피트니스 99,000원이
+ * 7일 연속 15:00에 거절). 시도를 낱개로 보여주면 같은 사건이 7줄이 되어 무엇이 문제인지
+ * 묻히고, 다른 실패가 스크롤 아래로 밀린다.
+ */
+export const cardSmsDeclineGroupSchema = z.object({
+  /** 정규화·별칭 해석된 가맹점 이름. 원문이 없으면 null. */
+  merchant: z.string().nullable(),
+  amount: z.number().int().nullable(),
+  currency: z.string(),
+  reason: cardSmsDeclineReasonSchema.nullable(),
+  issuer: z.string().nullable(),
+  maskedCardNumber: z.string().nullable(),
+  /** 이 묶음의 거절 시도 횟수. */
+  attempts: z.number().int(),
+  firstAttemptAt: z.string().nullable(),
+  lastAttemptAt: z.string().nullable(),
+  /**
+   * 마지막 거절 **이후** 같은 가맹점에서 승인된 시각. 있으면 스스로 해결된 것이고
+   * (실측: STEAMGAMES 10,038원 거절 → 9,900원 승인), null이면 아직 미해결이다
+   * (실측: OO피트니스 — 7번 거절 후 승인 0건).
+   */
+  resolvedAt: z.string().nullable(),
+});
+export type CardSmsDeclineGroup = z.infer<typeof cardSmsDeclineGroupSchema>;
+
+/** `GET /v1/card-sms-events/declines` — 미해결 먼저, 시도 많은 순. */
+export const cardSmsDeclineListResponseSchema = z.object({
+  items: z.array(cardSmsDeclineGroupSchema),
+  /** 미해결 묶음 수 — 홈 배너 노출 판단에 쓴다. */
+  unresolvedCount: z.number().int(),
+});
+export type CardSmsDeclineListResponse = z.infer<
+  typeof cardSmsDeclineListResponseSchema
+>;

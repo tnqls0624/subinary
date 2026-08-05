@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   BarList,
+  DeclineBanner,
   ListRow,
   Money,
   StatusBadge,
@@ -307,6 +308,10 @@ export default function DashboardPage() {
           {formatMonth(month)}
         </span>
       </div>
+
+      {/* 결제 실패 배너 — 미해결 반복 거절이 있을 때만 나타난다(없으면 렌더 안 함).
+          declined는 거래로 승격되지 않아 아래 어떤 집계에도 안 잡히므로 여기서 알린다. */}
+      <DeclineBanner />
 
       {/* 히어로 — 이번 달 소비 */}
       <Card>

@@ -35,7 +35,7 @@ import type {
   BudgetUpdateRequest,
   HouseholdRole,
 } from '@family/contracts';
-import { isUniqueViolation, schema, type Db } from '@family/database';
+import { isUniqueViolation, schema, type Db, notTransferCategory } from '@family/database';
 import { assertKrwInteger } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -230,6 +230,8 @@ export class BudgetService {
       eq(schema.cardTransactions.transactionType, 'approval'),
       // '중복이라 제외' 확정 거래는 예산 사용률에서도 뺀다(analytics와 동일 규칙).
       isNull(schema.cardTransactions.excludedAt),
+      // 자산 이동(현금 인출·선불 충전)도 예산을 소진시키지 않는다 — 쓴 게 아니라 옮긴 것.
+      notTransferCategory(),
       // 예산 통화와 같은 통화만 소진에 합산(amount=minor units). 외화 지출이 KRW
       // 예산 소진율을 오염시키지 않게 하고, 향후 비-KRW 예산도 자연히 지원한다.
       eq(schema.cardTransactions.currency, budget.currency),

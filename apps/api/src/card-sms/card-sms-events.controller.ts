@@ -11,6 +11,7 @@ import { createZodDto } from 'nestjs-zod';
 
 import {
   cardSmsReviewRequestSchema,
+  type CardSmsDeclineListResponse,
   type CardSmsEventDetail,
   type CardSmsEventSummary,
   type CardSmsReviewResponse,
@@ -50,6 +51,28 @@ export class CardSmsEventsController {
       status,
       limit,
       cursor,
+    );
+  }
+
+  /**
+   * GET /v1/card-sms-events/declines?householdId=&days= — 실패한 결제 묶음 목록.
+   *
+   * **`@Get(':id')`보다 반드시 위에 선언해야 한다** — NestJS는 선언 순서로 매칭하므로
+   * 아래에 두면 `declines`가 `:id`로 먹혀 uuid 파싱 실패가 된다.
+   */
+  @Get('declines')
+  listDeclines(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('householdId') householdId: string,
+    @Query('days') days?: string,
+  ): Promise<CardSmsDeclineListResponse> {
+    const parsed = days === undefined ? undefined : Number(days);
+    return this.queryService.listDeclines(
+      user.userId,
+      householdId,
+      Number.isFinite(parsed) && parsed !== undefined && parsed > 0
+        ? Math.min(Math.trunc(parsed), 365)
+        : undefined,
     );
   }
 

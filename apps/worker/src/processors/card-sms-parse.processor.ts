@@ -213,6 +213,9 @@ export class CardSmsParseProcessor extends WorkerHost {
         occurredAt: result.occurredAt ?? null,
         maskedCardNumber: result.maskedCardNumber ?? null,
         installmentMonths: result.installmentMonths ?? null,
+        // 거절 사유(거절 문자에만 존재). 재파싱 시 승인으로 바뀌면 null로 되돌려야 하므로
+        // `?? null`로 명시 초기화한다 — 옛 사유가 남으면 실패 목록에 유령 항목이 생긴다.
+        declineReason: result.declineReason ?? null,
         confidence: result.confidence,
         parseStatus,
         parseError,

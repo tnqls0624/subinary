@@ -16,6 +16,7 @@ import type {
   CardCreateRequest,
   CardSummary,
   CardUpdateRequest,
+  CardSmsDeclineListResponse,
   CardSmsEventDetail,
   CardSmsReviewRequest,
   CardSmsReviewResponse,
@@ -44,6 +45,10 @@ import type {
   MemberSummary,
   MeResponse,
   MerchantBreakdown,
+  MerchantAliasCreateRequest,
+  MerchantAliasCreateResponse,
+  MerchantAliasDeleteResponse,
+  MerchantListResponse,
   MonthlyAnalytics,
   RegisterRequest,
   TransactionListResponse,
@@ -439,6 +444,28 @@ export const api = {
       apiFetch<void>(`/v1/categories/${id}`, { method: "DELETE", accessToken }),
   },
 
+  merchants: {
+    list: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<MerchantListResponse>(
+        `/v1/merchants${buildQuery({ householdId })}`,
+        { accessToken },
+      ),
+    createAliases: (
+      accessToken: AccessToken,
+      body: MerchantAliasCreateRequest,
+    ) =>
+      apiFetch<MerchantAliasCreateResponse>("/v1/merchants/aliases", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+    deleteAlias: (accessToken: AccessToken, id: string) =>
+      apiFetch<MerchantAliasDeleteResponse>(`/v1/merchants/aliases/${id}`, {
+        method: "DELETE",
+        accessToken,
+      }),
+  },
+
   transactions: {
     list: (accessToken: AccessToken, params: TransactionListParams) =>
       apiFetch<TransactionListResponse>(
@@ -544,6 +571,15 @@ export const api = {
         body,
         accessToken,
       }),
+    /**
+     * 실패한 결제 묶음 목록. `declined`는 거래로 승격되지 않아 거래 목록에 없으므로
+     * 별도 경로로 읽는다.
+     */
+    declines: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<CardSmsDeclineListResponse>(
+        `/v1/card-sms-events/declines${buildQuery({ householdId })}`,
+        { accessToken },
+      ),
   },
 
   analytics: {

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."operational_alert_kind" ADD VALUE 'card_sms_promotion_stalled';

@@ -15,7 +15,12 @@ import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
 import { KNOWN_CURRENCY_CODES, toMinorUnits } from '../currency.js';
 
-import type { CardSmsInput, CardSmsParseResult, CardSmsParser } from '../types.js';
+import type {
+  CardSmsDeclineReason,
+  CardSmsInput,
+  CardSmsParseResult,
+  CardSmsParser,
+} from '../types.js';
 
 const TIMEZONE = 'Asia/Seoul';
 /** Occurred-at may legitimately trail receivedAt by clock skew; beyond this it rolled a year. */
@@ -75,6 +80,29 @@ const CANCEL_RE = /(취소|환불)/;
  * 판정해야 한다. 실제 체결이 아니므로 거래로 승격하지 않는다(processor에서 스킵).
  */
 const DECLINE_RE = /(거절|거부|승인\s*실패|결제\s*실패|한도\s*초과|승인불가)/;
+/**
+ * 거절 사유 문구 → 사유 코드. 위에서부터 첫 매치가 이긴다.
+ *
+ * 순서가 중요하다: 분실 신고 카드의 거절 문자에는 한도·잔액 문구가 함께 오지 않지만,
+ * 카드사 문구는 여러 사유를 나열하기도 한다. 조치 강도가 큰 것(분실 → 결제수단 교체)을
+ * 앞에 두어 과소 판정을 피한다.
+ */
+const DECLINE_REASON_PATTERNS: ReadonlyArray<
+  readonly [CardSmsDeclineReason, RegExp]
+> = [
+  ['lost_or_stolen', /분실|도난/],
+  // 명사와 서술어 사이에 조사·공백이 끼는 한국어 문장을 허용한다(같은 줄, 4자 이내):
+  // `잔액이 부족해요`(실측), `한도가 초과되었습니다`. `\s*`만 쓰면 조사를 못 넘어
+  // 사유가 `unknown`으로 떨어진다 — 실제로 이 케이스를 테스트가 잡아냈다.
+  ['limit_exceeded', /한도[^\n]{0,4}초과|한도[^\n]{0,4}부족|이용\s*한도/],
+  [
+    'insufficient_balance',
+    /잔액[^\n]{0,4}부족|예금[^\n]{0,4}부족|출금\s*가능\s*금액/,
+  ],
+  ['expired_card', /유효\s*기간|기간[^\n]{0,4}만료|만료[^\n]{0,2}카드/],
+  ['suspended', /이용\s*중지|사용\s*중지|거래\s*중지|정지된?\s*카드|카드\s*정지/],
+  ['invalid_credential', /비밀번호|카드번호\s*오류|정보\s*불일치|cvc/i],
+];
 const APPROVE_RE = /(승인|매출|결제)/;
 /** Cumulative-spend footer lines (`누적…`, `누계…`). */
 const CUMULATIVE_RE = /^\s*누[적계]/;
@@ -100,6 +128,17 @@ export function detectTransactionType(content: string): CardSmsParseResult['tran
   if (CANCEL_RE.test(content)) return 'cancellation';
   if (DECLINE_RE.test(content)) return 'declined';
   if (APPROVE_RE.test(content)) return 'approval';
+  return 'unknown';
+}
+
+/**
+ * 거절 문자에서 사유를 뽑는다. 어떤 패턴도 안 맞으면 `'unknown'`을 준다 — 거절이라는
+ * 사실은 확실하므로 사유 미상을 이유로 정보를 버리지 않는다.
+ */
+export function detectDeclineReason(content: string): CardSmsDeclineReason {
+  for (const [reason, pattern] of DECLINE_REASON_PATTERNS) {
+    if (pattern.test(content)) return reason;
+  }
   return 'unknown';
 }
 
@@ -318,6 +357,11 @@ export function buildResult(issuer: string, input: CardSmsInput): CardSmsParseRe
     occurredAt,
     maskedCardNumber: parseMaskedCardNumber(input.content),
     installmentMonths: parseInstallmentMonths(input.content),
+    // 거절일 때만 채운다 — 승인 문자에 'unknown' 사유가 남으면 집계에서 거절로 오인된다.
+    declineReason:
+      transactionType === 'declined'
+        ? detectDeclineReason(input.content)
+        : undefined,
     confidence: 0,
     warnings,
   };

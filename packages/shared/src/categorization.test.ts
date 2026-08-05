@@ -41,6 +41,41 @@ describe('normalizeMerchant', () => {
     expect(normalizeMerchant('   ')).toBe('');
     expect(normalizeMerchant('')).toBe('');
   });
+
+  // 아래 입력은 전부 실제 수집된 merchant_raw 값이다. 이 단계가 없던 동안
+  // 같은 브랜드가 여러 키로 쪼개져 카테고리 규칙이 중복 학습됐다.
+  it('strips parenthetical annotations so brand fragments collapse', () => {
+    // 결제수단 병기 — 이 둘이 갈려 쿠팡이 2개 가맹점으로 집계됐다(11건 264,800원).
+    expect(normalizeMerchant('쿠팡(쿠페이)')).toBe('쿠팡');
+    expect(normalizeMerchant('쿠팡')).toBe('쿠팡');
+    // 영문 병기가 이름 중간에 삽입된 형태.
+    expect(normalizeMerchant('지에스(GS)25여의캐')).toBe('지에스25여의캐');
+    // 카드 문자 길이 제한에 닫는 괄호가 잘려나간 형태.
+    expect(normalizeMerchant('카카오T일반택시(')).toBe('카카오T일반택시');
+  });
+
+  it('keeps the original when the brand itself lives inside the parens', () => {
+    expect(normalizeMerchant('(쿠페이)')).toBe('(쿠페이)');
+  });
+
+  it('strips corporate-form markers incl. truncated tails', () => {
+    expect(normalizeMerchant('주식회사팀오투')).toBe('팀오투');
+    expect(normalizeMerchant('(주)벤디스')).toBe('벤디스');
+    // 실측: 카드사가 '유한회사'를 '유한회'로 잘라 보낸다.
+    expect(normalizeMerchant('애플코리아유한회')).toBe('애플코리아');
+    expect(normalizeMerchant('애플코리아유한회사')).toBe('애플코리아');
+    expect(normalizeMerchant('㈜벤디스')).toBe('벤디스');
+  });
+
+  it('keeps the original when the corporate form was the whole name', () => {
+    expect(normalizeMerchant('주식회사')).toBe('주식회사');
+  });
+
+  it('still splits truncated names the parser cannot recover (alias territory)', () => {
+    // 카드사가 이름을 자른 결과는 정규화로 되돌릴 수 없다 — merchant_aliases의 몫.
+    expect(normalizeMerchant('주식회사우아한형')).toBe('우아한형');
+    expect(normalizeMerchant('주식회사 우아한형제들')).toBe('우아한형제들');
+  });
 });
 
 describe('categorizeByKeyword', () => {

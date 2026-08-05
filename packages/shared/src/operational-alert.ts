@@ -6,6 +6,12 @@ export type OperationalAlertKind =
   | 'canary_suspended'
   /** 등록 장치에서 카드 문자 유입이 임계 시간 이상 끊김(재전송 없음 → 유실 위험). */
   | 'card_sms_collection_gap'
+  /**
+   * 파싱은 됐는데 거래로 승격되지 않고 임계 시간 이상 멈춘 이벤트.
+   * `collection_gap`(유입 자체가 끊김)과 달리 **문자는 들어왔고 파싱도 성공했는데
+   * 집계에서만 빠진** 상태다 — 사용자 눈에는 결제가 없었던 것처럼 보인다.
+   */
+  | 'card_sms_promotion_stalled'
   | 'backup_stale'
   | 'disk_low'
   | 'receiver_test';
@@ -54,6 +60,19 @@ const SAFE_DETAIL_KEYS: Readonly<
     'lastSeenAt',
     'lastEventAt',
     'thresholdHours',
+  ]),
+  // 이벤트/가구 식별자와 시각·상태만. 가맹점·금액·원문은 금지(collection_gap과 동일 정책).
+  // `amount`를 넣고 싶은 유혹이 있으나 그것이 곧 결제 내역 유출이다 — 수신자는
+  // eventId로 관리자 화면에서 조회하면 된다.
+  card_sms_promotion_stalled: new Set([
+    'cardSmsEventId',
+    'householdId',
+    'parseStatus',
+    'transactionType',
+    'parsedAt',
+    'stalledMinutes',
+    'thresholdMinutes',
+    'autoRecoveryAttempted',
   ]),
   canary_rolled_back: new Set([
     'task',

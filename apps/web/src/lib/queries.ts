@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-query";
 
 import type {
+  CardSmsDeclineListResponse,
   CardBreakdown,
   CardSummary,
   CategoryBreakdown,
@@ -25,6 +26,7 @@ import type {
   MemberSummary,
   MerchantBreakdown,
   MerchantLabelCandidateListResponse,
+  MerchantListResponse,
   MonthlyAnalytics,
   TransactionListResponse,
   BudgetListResponse,
@@ -60,6 +62,10 @@ export const queryKeys = {
     ["categories", householdId] as const,
   merchantLabelCandidates: (householdId: string | null, limit: number) =>
     ["merchant-label-candidates", householdId, limit] as const,
+  merchants: (householdId: string | null) =>
+    ["merchants", householdId] as const,
+  declines: (householdId: string | null) =>
+    ["card-sms-declines", householdId] as const,
   householdMembers: (householdId: string | null) =>
     ["household-members", householdId] as const,
 };
@@ -275,6 +281,81 @@ export function useCategoryList(): UseQueryResult<CategorySummary[]> {
       authedFetch((token) =>
         api.categories.list(token, householdId as string),
       ),
+  });
+}
+
+// --- 결제 실패(declined) ----------------------------------------------------
+
+/**
+ * 실패한 결제 묶음. `declined`는 거래로 승격되지 않으므로 거래 목록 쿼리로는 볼 수 없다.
+ * 홈 배너와 실패 화면이 함께 쓴다.
+ */
+export function useDeclineList(): UseQueryResult<CardSmsDeclineListResponse> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.declines(householdId),
+    enabled,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.cardSms.declines(token, householdId as string),
+      ),
+  });
+}
+
+// --- Merchants (가맹점 아이덴티티) ------------------------------------------
+
+/** 가맹점 목록 — 지출 큰 순, 별칭·카테고리 상태 포함. */
+export function useMerchantList(): UseQueryResult<MerchantListResponse> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.merchants(householdId),
+    enabled,
+    queryFn: () =>
+      authedFetch((token) => api.merchants.list(token, householdId as string)),
+  });
+}
+
+/**
+ * "이 이름들은 같은 가게" 확정. 서버가 과거 거래·카테고리 규칙까지 대표 이름으로
+ * 백필하므로 거래/집계/예산 캐시도 통째로 무효화한다(가맹점 목록만 갱신하면
+ * 대시보드가 옛 분리 상태를 계속 보여준다).
+ */
+export function useCreateMerchantAliases() {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      canonical,
+      aliases,
+    }: {
+      canonical: string;
+      aliases: string[];
+    }) =>
+      authedFetch((token) =>
+        api.merchants.createAliases(token, {
+          householdId: householdId as string,
+          canonical,
+          aliases,
+        }),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.merchants(householdId) });
+      invalidateTransactionScope(qc);
+    },
+  });
+}
+
+/** 별칭 해제 — 서버가 해당 거래를 원문 재정규화 값으로 되돌린다. */
+export function useDeleteMerchantAlias() {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      authedFetch((token) => api.merchants.deleteAlias(token, id)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.merchants(householdId) });
+      invalidateTransactionScope(qc);
+    },
   });
 }
 

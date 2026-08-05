@@ -526,6 +526,23 @@ export const cardSmsTxnType = pgEnum('card_sms_txn_type', [
   'unknown',
 ]);
 
+/**
+ * 승인거절 사유. **사유마다 사용자 조치가 다르므로** 별도 축으로 보존한다 —
+ * `lost_or_stolen`은 정기결제 수단 갱신, `insufficient_balance`는 입금,
+ * `limit_exceeded`는 한도 조정/카드 변경이다. "거절됨"만으로는 아무것도 못 한다.
+ *
+ * `unknown`은 "사유 문구를 못 알아봤다"는 뜻으로, 거절 사실 자체는 확실하다.
+ */
+export const cardSmsDeclineReason = pgEnum('card_sms_decline_reason', [
+  'lost_or_stolen',
+  'limit_exceeded',
+  'insufficient_balance',
+  'expired_card',
+  'suspended',
+  'invalid_credential',
+  'unknown',
+]);
+
 /* -------------------------------------------------------------------------- */
 /* sourceItems                                                                */
 /* -------------------------------------------------------------------------- */
@@ -606,6 +623,14 @@ export const cardSmsEvents = pgTable(
     // 파싱 결과(구조화, Phase 4에서 card_transactions로 승격).
     issuer: text('issuer'),
     transactionType: cardSmsTxnType('transaction_type'),
+    /**
+     * `transaction_type='declined'`일 때의 거절 사유. 거절이 아니면 NULL이다.
+     *
+     * `card_transactions`가 아니라 이벤트에 두는 이유: declined는 체결이 아니라 거래로
+     * 승격되지 않으므로(유령 거래 방지) 거래 테이블에는 행 자체가 없다. 실패는 이벤트
+     * 층에서만 관측된다.
+     */
+    declineReason: cardSmsDeclineReason('decline_reason'),
     amount: integer('amount'),
     currency: text('currency').default('KRW'),
     merchantRaw: text('merchant_raw'),
@@ -798,6 +823,19 @@ export const expenseCategories = pgTable(
     slug: text('slug').notNull(),
     name: text('name').notNull(),
     isSystem: boolean('is_system').notNull().default(false),
+    /**
+     * 소비가 아니라 **자산 이동**인 카테고리(현금 인출·선불 충전·결제대행 정산).
+     * 이 카테고리 거래는 지출 집계에서 빠지되 이력은 남는다.
+     *
+     * 왜 `transactionType`이나 별도 테이블이 아니라 카테고리 플래그인가: 판정 기준이
+     * 결국 "이 가맹점이 무엇인가"이고, 그 판단 경로(키워드 규칙 → 사용자 확정 →
+     * `merchant_category_rules` 자가학습)가 이미 카테고리에 붙어 있다. 새 축을 만들면
+     * 같은 판단을 두 곳에서 학습해야 한다.
+     *
+     * 실측 계기: ATM 50,000 + 모바일티머니선불 60,000 + 토스페이 58,956 = 168,956원이
+     * 지출로 계상돼 총액의 13%를 부풀렸다. 충전액을 실제로 쓸 때 이중 계상되기도 한다.
+     */
+    isTransfer: boolean('is_transfer').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -853,6 +891,55 @@ export const merchantCategoryRules = pgTable(
     unique('merchant_category_rules_household_id_merchant_pattern_unique').on(
       table.householdId,
       table.merchantPattern,
+    ),
+  ],
+);
+
+/**
+ * 사용자가 확정한 가맹점 별칭 — "이거 다 같은 가게예요".
+ *
+ * `normalizeMerchant`는 결정적 규칙만 적용하므로 로마자↔한글 음차(`GS25` vs
+ * `지에스25`)나 카드사가 **잘라 보낸 이름**(`주식회사우아한형` vs
+ * `주식회사 우아한형제들`)은 합칠 수 없다. 실측에서 GS25 한 브랜드가 6개 키로
+ * 쪼개져 서로 다른 카테고리(장보기 1 / 식비 5)로 학습됐고, 사용자가 같은 가게를
+ * 6번 따로 확정해야 했다. 그 판단을 1회로 줄이고 재사용하는 것이 이 테이블이다.
+ *
+ * 해석은 **1단계만** 한다(alias -> canonical). 체인(`A->B`, `B->C`)은 등록 시
+ * 평탄화해 막는다 — 재귀 해석은 순환에 취약하고 승격 경로를 느리게 만든다.
+ */
+export const merchantAliases = pgTable(
+  'merchant_aliases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /** `normalizeMerchant` 출력값. 승격 시 이 값이 canonical로 치환된다. */
+    alias: text('alias').notNull(),
+    /** 대표 이름. 카테고리 규칙·집계·분석이 모두 이 값으로 모인다. */
+    canonical: text('canonical').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // 한 가구에서 같은 alias가 두 canonical을 가리킬 수 없다(해석이 비결정적이 됨).
+    unique('merchant_aliases_household_id_alias_unique').on(
+      table.householdId,
+      table.alias,
+    ),
+    index('merchant_aliases_household_canonical_idx').on(
+      table.householdId,
+      table.canonical,
+    ),
+    // 자기참조는 무한 해석이므로 DB가 막는다(앱 버그가 데이터를 오염시키지 못하게).
+    check(
+      'merchant_aliases_alias_not_canonical',
+      sql`${table.alias} <> ${table.canonical}`,
     ),
   ],
 );
@@ -2102,6 +2189,13 @@ export const operationalAlertKind = pgEnum('operational_alert_kind', [
    * 유입 공백 자체가 유일한 감지 신호다.
    */
   'card_sms_collection_gap',
+  /**
+   * 파싱까지 끝난 이벤트가 거래로 승격되지 않고 임계 시간 이상 멈춤.
+   * `card_sms_collection_gap`(유입 자체가 끊김)과 달리 문자는 들어왔고 파싱도
+   * 성공했는데 **집계에서만 빠진** 상태로, 사용자 눈에는 결제가 없던 것처럼 보인다.
+   * 2026-07-30에 4건(119,693원)이 이 상태로 조용히 누락된 것이 계기다.
+   */
+  'card_sms_promotion_stalled',
 ]);
 
 export const operationalAlertSeverity = pgEnum(
