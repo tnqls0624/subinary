@@ -19,6 +19,7 @@
 import { KNOWN_CURRENCY_CODES } from '../currency.js';
 
 import { buildResult } from './base.parser.js';
+import { DECLINE_NOTICE_RE } from './non-card.js';
 
 import type { CardSmsInput, CardSmsParseResult, CardSmsParser } from '../types.js';
 
@@ -50,22 +51,15 @@ const CARD_CONTEXT_RE =
 const NON_CARD_RE = /(입금|출금|이체|송금|잔액|결제\s*예정|청구|대출)/;
 
 /**
- * 명시적 카드 거절/실패 통지. 이 문구가 있으면 {@link NON_CARD_RE}를 **우회한다**.
+ * 명시적 카드 거절/실패 통지는 {@link NON_CARD_RE}를 **우회한다**(정의와 근거는
+ * `./non-card.ts`의 {@link DECLINE_NOTICE_RE} — 신한/KB 전용 파서와 공유한다).
  *
- * 왜 우회가 안전한가: 위 주석의 "오탐 > 미탐" 비대칭은 **approval에만** 성립한다.
- * 거절 문자는 `transactionType='declined'`로 판정되고 승격 파이프라인이 건너뛰므로
- * (`card-sms-parse.processor` §1.1) 오탐의 대가는 "실패 목록에 항목 하나"이지
- * 쓰레기 지출 거래가 아니다.
- *
- * 왜 우회가 필요한가: 거절 **사유가 곧 비카드 단어**다 — `잔액이 부족해요`,
- * `한도 초과`. 두 규칙이 구조적으로 충돌해서, 사유가 적힌 문자일수록 거부된다.
  * 실측(2026-08-01): `15,800원 결제 실패 공룡통장 카드 | 쿠팡(쿠페이)⏎잔액이 부족해요`가
  * `잔액` 때문에 `no matching parser`로 떨어져 실제 결제 실패를 놓쳤다.
  *
  * 카드 문맥({@link CARD_CONTEXT_RE})은 여전히 요구하므로 `우리은행 자동이체 결제 실패`
  * 같은 은행 문자는 계속 배제된다.
  */
-const DECLINE_NOTICE_RE = /(승인\s*거[절부]|승인\s*불가|승인불가|결제\s*실패|승인\s*실패)/;
 
 /**
  * 발급사 키워드 → 정식 라벨. 신한/KB는 전용 파서가 먼저 처리하지만, 안전하게

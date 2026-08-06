@@ -1,4 +1,5 @@
 import { BaseCardParser } from './base.parser.js';
+import { isNonCardNotice } from './non-card.js';
 
 import type { CardSmsInput } from '../types.js';
 
@@ -26,7 +27,15 @@ import type { CardSmsInput } from '../types.js';
 export class KookminCardParser extends BaseCardParser {
   readonly issuer = 'KB국민카드';
 
+  /**
+   * `KB`/`국민` 키워드 + 비카드 문자 배제. 실측(ADR-0026 검증):
+   * `KB국민카드 결제 예정 금액 1,200,000원`이 '결제'를 액션으로 인식해 **approval
+   * 1,200,000원**으로 승격됐다. 청구 예고는 아직 쓴 돈이 아니다.
+   */
   supports(input: CardSmsInput): boolean {
-    return input.content.includes('KB') || input.content.includes('국민');
+    if (!input.content.includes('KB') && !input.content.includes('국민')) {
+      return false;
+    }
+    return !isNonCardNotice(input.content);
   }
 }
