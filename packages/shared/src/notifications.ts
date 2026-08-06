@@ -94,6 +94,12 @@ export type NotificationDispatchJob =
       txnCount: number;
       /** 사람이 읽는 기간 라벨(예: '지난주'). */
       periodLabel: string;
+      /**
+       * 요약 기간이 속한 달(`YYYY-MM`, KST). 딥링크가 홈의 **그 달**을 열게 한다 —
+       * 8월 1일에 오는 '지난주' 요약을 탭했을 때 8월 화면(거의 빈 화면)이 아니라
+       * 7월 화면이 떠야 한다. 없으면 이번 달 홈으로 간다(구 잡 호환).
+       */
+      month?: string;
       sentTokenIds?: string[];
     };
 
@@ -109,6 +115,8 @@ export function notificationDeepLink(job: NotificationDispatchJob): string {
     case 'decline':
       return '/declines';
     case 'summary':
-      return '/dashboard';
+      return job.month
+        ? `/dashboard?month=${encodeURIComponent(job.month)}`
+        : '/dashboard';
   }
 }

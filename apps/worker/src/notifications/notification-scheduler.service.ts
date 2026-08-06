@@ -14,7 +14,12 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { schema, type Db, notTransferCategory } from '@family/database';
+import {
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import {
   createLogger,
   normalizeMerchant,
@@ -222,8 +227,9 @@ export class NotificationSchedulerService
           notTransferCategory(),
           // 요약은 KRW로 표기되므로 KRW 거래만 합산(외화 minor units 혼입 방지).
           eq(schema.cardTransactions.currency, 'KRW'),
-          gte(schema.cardTransactions.approvedAt, weekFrom),
-          lt(schema.cardTransactions.approvedAt, weekTo),
+          // 기간 창은 analytics·예산과 같은 공통 헬퍼(ADR-0026). 요약 문장의 금액이
+          // 사용자가 홈에서 보는 총액과 어긋나지 않게 한다.
+          spendPeriodWindow(weekFrom, weekTo),
         ),
       )
       .groupBy(schema.cardTransactions.householdId);
@@ -266,6 +272,10 @@ export class NotificationSchedulerService
             totalNet,
             txnCount,
             periodLabel: '지난주',
+            // 요약 기간이 **시작된** 달로 딥링크한다. 월초(1~7일)에 오는 '지난주'
+            // 요약은 대부분 전월 지출이므로, 이번 달 홈을 열면 방금 읽은 금액이
+            // 화면에 없다.
+            month: weekStart.slice(0, 7),
           },
           key,
         );
