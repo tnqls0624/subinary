@@ -259,15 +259,55 @@ export const cardSmsDeclineGroupSchema = z.object({
    * (실측: OO피트니스 — 7번 거절 후 승인 0건).
    */
   resolvedAt: z.string().nullable(),
+  /**
+   * 사용자가 "확인했다"고 표시한 시각. `resolvedAt`(자동 판정)과 **직교**한다.
+   *
+   * 왜 필요한가: `resolvedAt`은 후속 승인으로만 채워지므로, 정기결제를 아예 해지한
+   * 경우처럼 승인이 영구히 오지 않는 실패는 영원히 미해결로 남아 홈 배너가 사라지지
+   * 않는다(실측: 버핏서울 106,000원 — 7일 연속 거절 후 승인 0건, 배너 18일째 유지).
+   *
+   * 이 값이 있어도 **그 시각 이후 새 거절이 오면 서버가 null로 되돌린다** — 영구
+   * 무시가 아니라 "지금까지의 시도는 확인했다"는 뜻이다.
+   */
+  dismissedAt: z.string().nullable(),
 });
 export type CardSmsDeclineGroup = z.infer<typeof cardSmsDeclineGroupSchema>;
 
 /** `GET /v1/card-sms-events/declines` — 미해결 먼저, 시도 많은 순. */
 export const cardSmsDeclineListResponseSchema = z.object({
   items: z.array(cardSmsDeclineGroupSchema),
-  /** 미해결 묶음 수 — 홈 배너 노출 판단에 쓴다. */
+  /**
+   * 조치가 필요한 묶음 수 — 홈 배너 노출 판단에 쓴다.
+   * 자동 해결(`resolvedAt`)과 사용자 확인(`dismissedAt`) **둘 다** 제외한 수다.
+   */
   unresolvedCount: z.number().int(),
 });
 export type CardSmsDeclineListResponse = z.infer<
   typeof cardSmsDeclineListResponseSchema
+>;
+
+/**
+ * `POST /v1/card-sms-events/declines/dismiss` · `/undismiss` — 묶음 확인 표시 토글.
+ *
+ * 묶음을 id가 아니라 `(merchant, amount)`로 지목하는 이유: 묶음은 조회 시점에
+ * 계산되는 집계이지 저장된 행이 아니다. 둘 다 nullable인 것은 가맹점·금액을 파싱하지
+ * 못한 거절도 닫을 수 있어야 하기 때문이다.
+ */
+export const cardSmsDeclineDismissRequestSchema = z.object({
+  householdId: z.string().uuid(),
+  merchant: z.string().min(1).max(200).nullable(),
+  amount: z.number().int().nullable(),
+});
+export type CardSmsDeclineDismissRequest = z.infer<
+  typeof cardSmsDeclineDismissRequestSchema
+>;
+
+/** dismiss/undismiss 응답 — 토글 후의 상태(멱등). */
+export const cardSmsDeclineDismissResponseSchema = z.object({
+  merchant: z.string().nullable(),
+  amount: z.number().int().nullable(),
+  dismissedAt: z.string().nullable(),
+});
+export type CardSmsDeclineDismissResponse = z.infer<
+  typeof cardSmsDeclineDismissResponseSchema
 >;

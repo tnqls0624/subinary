@@ -14,11 +14,12 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageBackHeader } from "@/components/widgets";
 import { formatRelativeTime, formatWon } from "@/lib/format";
-import { useDeclineList } from "@/lib/queries";
+import { useDeclineList, useSetDeclineDismissed } from "@/lib/queries";
 import type { CardSmsDeclineGroup, CardSmsDeclineReason } from "@family/contracts";
 
 /** 사유 → 사용자가 할 일. 미등록 사유는 문구를 만들지 않는다(추측 안내 금지). */
@@ -32,18 +33,23 @@ const REASON_HINT: Partial<Record<CardSmsDeclineReason, string>> = {
 };
 
 function DeclineRow({ item }: { item: CardSmsDeclineGroup }) {
-  const resolved = item.resolvedAt !== null;
+  const autoResolved = item.resolvedAt !== null;
+  const dismissed = item.dismissedAt !== null;
+  // 조치가 끝난 것(자동 해결 또는 사용자 확인)은 회색 톤으로 내린다.
+  const done = autoResolved || dismissed;
   const hint = item.reason ? REASON_HINT[item.reason] : undefined;
+  const mutation = useSetDeclineDismissed();
+
   return (
     <div className="flex items-start gap-3 px-4 py-3.5">
       <span
         className={`flex size-9 shrink-0 items-center justify-center rounded-full ${
-          resolved
+          done
             ? "bg-muted text-muted-foreground"
             : "bg-destructive/10 text-destructive"
         }`}
       >
-        {resolved ? (
+        {done ? (
           <CheckCircle2 className="size-4" />
         ) : (
           <AlertTriangle className="size-4" />
@@ -54,8 +60,12 @@ function DeclineRow({ item }: { item: CardSmsDeclineGroup }) {
           <span className="truncate text-sm font-medium">
             {item.merchant ?? "확인 안 된 가맹점"}
           </span>
-          <Badge variant={resolved ? "secondary" : "destructive"}>
-            {resolved ? "해결됨" : `${item.attempts}번 거절`}
+          <Badge variant={done ? "secondary" : "destructive"}>
+            {autoResolved
+              ? "해결됨"
+              : dismissed
+                ? "확인함"
+                : `${item.attempts}번 거절`}
           </Badge>
         </span>
         <span className="text-muted-foreground mt-1 block text-xs">
@@ -63,18 +73,43 @@ function DeclineRow({ item }: { item: CardSmsDeclineGroup }) {
           {item.issuer ? ` · ${item.issuer}` : ""}
           {item.maskedCardNumber ? ` ${item.maskedCardNumber}` : ""}
         </span>
-        {resolved ? (
+        {autoResolved ? (
           <span className="text-muted-foreground mt-1 block text-xs">
             {formatRelativeTime(item.resolvedAt)}에 결제됐어요
           </span>
         ) : hint ? (
-          <span className="text-destructive mt-1 block text-xs font-medium">
+          <span
+            className={`mt-1 block text-xs font-medium ${
+              dismissed ? "text-muted-foreground" : "text-destructive"
+            }`}
+          >
             {hint}
           </span>
         ) : null}
         <span className="text-muted-foreground mt-1 block text-[11px]">
           마지막 시도 {formatRelativeTime(item.lastAttemptAt)}
         </span>
+
+        {/* 자동 해결된 것에는 버튼을 두지 않는다 — 이미 승인 기록으로 끝난 사건이다.
+            직접 확인한 것은 되돌릴 수 있게 남긴다(잘못 눌렀을 때 복구 경로). */}
+        {autoResolved ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-1.5 -ml-2 h-8"
+            disabled={mutation.isPending}
+            onClick={() =>
+              mutation.mutate({
+                merchant: item.merchant,
+                amount: item.amount,
+                dismissed: !dismissed,
+              })
+            }
+          >
+            {dismissed ? "다시 알려주세요" : "확인했어요"}
+          </Button>
+        )}
       </span>
     </div>
   );
@@ -83,8 +118,13 @@ function DeclineRow({ item }: { item: CardSmsDeclineGroup }) {
 export default function DeclinesPage() {
   const { data, isLoading, isError } = useDeclineList();
   const items = data?.items ?? [];
-  const unresolved = items.filter((i) => i.resolvedAt === null);
-  const resolved = items.filter((i) => i.resolvedAt !== null);
+  // 조치가 필요한 것 = 자동 해결도, 사용자 확인도 안 된 것.
+  const unresolved = items.filter(
+    (i) => i.resolvedAt === null && i.dismissedAt === null,
+  );
+  const resolved = items.filter(
+    (i) => i.resolvedAt !== null || i.dismissedAt !== null,
+  );
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5">
@@ -134,7 +174,7 @@ export default function DeclinesPage() {
           {resolved.length > 0 ? (
             <div className="space-y-2">
               <p className="text-muted-foreground px-1 text-xs font-medium">
-                그 뒤 결제된 것 {resolved.length}건
+                해결됐거나 확인한 것 {resolved.length}건
               </p>
               <Card className="divide-border divide-y overflow-hidden p-0">
                 {resolved.map((item) => (

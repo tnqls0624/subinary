@@ -17,6 +17,8 @@ import type {
   CardSummary,
   CardUpdateRequest,
   CardSmsDeclineListResponse,
+  CardSmsDeclineDismissRequest,
+  CardSmsDeclineDismissResponse,
   CardSmsEventDetail,
   CardSmsReviewRequest,
   CardSmsReviewResponse,
@@ -580,6 +582,19 @@ export const api = {
       apiFetch<CardSmsDeclineListResponse>(
         `/v1/card-sms-events/declines${buildQuery({ householdId })}`,
         { accessToken },
+      ),
+    /**
+     * 실패 묶음 확인 표시 토글. 묶음은 조회 시점 집계라 id가 없어
+     * `(merchant, amount)`로 지목한다(둘 다 미파싱이면 null).
+     */
+    setDeclineDismissed: (
+      accessToken: AccessToken,
+      body: CardSmsDeclineDismissRequest,
+      dismissed: boolean,
+    ) =>
+      apiFetch<CardSmsDeclineDismissResponse>(
+        `/v1/card-sms-events/declines/${dismissed ? "dismiss" : "undismiss"}`,
+        { method: "POST", body, accessToken },
       ),
   },
 

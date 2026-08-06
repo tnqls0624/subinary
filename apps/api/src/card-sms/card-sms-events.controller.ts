@@ -10,7 +10,9 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { createZodDto } from 'nestjs-zod';
 
 import {
+  cardSmsDeclineDismissRequestSchema,
   cardSmsReviewRequestSchema,
+  type CardSmsDeclineDismissResponse,
   type CardSmsDeclineListResponse,
   type CardSmsEventDetail,
   type CardSmsEventSummary,
@@ -25,6 +27,9 @@ import { CardSmsQueryService } from './card-sms-query.service';
 import { CardSmsReviewService } from './card-sms-review.service';
 
 class CardSmsReviewDto extends createZodDto(cardSmsReviewRequestSchema) {}
+class CardSmsDeclineDismissDto extends createZodDto(
+  cardSmsDeclineDismissRequestSchema,
+) {}
 
 @Controller('card-sms-events')
 export class CardSmsEventsController {
@@ -74,6 +79,32 @@ export class CardSmsEventsController {
         ? Math.min(Math.trunc(parsed), 365)
         : undefined,
     );
+  }
+
+  /**
+   * POST /v1/card-sms-events/declines/dismiss — 실패 묶음을 "확인했다"로 표시.
+   *
+   * 자동 해결 판정(`resolvedAt`)은 후속 승인이 있을 때만 채워지므로, 정기결제를
+   * 해지한 경우처럼 승인이 영구히 오지 않는 실패는 배너가 사라지지 않는다. 이 경로가
+   * 그 출구다. 표시 이후 새 거절이 오면 서버가 다시 노출한다(영구 무시가 아니다).
+   */
+  @Post('declines/dismiss')
+  @HttpCode(HttpStatus.OK)
+  dismissDecline(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: CardSmsDeclineDismissDto,
+  ): Promise<CardSmsDeclineDismissResponse> {
+    return this.queryService.setDeclineDismissed(user.userId, body, true);
+  }
+
+  /** POST /v1/card-sms-events/declines/undismiss — 확인 표시 해제(가역적). */
+  @Post('declines/undismiss')
+  @HttpCode(HttpStatus.OK)
+  undismissDecline(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: CardSmsDeclineDismissDto,
+  ): Promise<CardSmsDeclineDismissResponse> {
+    return this.queryService.setDeclineDismissed(user.userId, body, false);
   }
 
   /** GET /v1/card-sms-events/:id — full event detail (includes raw content). */

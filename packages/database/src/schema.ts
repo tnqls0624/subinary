@@ -945,6 +945,54 @@ export const merchantAliases = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* cardSmsDeclineDismissals                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 결제 실패 묶음의 **사용자 확인 표시**(ADR-0024 후속).
+ *
+ * `listDeclines`의 `resolvedAt`은 "마지막 거절 이후 같은 가맹점 승인"으로만 채워진다.
+ * 그래서 정기결제를 아예 해지한 경우처럼 **후속 승인이 영구히 없는** 실패는 영원히
+ * 미해결로 남아 홈 최상단 배너가 사라지지 않는다. 실측(2026-07~08): `버핏서울
+ * 106,000원` 7일 연속 거절 후 승인 0건 → 배너가 18일째 해소 불가 상태였다.
+ *
+ * 묶음 단위(가맹점 + 금액)로 기록하는 이유: 사용자가 닫는 대상이 개별 문자가 아니라
+ * "이 사건"이다. 낱개에 표시하면 카드사가 다음 날 재시도할 때 같은 사건이 다시 뜬다.
+ *
+ * `dismissedAt` **이후에 온 거절은 다시 표시한다**(조회 시 `lastAttemptAt`과 비교).
+ * 영구 무시가 아니라 "지금까지의 시도는 확인했다"는 뜻이어야, 몇 달 뒤 같은 가맹점에서
+ * 새로 실패했을 때 놓치지 않는다.
+ *
+ * `merchant`/`amount`가 NULL일 수 있다(가맹점·금액을 파싱하지 못한 거절). NULL을 포함한
+ * UNIQUE는 Postgres에서 중복을 막지 못하므로 `NULLS NOT DISTINCT`를 명시한다 — 없으면
+ * 같은 묶음을 닫을 때마다 행이 쌓인다.
+ */
+export const cardSmsDeclineDismissals = pgTable(
+  'card_sms_decline_dismissals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /** `normalizeMerchant`(+별칭) 적용 후의 묶음 키. 미파싱이면 NULL. */
+    merchant: text('merchant'),
+    /** 묶음 키의 금액(minor units). 미파싱이면 NULL. */
+    amount: integer('amount'),
+    /** 이 시각까지의 시도를 확인했다는 표시. 이후 거절은 다시 노출된다. */
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    dismissedBy: uuid('dismissed_by').references(() => users.id),
+  },
+  (table) => [
+    unique('card_sms_decline_dismissals_bucket_unique')
+      .on(table.householdId, table.merchant, table.amount)
+      .nullsNotDistinct(),
+    index('card_sms_decline_dismissals_household_idx').on(table.householdId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* cardTransactions                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -3533,6 +3581,11 @@ export type NewModelAlias = typeof modelAliases.$inferInsert;
 
 export type ModelAliasRevision = typeof modelAliasRevisions.$inferSelect;
 export type NewModelAliasRevision = typeof modelAliasRevisions.$inferInsert;
+
+export type CardSmsDeclineDismissal =
+  typeof cardSmsDeclineDismissals.$inferSelect;
+export type NewCardSmsDeclineDismissal =
+  typeof cardSmsDeclineDismissals.$inferInsert;
 
 export type ModelCanaryRun = typeof modelCanaryRuns.$inferSelect;
 export type NewModelCanaryRun = typeof modelCanaryRuns.$inferInsert;

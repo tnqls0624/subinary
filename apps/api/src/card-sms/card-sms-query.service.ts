@@ -17,10 +17,25 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import { cardSmsParseStatusSchema } from '@family/contracts';
 import type {
+  CardSmsDeclineDismissRequest,
+  CardSmsDeclineDismissResponse,
   CardSmsDeclineGroup,
   CardSmsDeclineListResponse,
   CardSmsEventDetail,
@@ -205,6 +220,15 @@ export class CardSmsQueryService {
       attempts: number;
       first: Date;
       last: Date;
+      /**
+       * 이 묶음에서 **가장 늦게 수집된** 시각(`createdAt`). 확인 표시 비교에 쓴다.
+       *
+       * `last`(=occurredAt)를 쓰면 안 된다: 카드 문자의 시각은 분 단위(`MM/DD HH:mm`)로
+       * 초가 절삭되고 수집이 지연될 수도 있어, 확인 직후 도착한 새 거절이 "확인 이전의
+       * 시도"로 판정돼 조용히 숨는다(실측: occurredAt 14:04:00 vs dismissedAt 14:04:56).
+       * 수집 시각은 서버가 찍으므로 그 역전이 없다.
+       */
+      lastSeen: Date;
     }
     const buckets = new Map<string, Bucket>();
     for (const e of events) {
@@ -215,6 +239,7 @@ export class CardSmsQueryService {
       if (existing) {
         existing.attempts += 1;
         if (at < existing.first) existing.first = at;
+        if (e.createdAt > existing.lastSeen) existing.lastSeen = e.createdAt;
         if (at > existing.last) {
           existing.last = at;
           // 사유는 **최신 시도**의 것을 쓴다(원인이 바뀔 수 있다: 한도초과 → 분실신고).
@@ -232,8 +257,22 @@ export class CardSmsQueryService {
         attempts: 1,
         first: at,
         last: at,
+        lastSeen: e.createdAt,
       });
     }
+
+    // 사용자가 "확인했다"고 표시한 묶음. 묶음 키가 (가맹점, 금액)이므로 같은 키로 읽는다.
+    const dismissals = await this.db
+      .select({
+        merchant: schema.cardSmsDeclineDismissals.merchant,
+        amount: schema.cardSmsDeclineDismissals.amount,
+        dismissedAt: schema.cardSmsDeclineDismissals.dismissedAt,
+      })
+      .from(schema.cardSmsDeclineDismissals)
+      .where(eq(schema.cardSmsDeclineDismissals.householdId, householdId));
+    const dismissedAtByKey = new Map(
+      dismissals.map((d) => [`${d.merchant ?? ''}|${d.amount ?? ''}`, d.dismissedAt]),
+    );
 
     // 각 묶음이 그 뒤 승인으로 해결됐는지 확인. 묶음 수가 적어(가맹점 단위) N+1이
     // 문제되지 않으며, 가맹점별 시각 조건이 달라 단일 쿼리로 합치면 더 복잡해진다.
@@ -257,6 +296,15 @@ export class CardSmsQueryService {
           .limit(1);
         resolvedAt = approved?.approvedAt ?? null;
       }
+      // 확인 표시는 그때까지 **수집된** 시도에만 적용된다 — 이후 새로 들어온 거절이
+      // 있으면 되살린다(영구 무시로 만들면 몇 달 뒤 같은 가맹점의 새 실패를 놓친다).
+      // 비교 기준이 occurredAt이 아니라 createdAt인 이유는 Bucket.lastSeen 주석 참고.
+      const dismissedRaw = dismissedAtByKey.get(
+        `${b.merchant ?? ''}|${b.amount ?? ''}`,
+      );
+      const dismissedAt =
+        dismissedRaw && b.lastSeen <= dismissedRaw ? dismissedRaw : null;
+
       items.push({
         merchant: b.merchant,
         amount: b.amount,
@@ -268,21 +316,91 @@ export class CardSmsQueryService {
         firstAttemptAt: b.first.toISOString(),
         lastAttemptAt: b.last.toISOString(),
         resolvedAt: resolvedAt ? resolvedAt.toISOString() : null,
+        dismissedAt: dismissedAt ? dismissedAt.toISOString() : null,
       });
     }
 
-    // 미해결 먼저 → 시도 많은 순 → 최근 순. 사용자가 조치해야 할 것이 맨 위로 온다.
+    // 조치 필요 먼저 → 시도 많은 순 → 최근 순. 사용자가 할 일이 맨 위로 온다.
+    // 확인 표시한 묶음은 자동 해결된 것과 같은 대우(아래로 내린다).
+    const needsAction = (i: CardSmsDeclineGroup): number =>
+      i.resolvedAt === null && i.dismissedAt === null ? 0 : 1;
     items.sort((a, b) => {
-      const aUnresolved = a.resolvedAt === null ? 0 : 1;
-      const bUnresolved = b.resolvedAt === null ? 0 : 1;
-      if (aUnresolved !== bUnresolved) return aUnresolved - bUnresolved;
+      const diff = needsAction(a) - needsAction(b);
+      if (diff !== 0) return diff;
       if (a.attempts !== b.attempts) return b.attempts - a.attempts;
       return (b.lastAttemptAt ?? '').localeCompare(a.lastAttemptAt ?? '');
     });
 
     return {
       items,
-      unresolvedCount: items.filter((i) => i.resolvedAt === null).length,
+      unresolvedCount: items.filter((i) => needsAction(i) === 0).length,
+    };
+  }
+
+  /**
+   * 실패 묶음 확인 표시 토글 — `dismiss=true`면 지금 시각으로 표시, false면 해제.
+   *
+   * 묶음은 조회 시점에 계산되는 집계라 id가 없으므로 `(merchant, amount)`로 지목한다.
+   * 멱등: 같은 묶음을 두 번 닫으면 `dismissedAt`만 갱신된다(NULL 포함 UNIQUE는
+   * `NULLS NOT DISTINCT`라 미파싱 묶음도 행이 쌓이지 않는다).
+   *
+   * 가역적으로 만든 이유는 `excludedAt`(중복 제외)과 같다 — 잘못 닫았을 때 데이터를
+   * 잃지 않고 되돌릴 수 있어야 사용자가 부담 없이 쓴다.
+   */
+  async setDeclineDismissed(
+    actorUserId: string,
+    input: CardSmsDeclineDismissRequest,
+    dismiss: boolean,
+  ): Promise<CardSmsDeclineDismissResponse> {
+    await this.requireMembership(input.householdId, actorUserId);
+
+    if (!dismiss) {
+      await this.db
+        .delete(schema.cardSmsDeclineDismissals)
+        .where(
+          and(
+            eq(schema.cardSmsDeclineDismissals.householdId, input.householdId),
+            input.merchant === null
+              ? isNull(schema.cardSmsDeclineDismissals.merchant)
+              : eq(schema.cardSmsDeclineDismissals.merchant, input.merchant),
+            input.amount === null
+              ? isNull(schema.cardSmsDeclineDismissals.amount)
+              : eq(schema.cardSmsDeclineDismissals.amount, input.amount),
+          ),
+        );
+      return {
+        merchant: input.merchant,
+        amount: input.amount,
+        dismissedAt: null,
+      };
+    }
+
+    const now = new Date();
+    const [row] = await this.db
+      .insert(schema.cardSmsDeclineDismissals)
+      .values({
+        householdId: input.householdId,
+        merchant: input.merchant,
+        amount: input.amount,
+        dismissedAt: now,
+        dismissedBy: actorUserId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.cardSmsDeclineDismissals.householdId,
+          schema.cardSmsDeclineDismissals.merchant,
+          schema.cardSmsDeclineDismissals.amount,
+        ],
+        set: { dismissedAt: now, dismissedBy: actorUserId },
+      })
+      .returning({
+        dismissedAt: schema.cardSmsDeclineDismissals.dismissedAt,
+      });
+
+    return {
+      merchant: input.merchant,
+      amount: input.amount,
+      dismissedAt: (row?.dismissedAt ?? now).toISOString(),
     };
   }
 

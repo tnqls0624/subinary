@@ -493,6 +493,10 @@ export class NotificationSchedulerService
         amount: schema.cardSmsEvents.amount,
         attempts: sql<string>`count(*)`,
         lastAt: lastAtExpr,
+        // 확인 표시(dismissedAt) 비교는 **수집 시각** 기준이다. occurredAt은 분 단위라
+        // 초가 절삭되고 수집 지연도 있어, 확인 직후 도착한 거절이 "이전 시도"로 판정돼
+        // 알림이 조용히 빠진다(api listDeclines의 Bucket.lastSeen과 같은 규칙).
+        lastSeenAt: sql<Date>`max(${schema.cardSmsEvents.createdAt})`,
         // 최신 시도의 사유. `max()`는 알파벳 순 최댓값이라 사유가 바뀐 경우
         // (한도초과 → 분실신고) 옛 사유를 보여준다.
         reason: sql<
@@ -522,6 +526,24 @@ export class NotificationSchedulerService
       .from(schema.merchantAliases);
     const aliasMap = new Map(aliasRows.map((a) => [a.alias, a.canonical]));
 
+    // 사용자가 "확인했어요"로 닫은 묶음은 알림도 보내지 않는다. api `listDeclines`와
+    // **같은 규칙을 양쪽에 두어야** 한다 — 화면에서는 사라졌는데 주 단위 알림은 계속
+    // 오는 상태가 이 기능에서 가장 나쁜 실패다. 묶음 키는 (정규화 가맹점, 금액).
+    const dismissalRows = await this.db
+      .select({
+        householdId: schema.cardSmsDeclineDismissals.householdId,
+        merchant: schema.cardSmsDeclineDismissals.merchant,
+        amount: schema.cardSmsDeclineDismissals.amount,
+        dismissedAt: schema.cardSmsDeclineDismissals.dismissedAt,
+      })
+      .from(schema.cardSmsDeclineDismissals);
+    const dismissedAtByKey = new Map(
+      dismissalRows.map((d) => [
+        `${d.householdId}|${d.merchant ?? ''}|${d.amount ?? ''}`,
+        d.dismissedAt,
+      ]),
+    );
+
     let enqueued = 0;
     for (const g of groups) {
       const attempts = Number(g.attempts) || 0;
@@ -538,6 +560,14 @@ export class NotificationSchedulerService
         ? (aliasMap.get(normalizeMerchant(g.merchantRaw)) ??
           normalizeMerchant(g.merchantRaw))
         : null;
+
+      // 확인 표시는 그때까지 수집된 시도에만 적용된다(이후 새 거절이면 다시 알린다).
+      const dismissedAt = dismissedAtByKey.get(
+        `${g.householdId}|${declinedMerchant ?? ''}|${g.amount ?? ''}`,
+      );
+      const lastSeenAt = g.lastSeenAt ? new Date(g.lastSeenAt) : lastAt;
+      if (dismissedAt && lastSeenAt <= dismissedAt) continue;
+
       if (declinedMerchant) {
         const [approved] = await this.db
           .select({ id: schema.cardTransactions.id })

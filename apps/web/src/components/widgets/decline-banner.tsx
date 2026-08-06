@@ -30,7 +30,12 @@ const REASON_HINT: Partial<Record<CardSmsDeclineReason, string>> = {
 
 export function DeclineBanner() {
   const { data } = useDeclineList();
-  const unresolved = (data?.items ?? []).filter((d) => d.resolvedAt === null);
+  // 자동 해결(후속 승인)과 사용자 확인(dismissedAt) **둘 다** 빼야 배너가 닫힌다.
+  // resolvedAt만 보면 정기결제를 해지한 실패는 승인이 영구히 오지 않아 배너가
+  // 사라지지 않는다(실측: 버핏서울 106,000원 — 18일째 상단 고정).
+  const unresolved = (data?.items ?? []).filter(
+    (d) => d.resolvedAt === null && d.dismissedAt === null,
+  );
   if (unresolved.length === 0) return null;
 
   const top = unresolved[0];

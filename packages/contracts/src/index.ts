@@ -238,6 +238,8 @@ export {
   cardSmsDeclineReasonSchema,
   cardSmsDeclineGroupSchema,
   cardSmsDeclineListResponseSchema,
+  cardSmsDeclineDismissRequestSchema,
+  cardSmsDeclineDismissResponseSchema,
 } from './card-sms.js';
 export type {
   CardSmsParseStatus,
@@ -257,6 +259,8 @@ export type {
   CardSmsDeclineReason,
   CardSmsDeclineGroup,
   CardSmsDeclineListResponse,
+  CardSmsDeclineDismissRequest,
+  CardSmsDeclineDismissResponse,
 } from './card-sms.js';
 
 export {

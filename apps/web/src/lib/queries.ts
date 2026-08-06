@@ -12,10 +12,12 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 
 import type {
+  CardSmsDeclineDismissResponse,
   CardSmsDeclineListResponse,
   CardBreakdown,
   CardSummary,
@@ -316,6 +318,38 @@ export function useDeclineList(): UseQueryResult<CardSmsDeclineListResponse> {
       authedFetch((token) =>
         api.cardSms.declines(token, householdId as string),
       ),
+  });
+}
+
+/**
+ * 실패 묶음 확인 표시 토글. 성공 시 목록을 무효화해 배너·화면이 함께 갱신된다.
+ * 표시 이후 새 거절이 오면 서버가 다시 노출하므로 클라이언트는 낙관적 갱신을 하지 않는다.
+ */
+export function useSetDeclineDismissed(): UseMutationResult<
+  CardSmsDeclineDismissResponse,
+  Error,
+  { merchant: string | null; amount: number | null; dismissed: boolean }
+> {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) =>
+      authedFetch((token) =>
+        api.cardSms.setDeclineDismissed(
+          token,
+          {
+            householdId: householdId as string,
+            merchant: input.merchant,
+            amount: input.amount,
+          },
+          input.dismissed,
+        ),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.declines(householdId),
+      });
+    },
   });
 }
 
