@@ -45,6 +45,15 @@ wait_for_state() {
       echo "[infra] $service_name=$current_state"
       return
     fi
+    # `running`을 기대하는 서비스에 healthcheck가 추가되면 container_state가
+    # State.Status 대신 health.Status를 돌려주므로 문자열이 어긋난다. healthy는
+    # running보다 강한 보장이니 통과시킨다 — 실측(2026-08-06): dozzle에
+    # healthcheck를 붙인 뒤 이 목록을 갱신하지 않아 배포 검증이 300s 타임아웃으로
+    # 실패했다(컨테이너는 6일째 정상이었다). unhealthy는 아래 case에서 계속 잡힌다.
+    if [ "$expected_state" = running ] && [ "$current_state" = healthy ]; then
+      echo "[infra] $service_name=$current_state (healthcheck 통과 — running 이상)"
+      return
+    fi
     case "$current_state" in
       exited|dead|unhealthy)
         fail "$service_name state is $current_state"
