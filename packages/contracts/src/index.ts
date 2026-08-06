@@ -337,6 +337,7 @@ export {
   memberBreakdownSchema,
   cardBreakdownSchema,
   merchantBreakdownSchema,
+  analyticsMonthsSchema,
 } from './analytics.js';
 export type {
   AnalyticsPeriod,
@@ -346,6 +347,7 @@ export type {
   MemberBreakdown,
   CardBreakdown,
   MerchantBreakdown,
+  AnalyticsMonths,
 } from './analytics.js';
 
 export {

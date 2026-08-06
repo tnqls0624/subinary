@@ -51,7 +51,13 @@ import type {
   TransactionSummaryResponse,
   TransactionUpdateRequest,
 } from '@family/contracts';
-import { revokeTrainingRuns, schema, type Db, notTransferCategory } from '@family/database';
+import {
+  revokeTrainingRuns,
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import {
   assertKrwInteger,
   createMerchantCategoryTargetId,
@@ -321,8 +327,9 @@ export class TransactionService {
       // currency:'KRW' 마커를 내려 클라이언트가 ₩ 포맷을 확정하게 한다.
       eq(schema.cardTransactions.currency, 'KRW'),
       this.visibilityScope(actor.memberId),
-      gte(schema.cardTransactions.approvedAt, from),
-      lt(schema.cardTransactions.approvedAt, to),
+      // 기간 창은 analytics/예산과 같은 공통 헬퍼(ADR-0026) — 세 경로의 같은 달 총액이
+      // 일치해야 이 요약이 검증 기준으로 쓸 수 있다.
+      spendPeriodWindow(from, to),
     ];
 
     const [agg] = await this.db

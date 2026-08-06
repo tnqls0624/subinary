@@ -27,7 +27,7 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 
 import type {
   CardBreakdown,
@@ -35,8 +35,14 @@ import type {
   MemberBreakdown,
   MerchantBreakdown,
   MonthlyAnalytics,
+  AnalyticsMonths,
 } from '@family/contracts';
-import { schema, type Db, notTransferCategory } from '@family/database';
+import {
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import { assertKrwInteger, DEFAULT_TIMEZONE } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -402,6 +408,53 @@ export class AnalyticsService {
     return { meta, items };
   }
 
+  /**
+   * 거래가 있는 달의 목록(오름차순) — 월 스위처가 빈 달을 건너뛰는 데 쓴다.
+   *
+   * 기간 필터만 없는 {@link approvalConditions}를 그대로 쓰므로 여기의 `net`은
+   * 그 달을 실제로 열었을 때 `monthly.totalNet`과 같은 값이다. 버킷 키는
+   * `coalesce(approvedAt, createdAt)`을 Asia/Seoul로 변환한 `YYYY-MM`으로,
+   * {@link spendPeriodWindow}가 승인시각 미파싱 거래를 createdAt으로 구제하는
+   * 규칙과 일치한다(다른 규칙을 쓰면 스위처에는 보이는데 열면 0원인 달이 생긴다).
+   */
+  async months(
+    userId: string,
+    householdId: string | undefined,
+  ): Promise<AnalyticsMonths> {
+    const hh = this.requireHouseholdId(householdId);
+    const actorMemberId = await this.requireMembership(hh, userId);
+    const conds = this.approvalConditions(hh, actorMemberId);
+
+    // 파라미터 보간이 없는 표현식이지만, groupBy에는 merchants와 동일하게 ordinal을
+    // 쓴다(SELECT alias는 Postgres GROUP BY에서 해석되지 않고, 표현식 객체를 다시
+    // 넘기면 placeholder가 어긋난다).
+    const monthExpr = sql<string>`to_char(
+      coalesce(${schema.cardTransactions.approvedAt}, ${schema.cardTransactions.createdAt})
+        at time zone 'Asia/Seoul',
+      'YYYY-MM'
+    )`;
+
+    const rows = await this.db
+      .select({
+        month: monthExpr,
+        net: sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`,
+        count: sql<string>`count(*)`,
+      })
+      .from(schema.cardTransactions)
+      .where(and(...conds))
+      .groupBy(sql`1`)
+      .orderBy(sql`1 asc`);
+
+    return {
+      timezone: DEFAULT_TIMEZONE,
+      items: rows.map((r) => {
+        const net = toInt(r.net);
+        assertKrwInteger(net);
+        return { month: r.month, net, count: toInt(r.count) };
+      }),
+    };
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Shared aggregation helpers                                              */
   /* ---------------------------------------------------------------------- */
@@ -418,6 +471,20 @@ export class AnalyticsService {
     to: Date,
   ): SQL[] {
     return [
+      ...this.approvalConditions(householdId, actorMemberId),
+      // 기간 창은 @family/database의 공통 헬퍼(ADR-0026). 예산·요약·주간요약·이상지출도
+      // 같은 함수를 쓰므로 "같은 달, 다른 총액"이 생기지 않는다.
+      spendPeriodWindow(from, to),
+    ];
+  }
+
+  /**
+   * 기간을 **뺀** 지출 집계 조건. `months()`(전 기간을 달별로 버킷팅)와
+   * {@link periodApprovalConditions}가 공유하므로, 스위처가 내려주는 달의 net이
+   * 그 달을 실제로 열었을 때의 총액과 일치한다.
+   */
+  private approvalConditions(householdId: string, actorMemberId: string): SQL[] {
+    return [
       eq(schema.cardTransactions.householdId, householdId),
       eq(schema.cardTransactions.transactionType, 'approval'),
       // 사용자가 '중복이라 제외' 확정한 거래는 모든 합계/브레이크다운에서 뺀다.
@@ -430,28 +497,7 @@ export class AnalyticsService {
       // 걸러 monthly/categories/members/cards/merchants/sumNet 전부를 정화한다.
       eq(schema.cardTransactions.currency, 'KRW'),
       this.visibilityScope(actorMemberId),
-      this.periodWindow(from, to),
     ];
-  }
-
-  /**
-   * 기간 창: 승인시각(approvedAt)이 `[from,to)`이거나, approvedAt이 NULL(미파싱)이면
-   * 생성시각(createdAt)이 `[from,to)`. `NULL >= from`이 항상 false라 승인시각
-   * 미파싱 거래가 집계에서 통째로 빠지는 것을 막는다(목록 필터와 동일 규칙).
-   * COALESCE를 SQL 표현식으로 쓰면 Date 바인딩이 깨지므로 컬럼 기반 OR로 표현한다.
-   */
-  private periodWindow(from: Date, to: Date): SQL {
-    return or(
-      and(
-        gte(schema.cardTransactions.approvedAt, from),
-        lt(schema.cardTransactions.approvedAt, to),
-      ),
-      and(
-        isNull(schema.cardTransactions.approvedAt),
-        gte(schema.cardTransactions.createdAt, from),
-        lt(schema.cardTransactions.createdAt, to),
-      ),
-    ) as SQL;
   }
 
   /**
@@ -515,7 +561,7 @@ export class AnalyticsService {
           isNull(schema.cardTransactions.excludedAt),
           // 자산 이동도 합계에 없으므로 같은 이유로 이 카운트에서 뺀다.
           notTransferCategory(),
-          this.periodWindow(period.from, period.to),
+          spendPeriodWindow(period.from, period.to),
           ne(schema.cardTransactions.memberId, actorMemberId),
           eq(schema.cardTransactions.visibility, 'private'),
         ),

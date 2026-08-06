@@ -14,6 +14,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 
 import type {
+  AnalyticsMonths,
   CardBreakdown,
   CategoryBreakdown,
   MemberBreakdown,
@@ -96,6 +97,18 @@ export class AnalyticsController {
       from,
       to,
     });
+  }
+
+  /**
+   * GET /v1/analytics/months?householdId= — 거래가 있는 달의 목록(오름차순).
+   * 월 스위처가 빈 달을 건너뛰는 데 쓴다. 기간 파라미터를 받지 않는다(전 기간).
+   */
+  @Get('months')
+  months(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('householdId') householdId?: string,
+  ): Promise<AnalyticsMonths> {
+    return this.analyticsService.months(user.userId, householdId);
   }
 
   /** GET /v1/analytics/merchants — net spend grouped by normalized merchant. */

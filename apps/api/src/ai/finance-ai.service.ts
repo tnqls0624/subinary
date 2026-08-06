@@ -27,10 +27,8 @@ import {
   and,
   desc,
   eq,
-  gte,
   inArray,
   isNull,
-  lt,
   or,
   sql,
   type SQL,
@@ -46,7 +44,12 @@ import type {
   MonthlyInsight,
   MonthlyInsightsResponse,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import {
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import { DEFAULT_CATEGORIES } from '@family/shared';
 
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -583,12 +586,17 @@ export class FinanceAiService {
           eq(schema.cardTransactions.householdId, householdId),
           eq(schema.cardTransactions.transactionType, 'approval'),
           isNull(schema.cardTransactions.excludedAt),
+          // 자산 이동(현금 인출·선불 충전)은 이상 지출 후보가 아니다 — 분모인
+          // totalNet/transactionCount는 analytics 집계(transfer 제외)에서 오므로,
+          // 여기에 조건이 없으면 ATM 인출이 "평소보다 큰 지출"로 되살아난다(ADR-0026).
+          notTransferCategory(),
           // KRW 전용(평균·formatWon이 원 기준). 외화 minor units가 최고액 정렬을
           // 오염시키지 않게 한다(grounding 정확성 = LLM 답변 정확성).
           eq(schema.cardTransactions.currency, 'KRW'),
           this.visibilityScope(actorMemberId),
-          gte(schema.cardTransactions.approvedAt, from),
-          lt(schema.cardTransactions.approvedAt, to),
+          // 기간 창도 analytics와 같은 공통 헬퍼로 — 분자(최고액)와 분모(평균)의
+          // 모집단이 어긋나면 3배 판정 자체가 흔들린다.
+          spendPeriodWindow(from, to),
         ),
       )
       .orderBy(desc(schema.cardTransactions.netAmount))

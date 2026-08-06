@@ -123,3 +123,27 @@ export const merchantBreakdownSchema = z.object({
   ),
 });
 export type MerchantBreakdown = z.infer<typeof merchantBreakdownSchema>;
+
+/**
+ * `GET /v1/analytics/months` — 거래가 **있는** 달의 목록(오름차순, Asia/Seoul 기준).
+ *
+ * 왜 별도 엔드포인트인가: 홈·예산의 월 스위처가 임의의 달로 이동하면 데이터가 없는
+ * 달에서 빈 화면과 `-100%` 델타를 보여준다. 실측(2026-08) 데이터는 2026-03과
+ * 2026-07 사이가 비어 있어 화살표를 4번 눌러야 다음 데이터에 닿았다. 클라이언트가
+ * 이 목록으로 **건너뛴다**(ADR-0026).
+ *
+ * `net`은 다른 analytics 집계와 동일한 정의(approval · 제외 아님 · 자산이동 아님 ·
+ * KRW · 공개범위 필터)의 순지출이므로, 스위처 라벨에 그대로 쓸 수 있다.
+ */
+export const analyticsMonthsSchema = z.object({
+  timezone: z.string(),
+  items: z.array(
+    z.object({
+      /** `YYYY-MM` (Asia/Seoul). */
+      month: z.string(),
+      net: z.number().int(),
+      count: z.number().int(),
+    }),
+  ),
+});
+export type AnalyticsMonths = z.infer<typeof analyticsMonthsSchema>;

@@ -26,7 +26,12 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '@family/config';
-import { schema, type Db, notTransferCategory } from '@family/database';
+import {
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import {
   assertKrwInteger,
   categorizeByKeyword,
@@ -945,8 +950,9 @@ export class TransactionPromotionService {
       // 예산 통화(minor units)와 같은 통화만 합산 — 외화 지출이 KRW 예산 소진율을
       // 오염시키지 않게 한다(예산은 단일 통화, 기본 'KRW').
       eq(schema.cardTransactions.currency, budget.currency),
-      gte(schema.cardTransactions.approvedAt, from),
-      lt(schema.cardTransactions.approvedAt, to),
+      // 기간 창은 api budget.service와 같은 공통 헬퍼(ADR-0026) — 알림의 사용률과
+      // 화면의 사용률이 어긋나면 "80% 알림이 왔는데 화면은 74%"가 된다.
+      spendPeriodWindow(from, to),
     ];
     if (budget.scopeType === 'member' && budget.scopeRefId) {
       conditions.push(eq(schema.cardTransactions.memberId, budget.scopeRefId));

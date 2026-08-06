@@ -26,7 +26,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 
 import type {
   BudgetCreateRequest,
@@ -35,7 +35,13 @@ import type {
   BudgetUpdateRequest,
   HouseholdRole,
 } from '@family/contracts';
-import { isUniqueViolation, schema, type Db, notTransferCategory } from '@family/database';
+import {
+  isUniqueViolation,
+  schema,
+  type Db,
+  notTransferCategory,
+  spendPeriodWindow,
+} from '@family/database';
 import { assertKrwInteger } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -235,8 +241,9 @@ export class BudgetService {
       // 예산 통화와 같은 통화만 소진에 합산(amount=minor units). 외화 지출이 KRW
       // 예산 소진율을 오염시키지 않게 하고, 향후 비-KRW 예산도 자연히 지원한다.
       eq(schema.cardTransactions.currency, budget.currency),
-      gte(schema.cardTransactions.approvedAt, period.from),
-      lt(schema.cardTransactions.approvedAt, period.to),
+      // 기간 창은 analytics/요약과 같은 공통 헬퍼(ADR-0026). approvedAt strict 비교였을
+      // 때는 승인시각 미파싱 거래가 사용률에서 통째로 빠져 analytics 총액과 어긋났다.
+      spendPeriodWindow(period.from, period.to),
       this.visibilityScope(actorMemberId),
     ];
 
