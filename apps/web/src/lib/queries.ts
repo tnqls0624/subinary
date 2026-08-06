@@ -25,6 +25,7 @@ import type {
   MemberBreakdown,
   MemberSummary,
   MerchantBreakdown,
+  AnalyticsMonths,
   MerchantLabelCandidateListResponse,
   MerchantListResponse,
   MonthlyAnalytics,
@@ -181,6 +182,22 @@ export function useMerchants(
           householdId: householdId as string,
           month,
         }),
+      ),
+  });
+}
+
+/**
+ * 거래가 있는 달의 목록(오름차순) — 월 스위처가 빈 달을 건너뛰는 데 쓴다.
+ * 달 목록은 새 거래가 들어와도 거의 변하지 않으므로 폴링하지 않는다.
+ */
+export function useAnalyticsMonths(): UseQueryResult<AnalyticsMonths> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.analytics("months", householdId),
+    enabled,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.analytics.months(token, householdId as string),
       ),
   });
 }

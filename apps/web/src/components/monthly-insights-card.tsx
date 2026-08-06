@@ -14,6 +14,7 @@ import type { MonthlyInsight, MonthlyInsightKind } from "@family/contracts";
 import { Card, CardContent } from "@/components/ui/card";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { formatMonth } from "@/lib/format";
 import { useHousehold } from "@/lib/household-context";
 
 /** insight 종류별 아이콘/색조. */
@@ -45,9 +46,26 @@ export function MonthlyInsightsCard({ month }: { month?: string }) {
 
   const insights: MonthlyInsight[] = query.data?.insights ?? [];
 
-  // 로딩/에러/빈 결과는 조용히 숨긴다(대시보드 보조 카드).
-  if (query.isLoading || query.isError || insights.length === 0) {
+  // 로딩과 빈 결과는 조용히 숨긴다(대시보드 보조 카드). 다만 **에러는 알린다** —
+  // 월을 넘겨가며 보는 화면에서 카드가 이유 없이 사라지면 "그 달은 인사이트가
+  // 없구나"로 오해하게 된다(둘은 다른 상태다).
+  if (query.isLoading || (!query.isError && insights.length === 0)) {
     return null;
+  }
+
+  const title = month ? `${formatMonth(month)} AI 인사이트` : "AI 인사이트";
+
+  if (query.isError) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2">
+          <Sparkles className="text-muted-foreground size-4" />
+          <span className="text-muted-foreground text-sm">
+            인사이트를 불러오지 못했어요
+          </span>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -55,7 +73,7 @@ export function MonthlyInsightsCard({ month }: { month?: string }) {
       <CardContent className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Sparkles className="text-accent-foreground size-4" />
-          <span className="text-[15px] font-semibold">이번 달 AI 인사이트</span>
+          <span className="text-[15px] font-semibold">{title}</span>
         </div>
         <ul className="flex flex-col gap-2.5">
           {insights.map((insight, i) => {

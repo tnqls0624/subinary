@@ -45,6 +45,7 @@ import type {
   MemberSummary,
   MeResponse,
   MerchantBreakdown,
+  AnalyticsMonths,
   MerchantAliasCreateRequest,
   MerchantAliasCreateResponse,
   MerchantAliasDeleteResponse,
@@ -606,6 +607,15 @@ export const api = {
     merchants: (accessToken: AccessToken, params: AnalyticsParams) =>
       apiFetch<MerchantBreakdown>(
         `/v1/analytics/merchants${buildQuery({ ...params })}`,
+        { accessToken },
+      ),
+    /**
+     * 거래가 있는 달의 목록 — 월 스위처가 빈 달을 건너뛰는 데 쓴다.
+     * 기간 파라미터가 없다(전 기간을 달별로 버킷팅).
+     */
+    months: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<AnalyticsMonths>(
+        `/v1/analytics/months${buildQuery({ householdId })}`,
         { accessToken },
       ),
   },

@@ -68,6 +68,7 @@ import {
   formatMonth,
   currentMonth,
 } from "@/lib/format";
+import { monthRange, recentMonths } from "@/lib/month";
 import { memberColorClass } from "@/lib/member-color";
 import { useHousehold } from "@/lib/household-context";
 import {
@@ -158,37 +159,8 @@ type RowAction =
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** `YYYY-MM` → Asia/Seoul 월 경계 [월초, 다음달초)의 ISO 문자열. */
-function monthRange(month: string): { from?: string; to?: string } {
-  const match = /^(\d{4})-(\d{2})$/.exec(month);
-  if (!match) return {};
-  const year = Number(match[1]);
-  const mon = Number(match[2]);
-  // Asia/Seoul은 DST 없는 고정 +09:00 → 오프셋을 명시해 안전하게 경계를 만든다.
-  const from = `${match[1]}-${match[2]}-01T00:00:00+09:00`;
-  const nextYear = mon === 12 ? year + 1 : year;
-  const nextMon = mon === 12 ? 1 : mon + 1;
-  const to = `${nextYear}-${String(nextMon).padStart(2, "0")}-01T00:00:00+09:00`;
-  return { from, to };
-}
-
-/** 현재월부터 과거로 `count`개월(YYYY-MM) 목록. */
-function recentMonths(count: number): string[] {
-  const match = /^(\d{4})-(\d{2})$/.exec(currentMonth());
-  if (!match) return [];
-  let year = Number(match[1]);
-  let mon = Number(match[2]);
-  const out: string[] = [];
-  for (let i = 0; i < count; i += 1) {
-    out.push(`${year}-${String(mon).padStart(2, "0")}`);
-    mon -= 1;
-    if (mon === 0) {
-      mon = 12;
-      year -= 1;
-    }
-  }
-  return out;
-}
+// monthRange/recentMonths는 `@/lib/month`로 승격했다(홈·예산 월 스위처가 같은 규칙을
+// 써야 하므로 — ADR-0026). 동작은 동일하다.
 
 /** 가맹점 표시명(masked → '(비공개)', 미확인 → '미확인 가맹점'). */
 function merchantLabel(txn: TransactionSummary): string {

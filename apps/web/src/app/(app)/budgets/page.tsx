@@ -51,17 +51,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UsageBar } from "@/components/widgets";
+import { MonthSwitcher, UsageBar } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
+import { addMonths } from "@/lib/month";
 import {
+  useAnalyticsMonths,
   useBudgets,
   useCardList,
   useCategoryList,
   useHouseholdMembers,
 } from "@/lib/queries";
-import { formatMoney, formatMonth } from "@/lib/format";
+import { currentMonth, formatMoney, formatMonth } from "@/lib/format";
 
 /** select 옵션(로컬 타입). */
 type Option = { value: string; label: string };
@@ -125,7 +127,23 @@ export default function BudgetsPage() {
   const canManage =
     activeMembership?.role === "owner" || activeMembership?.role === "admin";
 
-  const budgetsQuery = useBudgets();
+  const thisMonth = currentMonth();
+  // 보고 있는 달. 홈과 달리 URL에 싣지 않는다 — 예산 화면으로 오는 딥링크가 없고,
+  // 하단 탭으로 오갈 때 이전 선택이 남아 있으면 "왜 지난달이 보이지" 가 된다.
+  const [month, setMonth] = useState(thisMonth);
+  const isCurrentMonth = month === thisMonth;
+  // 과거월 예산은 **읽기 전용**이다. 예산액을 지금 바꾸면 그 달 달성률이 소급해서
+  // 달라지는데, 그건 기록이 아니라 조작이다(ADR-0026).
+  const canEdit = canManage && isCurrentMonth;
+
+  const budgetsQuery = useBudgets(month);
+  // 이전 달 실지출 — 현재월 수정 다이얼로그의 보조 문구에만 쓴다(자동 입력은 하지 않음).
+  const prevBudgetsQuery = useBudgets(addMonths(month, -1));
+  const monthsQuery = useAnalyticsMonths();
+  const availableMonths = useMemo(
+    () => monthsQuery.data?.items.map((i) => i.month),
+    [monthsQuery.data],
+  );
   const membersQuery = useHouseholdMembers();
   const categoriesQuery = useCategoryList();
   const cardsQuery = useCardList();
@@ -263,30 +281,46 @@ export default function BudgetsPage() {
   }
 
   const items = budgetsQuery.data?.items ?? [];
-  const month = budgetsQuery.data?.month;
+
+  // 수정 중인 예산의 **직전 달** 실지출. 같은 예산 id가 그 달에도 있었을 때만 나온다
+  // (그 달에 없던 예산이면 비교 대상이 없으므로 문구를 숨긴다).
+  const prevMonthSpent =
+    editing != null
+      ? (prevBudgetsQuery.data?.items.find((b) => b.id === editing.id)?.spent ??
+        null)
+      : null;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      {/* 페이지 헤더 + 주 CTA(상단 우측) ----------------------------------- */}
+      {/* 페이지 헤더 + 월 스위처 + 주 CTA(상단 우측) ----------------------- */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="sr-only">예산</h1>
           <p className="text-muted-foreground text-sm">
-            이번 달 얼마나 썼는지 한눈에 확인해요
+            {isCurrentMonth
+              ? "이번 달 얼마나 썼는지 한눈에 확인해요"
+              : "지난 달 기록이에요"}
           </p>
         </div>
-        {canManage && items.length > 0 ? (
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            <Plus />
-            예산 만들기
-          </Button>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1">
+          <MonthSwitcher
+            month={month}
+            months={availableMonths}
+            onChange={setMonth}
+          />
+          {canEdit && items.length > 0 ? (
+            <Button type="button" onClick={() => setCreateOpen(true)}>
+              <Plus />
+              예산 만들기
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* 목록 ------------------------------------------------------------- */}
       <section className="flex flex-col gap-3">
         <h2 className="text-muted-foreground text-[13px] font-semibold">
-          이번 달 예산{month ? ` · ${formatMonth(month)}` : ""}
+          {isCurrentMonth ? "이번 달 예산" : `${formatMonth(month)} 예산`}
         </h2>
 
         {budgetsQuery.isLoading ? (
@@ -320,9 +354,13 @@ export default function BudgetsPage() {
                 아직 예산이 없어요
               </p>
               <p className="text-muted-foreground text-sm">
-                예산을 만들어 두면 넘치기 전에 미리 알 수 있어요
+                {isCurrentMonth
+                  ? "예산을 만들어 두면 넘치기 전에 미리 알 수 있어요"
+                  : "그 달에는 예산이 없었어요"}
               </p>
-              {canManage ? (
+              {/* 과거월에서는 CTA도 권한 안내도 띄우지 않는다 — 그 달에 예산이
+                  없었다는 사실만 남기면 되고, 지금 만들 수 있는 것은 이번 달 예산이다. */}
+              {canEdit ? (
                 <Button
                   type="button"
                   size="lg"
@@ -331,11 +369,11 @@ export default function BudgetsPage() {
                 >
                   예산 만들기
                 </Button>
-              ) : (
+              ) : !canManage && isCurrentMonth ? (
                 <p className="text-muted-foreground text-[13px]">
                   예산은 가족의 소유자나 관리자가 만들 수 있어요
                 </p>
-              )}
+              ) : null}
             </CardContent>
           </Card>
         ) : (
@@ -356,7 +394,7 @@ export default function BudgetsPage() {
                 />
                 <div className="flex items-center justify-between gap-2">
                   <BudgetStatusLine budget={budget} />
-                  {canManage ? (
+                  {canEdit ? (
                     <span className="flex shrink-0 items-center gap-1">
                       <Button
                         type="button"
@@ -560,6 +598,15 @@ export default function BudgetsPage() {
                 value={editAmount}
                 onChange={(e) => setEditAmount(e.target.value)}
               />
+              {/* 지난달 실지출을 근거로 보여준다. 값을 자동으로 채우지는 않는다 —
+                  "지난달만큼 쓰겠다"가 사용자의 의도라는 근거가 없다. */}
+              {prevMonthSpent != null ? (
+                <p className="text-muted-foreground text-[13px]">
+                  {formatMonth(addMonths(month, -1))} 실지출은{" "}
+                  {formatMoney(prevMonthSpent, editing?.currency ?? "KRW")}
+                  이었어요
+                </p>
+              ) : null}
             </div>
             {editError ? (
               <p className="text-destructive text-sm" role="alert">

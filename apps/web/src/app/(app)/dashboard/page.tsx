@@ -20,7 +20,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import {
   useMutation,
@@ -66,6 +67,7 @@ import {
   DeclineBanner,
   ListRow,
   Money,
+  MonthSwitcher,
   StatusBadge,
   UsageBar,
   type BarListItem,
@@ -83,7 +85,9 @@ import {
 import { categoryIcon } from "@/lib/category-icon";
 import { useHousehold } from "@/lib/household-context";
 import { memberColorClass } from "@/lib/member-color";
+import { addMonths, isMonthKey } from "@/lib/month";
 import {
+  useAnalyticsMonths,
   useBudgets,
   useCardList,
   useCards,
@@ -91,6 +95,7 @@ import {
   useCategoryList,
   useHouseholdMembers,
   useMembers,
+  useMerchants,
   useMonthly,
   useTransactions,
 } from "@/lib/queries";
@@ -127,10 +132,33 @@ const SCOPE_LABEL: Record<BudgetScopeType, string> = {
 // --- 페이지 -----------------------------------------------------------------
 
 export default function DashboardPage() {
-  const month = currentMonth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const thisMonth = currentMonth();
+  // 보고 있는 달은 URL(`?month=YYYY-MM`)이 소유한다 — 새로고침·공유·알림 딥링크가
+  // 같은 화면을 재현해야 하고, 뒤로가기가 달 이동을 되돌리는 것이 자연스럽다.
+  // 무효한 값(수동 편집·오래된 링크)은 조용히 이번 달로 되돌린다.
+  const monthParam = searchParams.get("month");
+  const month = monthParam && isMonthKey(monthParam) ? monthParam : thisMonth;
+  const isCurrentMonth = month === thisMonth;
+
   const { householdId } = useHousehold();
   const { authedFetch } = useAuth();
   const [parseFailedOpen, setParseFailedOpen] = useState(false);
+
+  // 이번 달이면 쿼리스트링을 없애 링크를 짧게 유지한다(기본 상태 = 파라미터 없음).
+  // replace: 달을 5번 넘겼다고 뒤로가기를 5번 눌러야 하면 안 된다.
+  const changeMonth = useCallback(
+    (next: string) => {
+      router.replace(
+        next === thisMonth
+          ? "/dashboard"
+          : `/dashboard?month=${encodeURIComponent(next)}`,
+        { scroll: false },
+      );
+    },
+    [router, thisMonth],
+  );
 
   // 실시간 카드문자가 파싱돼 들어오면 화면에 자동 반영되도록, 문자 유입에 민감한
   // 쿼리는 폴링한다(포커스 상태에서만 — TanStack 기본이 백그라운드 폴링 정지).
@@ -163,6 +191,13 @@ export default function DashboardPage() {
   const cardsQuery = useCards(month);
   const categoriesQuery = useCategories(month);
   const budgetsQuery = useBudgets(month);
+  const merchantsQuery = useMerchants(month);
+  // 거래가 있는 달 목록 — 스위처가 빈 달을 건너뛰는 데 쓴다.
+  const monthsQuery = useAnalyticsMonths();
+  const availableMonths = useMemo(
+    () => monthsQuery.data?.items.map((i) => i.month),
+    [monthsQuery.data],
+  );
 
   // 최근 거래 10건(기간 무관, 최신순).
   const recentQuery = useTransactions({ limit: 10 }, poll);
@@ -235,6 +270,21 @@ export default function DashboardPage() {
     [categoriesQuery.data],
   );
 
+  // 가맹점 상위 — 서버가 이미 net 내림차순 top 20을 주므로 앞에서 잘라 쓴다.
+  const merchantItems = useMemo<BarListItem[]>(
+    () =>
+      (merchantsQuery.data?.items ?? [])
+        .slice(0, BREAKDOWN_TOP_N)
+        .map((m) => ({
+          key: m.merchant,
+          label: m.merchant,
+          value: m.net,
+          ratio: m.ratio,
+          meta: `${m.count}건`,
+        })),
+    [merchantsQuery.data],
+  );
+
   // 상위 사용률 예산(사용률 내림차순).
   const topBudgets = useMemo(
     () =>
@@ -293,20 +343,34 @@ export default function DashboardPage() {
   const showReviewCard = showReviewRow || showParseFailedRow;
 
   const monthly = monthlyQuery.data;
+  // 비교 대상 호칭: 이번 달이면 '지난달', 과거월이면 그 달의 직전 달을 명시한다.
+  const prevLabel = isCurrentMonth
+    ? "지난달"
+    : formatMonth(addMonths(month, -1));
   const delta = monthly
-    ? deltaSentence(monthly.deltaNet, monthly.deltaRate, monthly.previousNet)
+    ? deltaSentence(
+        monthly.deltaNet,
+        monthly.deltaRate,
+        monthly.previousNet,
+        prevLabel,
+      )
     : null;
 
   // --- 렌더 -----------------------------------------------------------------
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      {/* 제목은 하단 탭('홈')과 중복이라 시각적으로 숨긴다(스크린리더용 h1만 유지). */}
-      <div className="flex items-baseline justify-end">
+      {/* 제목은 하단 탭('홈')과 중복이라 시각적으로 숨긴다(스크린리더용 h1만 유지).
+          월 라벨이 있던 자리가 그대로 스위처가 된다 — 누적 지출의 대부분이 지난달에
+          있는데도 이 화면이 이번 달만 보여주고 있었다(ADR-0026). */}
+      <div className="flex items-center justify-end">
         <h1 className="sr-only">홈</h1>
-        <span className="text-muted-foreground text-[13px]">
-          {formatMonth(month)}
-        </span>
+        <MonthSwitcher
+          month={month}
+          months={availableMonths}
+          onChange={changeMonth}
+          className="-mr-2"
+        />
       </div>
 
       {/* 결제 실패 배너 — 미해결 반복 거절이 있을 때만 나타난다(없으면 렌더 안 함).
@@ -325,7 +389,7 @@ export default function DashboardPage() {
             <>
               <div className="flex flex-col gap-1">
                 <span className="text-muted-foreground text-sm">
-                  이번 달 소비
+                  {isCurrentMonth ? "이번 달 소비" : `${formatMonth(month)} 소비`}
                 </span>
                 <span className="text-3xl font-bold tracking-tight tabular-nums">
                   {formatWon(monthly.totalNet)}
@@ -335,7 +399,7 @@ export default function DashboardPage() {
                 </p>
                 {monthly.previousNet !== 0 ? (
                   <p className="text-muted-foreground text-xs">
-                    지난달에는 {formatWon(monthly.previousNet)} 썼어요
+                    {prevLabel}에는 {formatWon(monthly.previousNet)} 썼어요
                   </p>
                 ) : null}
               </div>
@@ -459,8 +523,14 @@ export default function DashboardPage() {
       {/* 예산 요약 */}
       <Card>
         <CardHeader>
-          <CardTitle>이번 달 예산</CardTitle>
-          <CardDescription>사용률이 높은 예산부터 보여드려요</CardDescription>
+          <CardTitle>
+            {isCurrentMonth ? "이번 달 예산" : `${formatMonth(month)} 예산`}
+          </CardTitle>
+          <CardDescription>
+            {isCurrentMonth
+              ? "사용률이 높은 예산부터 보여드려요"
+              : "그 달의 예산 달성률이에요"}
+          </CardDescription>
           <CardAction>
             <SeeAllLink href="/budgets" />
           </CardAction>
@@ -520,7 +590,10 @@ export default function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>어디에 많이 썼나요?</CardTitle>
-          <CardDescription>이번 달 카테고리별 지출이에요</CardDescription>
+          <CardDescription>
+            {isCurrentMonth ? "이번 달" : formatMonth(month)} 카테고리별
+            지출이에요
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {categoriesQuery.isLoading || categoriesQuery.isError ? (
@@ -531,6 +604,34 @@ export default function DashboardPage() {
           ) : (
             <BarList
               items={categoryItems}
+              formatValue={formatWon}
+              emptyLabel="아직 지출 내역이 없어요"
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 가맹점별 지출 — 서버 `analytics/merchants`(타 구성원 summary_only는 '(비공개)'로
+          마스킹된 상태)를 그대로 표시한다. 이 집계는 이미 있었지만 화면 소비자가
+          없었다(ADR-0026). '이번 달 어디서 많이 썼나'는 카테고리보다 구체적이라
+          회고에서 먼저 눈에 들어온다. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>자주 간 곳은 어디인가요?</CardTitle>
+          <CardDescription>
+            {isCurrentMonth ? "이번 달" : formatMonth(month)} 가맹점별 지출
+            상위예요
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {merchantsQuery.isLoading || merchantsQuery.isError ? (
+            <StateNote
+              loading={merchantsQuery.isLoading}
+              error={merchantsQuery.error}
+            />
+          ) : (
+            <BarList
+              items={merchantItems}
               formatValue={formatWon}
               emptyLabel="아직 지출 내역이 없어요"
             />
@@ -949,28 +1050,37 @@ function deltaSentence(
   deltaNet: number,
   deltaRate: number | null,
   previousNet: number,
+  /**
+   * 비교 대상 달의 호칭. 이번 달을 볼 때는 '지난달'이지만, 과거월을 볼 때는
+   * '2026년 6월'처럼 실제 달을 쓴다 — 7월 화면에서 '지난달보다'는 6월이 아니라
+   * 지금 기준의 지난달로 읽힌다.
+   */
+  prevLabel: string,
 ): { text: string; className: string } {
   if (previousNet === 0) {
     return {
-      text: "지난달 기록이 없어요. 이번 달부터 차곡차곡 모아봐요",
+      text:
+        prevLabel === "지난달"
+          ? "지난달 기록이 없어요. 이번 달부터 차곡차곡 모아봐요"
+          : `${prevLabel} 기록이 없어요`,
       className: "text-muted-foreground",
     };
   }
   if (deltaNet === 0) {
     return {
-      text: "지난달과 똑같이 썼어요",
+      text: `${prevLabel}과 똑같이 썼어요`,
       className: "text-muted-foreground",
     };
   }
   const rate = deltaRate != null ? ` (${percent(Math.abs(deltaRate))})` : "";
   if (deltaNet > 0) {
     return {
-      text: `지난달보다 ${formatWon(deltaNet)} 더 썼어요${rate}`,
+      text: `${prevLabel}보다 ${formatWon(deltaNet)} 더 썼어요${rate}`,
       className: "text-destructive",
     };
   }
   return {
-    text: `지난달보다 ${formatWon(Math.abs(deltaNet))} 덜 썼어요${rate}`,
+    text: `${prevLabel}보다 ${formatWon(Math.abs(deltaNet))} 덜 썼어요${rate}`,
     className: "text-accent-foreground",
   };
 }
