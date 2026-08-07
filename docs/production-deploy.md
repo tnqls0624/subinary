@@ -198,6 +198,26 @@ docker compose --env-file .env --env-file .env.production \
 자동 실행한다. password를 repository와 같은 위치에만 두지 말고 별도 password manager/복구 매체에
 보관한다. `RESTIC_REPOSITORY` 또는 password가 없거나 잘못되면 복제를 성공으로 표시하지 않는다.
 
+#### ⚠️ 백업에 **들어 있지 않은 것** — 시크릿은 따로 보관해야 한다
+
+스냅샷은 `pg_dump`(PostgreSQL)와 MinIO 객체만 담는다(`infrastructure/backup/backup-once.sh`).
+`.env`/`.env.production`은 **의도적으로 제외**한다 — 시크릿을 데이터 백업에 넣으면 백업 한 벌 유출이
+곧 전면 유출이 된다. 대신 아래 값들을 password manager나 별도 복구 매체에 보관해야 한다. **이것들이
+없으면 DB를 완벽히 복원해도 서비스가 되살아나지 않는다.**
+
+| 값 | 없으면 벌어지는 일 |
+| --- | --- |
+| `DEVICE_SECRET_ENC_KEY` | 장치 secret이 AES-256-GCM으로 저장돼 있어 **복호화 불가 → 카드문자 수집이 영구 중단**된다. 기기를 전부 재등록하고 MacroDroid/단축어 설정을 다시 해야 한다 |
+| `JWT_ACCESS_SECRET` | 전 사용자 강제 로그아웃(치명적이진 않으나 재로그인 필요) |
+| `POSTGRES_PASSWORD` / `DATABASE_URL` | 복원 대상 DB에 접속 불가 |
+| `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | MinIO 객체(카드문자 원문 이중보존) 복원 불가 |
+| `RESTIC_PASSWORD` | **오프사이트 스냅샷 자체를 열 수 없다** — 저장소와 같은 곳에 두면 백업이 무의미하다 |
+| `FCM_PRIVATE_KEY` | 푸시 알림 중단(재발급 가능) |
+| `GEMINI_API_KEY` | AI 분류·인사이트 중단(재발급 가능) |
+
+복구 리허설은 `pnpm ops:backup:verify`(로컬)와 `pnpm ops:backup:replica:verify`(원격)가 격리된 임시
+PostgreSQL에 실제로 복원해 확인한다. **시크릿 보관 여부는 그 검증이 잡아주지 않는다** — 사람이 확인해야 한다.
+
 ### 6.2 일회성 AI Training Runner
 
 Training Runner는 기본 운영 스택에 상주하지 않는다. 준비도 gate를 통과한 승인 dataset으로 API에서
