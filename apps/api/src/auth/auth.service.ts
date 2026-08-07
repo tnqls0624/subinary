@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -36,12 +37,44 @@ import { TokenService } from './token.service';
  * 못 덮어 '탈취'로 오판→전 세션 몰살(모바일·웹 동반 로그아웃)로 이어졌다.
  *
  * 따라서 이 창 안의 재제시는 탈취가 아니라 '응답 유실 후 재시도'로 보고, 401로 끊지
- * 않고 새 세션을 발급해 조용히 복구한다(refresh 참조). 창을 넘긴 재제시만 실제 탈취로
- * 간주해 전 세션을 무효화한다. 가족 2인 + 토큰이 Keychain(whenUnlockedThisDeviceOnly)/
- * HttpOnly 쿠키에 있어 1회용 토큰 추출 난도가 매우 높은 위협 모델이라, 24h 복구 창의
- * 재사용 노출은 자동 로그아웃 제거의 이득에 비해 수용 가능한 교환이다.
+ * 않고 새 세션을 발급해 조용히 복구한다(refresh 참조). 가족 2인 + 토큰이
+ * Keychain(whenUnlockedThisDeviceOnly)/HttpOnly 쿠키에 있어 1회용 토큰 추출 난도가 매우
+ * 높은 위협 모델이라, 24h 복구 창의 재사용 노출은 자동 로그아웃 제거의 이득에 비해
+ * 수용 가능한 교환이다.
+ *
+ * 창을 넘긴 재제시도 **그것만으로는 탈취가 아니다**(REUSE_BURST_* 주석 참조).
  */
 const REFRESH_REUSE_GRACE_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
+ * 재사용 '폭주' 판정 창(ms)과 임계값 — 유예 창 밖 재제시 중 진짜 탈취만 골라낸다.
+ *
+ * 왜 창 밖 단건으로는 전 세션을 죽이지 않는가:
+ * 운영 DB 실측(2026-08-07)에서 user_sessions 465행 중 460이 revoked였고, 같은 초에
+ * 2~4개 세션이 한꺼번에 폐기된 사건이 07-21~08-07에 12회 있었다. 동시 폐기는
+ * revokeAllSessions 흔적이고 호출처는 재사용 탐지와 비밀번호 변경 둘뿐인데 사용자는
+ * 비밀번호를 12번 바꾸지 않았다 → 전부 재사용 탐지 오탐이다. 실제 모양은 이렇다:
+ * 앱을 하루 넘게 열지 않으면 회전 응답을 못 받고 남은 stale 토큰이 유예 24h를 넘기고,
+ * 복귀 첫 refresh가 '탈취'로 오판돼 **웹까지 포함한 모든 기기**가 로그아웃됐다.
+ * 위 위협 모델에서 전 세션 몰살의 대가(가족 전원 재로그인)가 방어 이득보다 크다.
+ * → 회전으로 죽은 토큰의 지연 재제시는 그 요청만 401로 거절한다.
+ *
+ * 그럼 무엇을 탈취로 보는가 — **정상 클라이언트는 refresh 토큰을 한 개만 들고 있다**는
+ * 사실을 쓴다(웹은 HttpOnly 쿠키 1개 + 탭 간 Web Locks 직렬화, 모바일은 보안 저장소
+ * 1개이며 refresh가 401이면 세션을 정리하고 재로그인한다).
+ *  - 같은 죽은 토큰을 여러 탭·병렬 요청이 동시에 제시 → 세션 1개로 센다. 오탐의
+ *    주범이던 이 패턴은 임계값에 절대 닿지 않는다.
+ *  - 서로 다른 죽은 토큰 3개가 15분 안에 온다 → 클라이언트 하나로는 만들 수 없는
+ *    모양이다. 그 사용자의 과거 토큰 '뭉치'를 쥔 쪽(DB/백업 유출, 저장소 덤프)만
+ *    가능하므로 이때는 계정 침해로 보고 전 세션을 무효화한다. 기기 2대(안드로이드+웹)
+ *    위협 모델에서는 둘 다 동시에 stale이어도 2라서 오탐이 나지 않는다.
+ *
+ * 카운터는 프로세스 메모리에 둔다(운영 api 인스턴스 1개, prod compose에 replicas 없음).
+ * 재시작하면 잊지만 그 방향의 오차는 '탐지를 놓친다'뿐이고 없는 탈취를 만들어내지는
+ * 않는다 — 자동 로그아웃 제거가 목적이므로 실패는 이 방향이어야 한다.
+ */
+const REUSE_BURST_WINDOW_MS = 15 * 60 * 1000; // 15m
+const REUSE_BURST_THRESHOLD = 3;
 
 /** Freshly minted access tokens + the raw refresh token for the cookie. */
 interface IssuedSession {
@@ -63,12 +96,21 @@ export interface AuthSessionResult {
  * - Email is normalised to lowercase before any lookup/insert.
  * - Login/refresh/change-password failures return a generic 401 that never
  *   reveals whether an account exists.
- * - Refresh tokens rotate on every use; replay of a rotated (revoked) token
- *   triggers revocation of every session for that user.
+ * - Refresh tokens rotate on every use; replay of a rotated (revoked) token is
+ *   refused (401) and only a burst of distinct dead tokens — which a single
+ *   legitimate client cannot produce — revokes every session for that user.
  * - Passwords, hashes and tokens are never written to logs or error messages.
  */
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  /**
+   * 유예 창 밖 재사용 기록: userId → (sessionId → 마지막 목격 시각 ms).
+   * sessionId로 dedupe하므로 같은 토큰을 동시에 여러 번 제시해도 1로 센다.
+   */
+  private readonly reuseBurst = new Map<string, Map<string, number>>();
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly tokenService: TokenService,
@@ -181,26 +223,42 @@ export class AuthService {
     }
 
     // 재사용 탐지: 이미 revoke된 세션의 토큰이 다시 제시된 경우.
-    // - 유예 창(REFRESH_REUSE_GRACE_MS) 밖: 실제 탈취로 간주 → 전 세션 무효화 + 401.
-    // - 유예 창 안: 다중 탭 동시 회전 / 모바일 회전 응답 유실(백그라운드 suspend·앱
-    //   종료로 새 토큰 저장 실패) 후 재시도로 보고, 401로 끊지 않고 아래 정상 회전
-    //   경로로 흘려보내 새 세션을 발급한다(자동 로그아웃 제거). 재-revoke는 멱등.
+    // - 유예 창(REFRESH_REUSE_GRACE_MS) 안: 다중 탭 동시 회전 / 모바일 회전 응답
+    //   유실(백그라운드 suspend·앱 종료로 새 토큰 저장 실패) 후 재시도로 보고, 401로
+    //   끊지 않고 아래 정상 회전 경로로 흘려보내 새 세션을 발급한다. 재-revoke는 멱등.
+    // - 유예 창 밖: 이 요청만 401. 전 세션 무효화는 아래 두 경우로 한정한다.
     if (session.revokedAt) {
+      const reason = session.revokedReason;
       // 유예는 **회전으로 죽은 세션에만** 적용한다. 로그아웃·비밀번호 변경으로 죽은
       // 세션까지 살려주면 그 조치가 24시간 동안 무효가 된다("모든 기기에서
       // 로그아웃"이 거짓이 됨). `revokedReason`이 NULL인 행은 이 컬럼 도입 이전
       // 세션이므로 기존 동작(유예 적용)을 유지한다 — 마이그레이션만으로 살아 있는
       // 세션을 끊지 않기 위해서다.
-      const graceEligible =
-        session.revokedReason === 'rotated' || session.revokedReason === null;
+      const graceEligible = reason === 'rotated' || reason === null;
       const withinGrace =
         Date.now() - session.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+
       if (!graceEligible || !withinGrace) {
-        // 창 밖의 재제시만 실제 탈취로 간주한다. 명시적으로 끊긴 세션의 재제시는
-        // 탈취 신호가 아니므로 전 세션을 몰살하지 않고 이 요청만 거절한다.
-        if (graceEligible) {
+        if (reason === 'rotated') {
+          // 창 밖의 회전 토큰 재제시 = 앱이 하루 넘게 백그라운드에 있다 복귀한 정상
+          // 시나리오다(REUSE_BURST_* 주석의 실측 12건이 전부 이 패턴). 단건으로는
+          // 전 세션을 죽이지 않고 이 요청만 거절한다. 서로 다른 죽은 토큰이 짧은
+          // 창 안에 쌓일 때만 계정 침해로 판단한다.
+          if (this.recordReuse(session.userId, session.id)) {
+            this.logger.warn(
+              `refresh 재사용 폭주 감지 — 전 세션 무효화 (userId=${session.userId}, ` +
+                `distinct=${REUSE_BURST_THRESHOLD}+/${REUSE_BURST_WINDOW_MS / 60_000}m)`,
+            );
+            await this.revokeAllSessions(session.userId, 'reuse_detected');
+          }
+        } else if (reason === null) {
+          // 0045 이전 행은 회전인지 로그아웃인지 알 수 없다. 판단 근거가 없는 행에
+          // 새 완화 정책을 적용하지 않고 기존 동작(창 밖 = 전 세션 무효화)을 남긴다.
+          // 회전 시마다 reason이 채워지므로 이 행들은 자연 소멸한다.
           await this.revokeAllSessions(session.userId, 'reuse_detected');
         }
+        // logout / password_change / reuse_detected: 이미 명시적으로 끊긴 세션이다.
+        // 탈취 신호가 아니므로 전 세션을 몰살하지 않고 이 요청만 거절한다.
         throw new UnauthorizedException('invalid session');
       }
       // 유예 창 안 → 복구 경로로 폴백(throw 하지 않음).
@@ -371,6 +429,35 @@ export class AuthService {
       expiresInSec,
     };
     return { tokens, refresh: { raw, expiresAt } };
+  }
+
+  /**
+   * 유예 창 밖 재사용을 기록하고, 그 사용자가 폭주 임계값에 닿았는지 알려준다.
+   *
+   * 세션 단위로 dedupe한다 — 다중 탭이 같은 죽은 토큰을 동시에 밀어 넣어도 1건이다.
+   * 임계값에 닿으면 엔트리를 비워, 이어지는 재제시가 (이미 전 세션이 죽은 뒤에도)
+   * 반복해서 무효화를 재발화하지 않게 한다.
+   *
+   * @returns 전 세션 무효화가 필요하면 true
+   */
+  private recordReuse(userId: string, sessionId: string): boolean {
+    const now = Date.now();
+    // 재사용 거절은 드문 경로라 전체 스윕 비용이 무시할 만하다. 창을 넘긴 항목을
+    // 여기서 걷어내 맵이 무한히 커지지 않게 한다(만료 전용 타이머를 두지 않는 이유).
+    for (const [uid, seen] of this.reuseBurst) {
+      for (const [sid, at] of seen) {
+        if (now - at > REUSE_BURST_WINDOW_MS) seen.delete(sid);
+      }
+      if (seen.size === 0) this.reuseBurst.delete(uid);
+    }
+
+    const seen = this.reuseBurst.get(userId) ?? new Map<string, number>();
+    seen.set(sessionId, now);
+    this.reuseBurst.set(userId, seen);
+
+    if (seen.size < REUSE_BURST_THRESHOLD) return false;
+    this.reuseBurst.delete(userId);
+    return true;
   }
 
   /**
