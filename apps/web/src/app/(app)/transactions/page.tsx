@@ -13,7 +13,7 @@
  * ------------------------------------------------------------------------- */
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useMutation,
   useQuery,
@@ -26,6 +26,7 @@ import type {
   TransactionUpdateRequest,
 } from "@family/contracts";
 import { DEFAULT_TIMEZONE } from "@family/shared";
+import { Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +69,7 @@ import {
   formatMonth,
   currentMonth,
 } from "@/lib/format";
-import { monthRange, recentMonths } from "@/lib/month";
+import { isMonthKey, monthRange, recentMonths } from "@/lib/month";
 import { memberColorClass } from "@/lib/member-color";
 import { useHousehold } from "@/lib/household-context";
 import {
@@ -102,6 +103,12 @@ type DayGroup = {
 /* -------------------------------------------------------------------------- */
 
 const PAGE_SIZE = 20;
+
+/** 검색 입력 → 쿼리 반영 지연(ms). 타이핑마다 요청하면 한 단어에 대여섯 번 나간다. */
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** 검색어 최대 길이(서버 절삭 기준과 동일). */
+const SEARCH_MAX_LENGTH = 100;
 
 /** 전체(필터 없음) sentinel — SelectItem은 빈 문자열 value 금지. */
 const ALL = "all";
@@ -231,12 +238,28 @@ export default function TransactionsPage() {
   const queryClient = useQueryClient();
 
   // --- 필터 상태 ---
-  const [month, setMonth] = useState<string>(currentMonth());
-  const [memberId, setMemberId] = useState("");
-  const [cardId, setCardId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [type, setType] = useState("");
-  const [status, setStatus] = useState("");
+  // 초기값을 URL에서 읽는다(mount 1회). 이전에는 로컬 state만 써서 알림이 만든
+  // `?status=pending_review` 딥링크(packages/shared notificationDeepLink)가 그냥
+  // 버려졌다 — 탭하면 필터 없는 전체 목록이 열렸다. 변경 시에는 아래 effect가 URL을
+  // 되써서 새로고침·공유·뒤로가기가 같은 화면을 재현한다.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const initial = (key: string): string => searchParams.get(key) ?? "";
+
+  const [month, setMonth] = useState<string>(() => {
+    const m = searchParams.get("month");
+    return m && isMonthKey(m) ? m : currentMonth();
+  });
+  const [memberId, setMemberId] = useState<string>(() => initial("memberId"));
+  const [cardId, setCardId] = useState<string>(() => initial("cardId"));
+  const [categoryId, setCategoryId] = useState<string>(() =>
+    initial("categoryId"),
+  );
+  const [type, setType] = useState<string>(() => initial("type"));
+  const [status, setStatus] = useState<string>(() => initial("status"));
+  /** 검색 입력값(즉시 반영) — 실제 쿼리는 아래 디바운스된 `q`를 쓴다. */
+  const [qInput, setQInput] = useState<string>(() => initial("q"));
+  const [q, setQ] = useState<string>(qInput);
   /** 인라인 카테고리 변경 시 merchant_category_rules로 저장할지(applyRule). */
   const [applyRule, setApplyRule] = useState(false);
 
@@ -255,6 +278,8 @@ export default function TransactionsPage() {
     setCategoryId("");
     setType("");
     setStatus("");
+    setQInput("");
+    setQ("");
   };
 
   const hasActiveFilter =
@@ -263,7 +288,32 @@ export default function TransactionsPage() {
     categoryId !== "" ||
     type !== "" ||
     status !== "" ||
+    q !== "" ||
     month !== currentMonth();
+
+  // 타이핑마다 요청하면 한 단어에 대여섯 번 쿼리가 나간다 → 300ms 디바운스.
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(qInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [qInput]);
+
+  // 필터 상태 → URL. 기본값은 파라미터에서 빼 링크를 짧게 유지한다.
+  // `txn`(알림 딥링크)은 아래 상세 열기 effect가 소유하므로 여기서 건드리지 않는다.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (month !== currentMonth()) params.set("month", month);
+    if (memberId) params.set("memberId", memberId);
+    if (cardId) params.set("cardId", cardId);
+    if (categoryId) params.set("categoryId", categoryId);
+    if (type) params.set("type", type);
+    if (status) params.set("status", status);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    // replace: 필터를 다섯 번 바꿨다고 뒤로가기를 다섯 번 눌러야 하면 안 된다.
+    router.replace(qs ? `/transactions?${qs}` : "/transactions", {
+      scroll: false,
+    });
+  }, [month, memberId, cardId, categoryId, type, status, q, router]);
 
   // --- 참조 목록(필터/표시용) ---
   const membersQuery = useHouseholdMembers();
@@ -333,11 +383,12 @@ export default function TransactionsPage() {
       categoryId: categoryId || undefined,
       type: type || undefined,
       status: status || undefined,
+      q: q || undefined,
       from,
       to,
       limit: PAGE_SIZE,
     }),
-    [memberId, cardId, categoryId, type, status, from, to],
+    [memberId, cardId, categoryId, type, status, q, from, to],
   );
   const listQuery = useInfiniteTransactions(filters);
 
@@ -411,13 +462,20 @@ export default function TransactionsPage() {
   // (다른 월/필터) 단건 조회로 폴백한다. 볼 수 없는 거래(private/masked)는
   // 403/404가 나므로 조용히 리스트로 남는다. 상세를 연 뒤 URL에서 ?txn을 제거해,
   // 같은 알림을 다시 탭하면(같은 경로 push) effect가 재실행되어 다시 열리게 한다.
-  const searchParams = useSearchParams();
   useEffect(() => {
     const txnParam = searchParams.get("txn");
     if (!txnParam) return;
     setDetailId(txnParam);
     if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", window.location.pathname);
+      // `txn`만 지운다. 예전엔 pathname으로 통째로 replace해서, 같은 링크에 실려 온
+      // 다른 필터(`?status=`)까지 함께 날아갔다.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("txn");
+      window.history.replaceState(
+        null,
+        "",
+        `${url.pathname}${url.search}`,
+      );
     }
   }, [searchParams]);
 
@@ -596,6 +654,32 @@ export default function TransactionsPage() {
         <Button size="sm" onClick={() => setAddOpen(true)}>
           거래 추가
         </Button>
+      </div>
+
+      {/* 검색 — 가맹점 이름과 메모를 부분 일치로 찾는다. 타인의 summary_only 거래는
+          서버가 검색 대상에서 제외한다(결과 존재만으로 프라이버시가 새므로). */}
+      <div className="relative">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+        <Input
+          type="search"
+          inputMode="search"
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+          maxLength={SEARCH_MAX_LENGTH}
+          placeholder="가맹점이나 메모로 찾기"
+          aria-label="거래 검색"
+          className="pl-9"
+        />
+        {qInput ? (
+          <button
+            type="button"
+            onClick={() => setQInput("")}
+            aria-label="검색어 지우기"
+            className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
       </div>
 
       {/* 필터 칩 행 — Select 로직/sentinel 매핑은 그대로, 트리거만 칩 스타일 */}

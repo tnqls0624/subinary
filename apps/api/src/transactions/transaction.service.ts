@@ -30,6 +30,7 @@ import {
   desc,
   eq,
   gte,
+  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -96,6 +97,12 @@ type Visibility = 'private' | 'household' | 'summary_only';
 /** Roles allowed to mutate any household member's transaction. */
 const PRIVILEGED_ROLES: readonly HouseholdRole[] = ['owner', 'admin'];
 
+/**
+ * 검색어 최대 길이. 초과분은 잘라낸다(거절이 아니라 절삭 — 사용자가 붙여넣기로 긴
+ * 문자열을 넣어도 화면이 400으로 깨지지 않게 한다). 가맹점명이 200자를 넘지 않는다.
+ */
+const SEARCH_MAX_LENGTH = 100;
+
 /* -------------------------------------------------------------------------- */
 /* Query shapes                                                               */
 /* -------------------------------------------------------------------------- */
@@ -112,6 +119,8 @@ export interface TransactionListQuery {
   to?: string;
   minAmount?: string;
   maxAmount?: string;
+  /** 가맹점·메모 부분 일치 검색어. 공백만이면 무시한다. */
+  q?: string;
   limit?: string;
   cursor?: string;
 }
@@ -227,6 +236,10 @@ export class TransactionService {
     }
     if (maxAmount !== undefined) {
       conditions.push(lte(schema.cardTransactions.amount, maxAmount));
+    }
+    const search = this.parseSearch(query.q);
+    if (search) {
+      conditions.push(this.searchScope(search, actor.memberId));
     }
     if (keyset) {
       const after = or(
@@ -1161,6 +1174,41 @@ export class TransactionService {
     );
     // Both operands are defined, so `or` always yields a SQL fragment.
     return scope as SQL;
+  }
+
+  /** 검색어 정규화: 트림 후 빈 문자열이면 undefined(필터를 걸지 않는다). */
+  private parseSearch(raw: string | undefined): string | undefined {
+    const trimmed = raw?.trim();
+    return trimmed ? trimmed.slice(0, SEARCH_MAX_LENGTH) : undefined;
+  }
+
+  /**
+   * 가맹점·메모 부분 일치 검색 WHERE 조각.
+   *
+   * ⚠️ **마스킹 대상 행은 검색에서 아예 제외한다.** 타인의 `summary_only` 거래는
+   * 응답에서 가맹점·메모가 null로 가려지지만(`maskedFor`), 검색은 그것만으로 부족하다
+   * — `q=산부인과`로 한 건이 나오면 **결과의 존재 자체**가 "누가 거기 갔다"를 알려준다.
+   * 가려진 값으로는 사용자가 왜 매칭됐는지도 알 수 없어 화면도 이상해진다.
+   * 그래서 매칭 대상을 "본인 행 ∪ household 공개 행"으로 좁힌다.
+   *
+   * 대소문자 무시는 `ilike`, 사용자 입력의 와일드카드(`%` `_`)와 이스케이프(`\`)는
+   * 리터럴로 취급한다 — `%`를 그대로 넘기면 전체 매칭이 되어 검색이 아니라 목록이 된다.
+   *
+   * 인덱스 없이 순차 스캔이지만 규모가 수백 행이라 무의미하다. 수만 행이 되면
+   * `pg_trgm` GIN 인덱스를 붙인다(확장은 이미 설치돼 있다 — slack_messages가 쓴다).
+   */
+  private searchScope(term: string, actorMemberId: string): SQL {
+    const pattern = `%${term.replace(/([\\%_])/g, '\\$1')}%`;
+    const textMatch = or(
+      ilike(schema.cardTransactions.merchantRaw, pattern),
+      ilike(schema.cardTransactions.merchantNormalized, pattern),
+      ilike(schema.cardTransactions.memo, pattern),
+    ) as SQL;
+    const notMasked = or(
+      eq(schema.cardTransactions.memberId, actorMemberId),
+      ne(schema.cardTransactions.visibility, 'summary_only'),
+    ) as SQL;
+    return and(notMasked, textMatch) as SQL;
   }
 
   /** Loads a raw transaction row or throws 404. */

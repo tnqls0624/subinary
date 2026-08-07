@@ -209,6 +209,8 @@ export interface TransactionListParams {
   to?: string;
   minAmount?: number;
   maxAmount?: number;
+  /** 가맹점·메모 부분 일치 검색어. */
+  q?: string;
   limit?: number;
   cursor?: string;
 }

@@ -50,8 +50,12 @@ export class TransactionController {
 
   /**
    * GET /v1/transactions?householdId=&memberId=&cardId=&type=&status=&categoryId=
-   *   &from=&to=&minAmount=&maxAmount=&limit=&cursor= — list transactions the
+   *   &from=&to=&minAmount=&maxAmount=&q=&limit=&cursor= — list transactions the
    * caller may see (visibility scope applied), newest first.
+   *
+   * `q`는 가맹점(원문·정규화)과 메모의 부분 일치 검색어다. 타인의 `summary_only`
+   * 거래는 검색 대상에서 제외된다 — 가려진 값에 매칭시키면 결과의 존재만으로
+   * 프라이버시가 새기 때문(service `searchScope` 참고).
    */
   @Get()
   list(
@@ -66,6 +70,7 @@ export class TransactionController {
     @Query('to') to?: string,
     @Query('minAmount') minAmount?: string,
     @Query('maxAmount') maxAmount?: string,
+    @Query('q') q?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ): Promise<TransactionListResponse> {
@@ -80,6 +85,7 @@ export class TransactionController {
       to,
       minAmount,
       maxAmount,
+      q,
       limit,
       cursor,
     });
