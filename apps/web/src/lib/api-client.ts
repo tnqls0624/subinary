@@ -11,6 +11,7 @@
  * ------------------------------------------------------------------------- */
 import type {
   AcceptInvitationRequest,
+  ChangePasswordRequest,
   AuthResult,
   CardBreakdown,
   CardCreateRequest,
@@ -251,6 +252,16 @@ export const api = {
       }),
     me: (accessToken: AccessToken) =>
       apiFetch<MeResponse>("/v1/auth/me", { accessToken }),
+    /**
+     * 비밀번호 변경. 서버가 **모든 세션을 폐기**하고 refresh 쿠키를 지우므로,
+     * 호출부는 성공 후 로그아웃 처리를 해야 한다(다른 기기도 함께 로그아웃된다).
+     */
+    changePassword: (accessToken: AccessToken, body: ChangePasswordRequest) =>
+      apiFetch<{ success: true }>("/v1/auth/change-password", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
   },
 
   households: {

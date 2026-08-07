@@ -16,6 +16,7 @@ import {
   ChevronRight,
   CreditCard,
   Fingerprint,
+  KeyRound,
   Smartphone,
   Store,
   Tags,
@@ -85,6 +86,12 @@ const ITEMS: ReadonlyArray<MoreItem> = [
     icon: Bell,
     title: "알림 설정",
     description: "푸시 알림·최소 금액·무음 시간대를 조절해요",
+  },
+  {
+    href: "/more/password",
+    icon: KeyRound,
+    title: "비밀번호 변경",
+    description: "바꾸면 모든 기기에서 다시 로그인해야 해요",
   },
 ];
 
