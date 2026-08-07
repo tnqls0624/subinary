@@ -186,8 +186,21 @@ export class AuthService {
     //   종료로 새 토큰 저장 실패) 후 재시도로 보고, 401로 끊지 않고 아래 정상 회전
     //   경로로 흘려보내 새 세션을 발급한다(자동 로그아웃 제거). 재-revoke는 멱등.
     if (session.revokedAt) {
-      if (Date.now() - session.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
-        await this.revokeAllSessions(session.userId);
+      // 유예는 **회전으로 죽은 세션에만** 적용한다. 로그아웃·비밀번호 변경으로 죽은
+      // 세션까지 살려주면 그 조치가 24시간 동안 무효가 된다("모든 기기에서
+      // 로그아웃"이 거짓이 됨). `revokedReason`이 NULL인 행은 이 컬럼 도입 이전
+      // 세션이므로 기존 동작(유예 적용)을 유지한다 — 마이그레이션만으로 살아 있는
+      // 세션을 끊지 않기 위해서다.
+      const graceEligible =
+        session.revokedReason === 'rotated' || session.revokedReason === null;
+      const withinGrace =
+        Date.now() - session.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+      if (!graceEligible || !withinGrace) {
+        // 창 밖의 재제시만 실제 탈취로 간주한다. 명시적으로 끊긴 세션의 재제시는
+        // 탈취 신호가 아니므로 전 세션을 몰살하지 않고 이 요청만 거절한다.
+        if (graceEligible) {
+          await this.revokeAllSessions(session.userId, 'reuse_detected');
+        }
         throw new UnauthorizedException('invalid session');
       }
       // 유예 창 안 → 복구 경로로 폴백(throw 하지 않음).
@@ -211,9 +224,11 @@ export class AuthService {
     }
 
     // 회전: 기존 세션 revoke 후 새 세션 발급.
+    // `rotated`만 재사용 유예 대상이다 — 로그아웃·비밀번호 변경으로 죽은 세션까지
+    // 유예하면 그 조치들이 24시간 동안 무효가 된다.
     await this.db
       .update(schema.userSessions)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt: new Date(), revokedReason: 'rotated' })
       .where(eq(schema.userSessions.id, session.id));
 
     const next = await this.createSession(
@@ -234,9 +249,11 @@ export class AuthService {
       return;
     }
     const tokenHash = this.tokenService.hashToken(rawRefresh);
+    // `logout`은 유예 대상이 아니다 — 사용자가 명시적으로 끊은 세션이 되살아나면
+    // 로그아웃 버튼이 거짓말이 된다.
     await this.db
       .update(schema.userSessions)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt: new Date(), revokedReason: 'logout' })
       .where(
         and(
           eq(schema.userSessions.refreshTokenHash, tokenHash),
@@ -278,7 +295,7 @@ export class AuthService {
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
 
-    await this.revokeAllSessions(userId);
+    await this.revokeAllSessions(userId, 'password_change');
   }
 
   /** Returns the current user plus their active household memberships. */
@@ -356,11 +373,19 @@ export class AuthService {
     return { tokens, refresh: { raw, expiresAt } };
   }
 
-  /** Revokes every still-active session for a user. */
-  private async revokeAllSessions(userId: string): Promise<void> {
+  /**
+   * Revokes every still-active session for a user.
+   *
+   * `reason`은 재사용 유예 판정에 쓰인다 — 여기서 죽는 세션은 회전이 아니라
+   * 비밀번호 변경이나 탈취 탐지 결과이므로, 어느 쪽이든 유예 없이 즉시 401이어야 한다.
+   */
+  private async revokeAllSessions(
+    userId: string,
+    reason: 'password_change' | 'reuse_detected',
+  ): Promise<void> {
     await this.db
       .update(schema.userSessions)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt: new Date(), revokedReason: reason })
       .where(
         and(
           eq(schema.userSessions.userId, userId),

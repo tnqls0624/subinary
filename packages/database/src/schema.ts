@@ -99,6 +99,20 @@ export const userSessions = pgTable(
     refreshTokenHash: text('refresh_token_hash').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /**
+     * 왜 폐기됐는가 — refresh 재사용 유예(24h)를 **회전에만** 적용하기 위해 필요하다.
+     *
+     * 유예는 다중 탭 동시 회전과 모바일 회전 응답 유실을 자동 로그아웃으로 처리하지
+     * 않으려고 도입했다. 그런데 `revokedAt`만 보면 **명시적 로그아웃과 비밀번호 변경도
+     * 유예 대상**이 되어, 로그아웃 뒤 24시간 동안 같은 토큰으로 세션을 다시 받을 수
+     * 있었다("모든 기기에서 로그아웃"이 거짓이 된다).
+     *
+     * `rotated`만 유예하고 나머지는 즉시 401이다. NULL(이 컬럼 도입 이전 행)은
+     * 기존 동작대로 유예를 적용한다 — 살아 있는 세션을 마이그레이션만으로 끊지 않는다.
+     */
+    revokedReason: text('revoked_reason', {
+      enum: ['rotated', 'logout', 'password_change', 'reuse_detected'],
+    }),
     userAgent: text('user_agent'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

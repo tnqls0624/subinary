@@ -309,13 +309,28 @@ async function main() {
     'refresh 토큰이 회전됨(이전 값과 다름)',
   );
 
+  // 유예 창(REFRESH_REUSE_GRACE_MS = 24h) **안**의 재사용은 의도적으로 허용한다 —
+  // 다중 탭 동시 회전과 모바일 회전 응답 유실(백그라운드 suspend로 새 토큰 저장 실패)
+  // 을 자동 로그아웃으로 처리하면 사용자가 실제로 튕겼기 때문이다(auth.service
+  // `REFRESH_REUSE_GRACE_MS` 주석 참고). 401은 유예 창 **밖**에서만 나므로 이 e2e에서
+  // 재현할 수 없다(24시간 대기 필요) — 여기서는 복구 경로가 살아 있는지만 고정한다.
   const reuseOld = await req('POST', '/auth/refresh', { refresh: ownerARefresh0.value });
-  assert(reuseOld.status === 401, '이전 refresh 재사용 401', reuseOld.status);
+  assert(
+    reuseOld.status === 200,
+    '유예 창 안의 이전 refresh 재사용 → 200으로 복구(자동 로그아웃 없음)',
+    reuseOld.status,
+  );
+  const recovered = parseRefreshCookie(reuseOld.setCookies);
+  assert(
+    !!recovered && !recovered.cleared && recovered.value !== ownerARefresh0.value,
+    '복구 경로도 새 refresh를 발급(회전 유지)',
+    recovered?.value === ownerARefresh0.value ? '토큰이 회전되지 않음' : recovered,
+  );
 
   // ── 14) logout → 이후 refresh 401 ─────────────────────────────────────────
   step(14, 'logout → 이후 refresh 401');
-  // 재사용 탐지(13번)로 ownerA의 모든 세션이 무효화되므로, 깨끗한 로그아웃 검증을
-  // 위해 새로 로그인해 살아있는 세션을 확보한 뒤 로그아웃한다.
+  // 13번이 세션을 여러 번 회전시켰으므로, 깨끗한 로그아웃 검증을 위해 새로 로그인해
+  // 살아있는 세션을 확보한 뒤 로그아웃한다.
   const relogin = await req('POST', '/auth/login', {
     body: { email: a.email, password: PASSWORD },
   });

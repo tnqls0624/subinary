@@ -143,19 +143,27 @@ async function bootstrap(): Promise<void> {
   // argon2id 검증이 CPU를 많이 쓰므로, 인증 경로에 리밋이 없으면 로그인 시도만으로
   // 홈서버가 눕는다. 전역 기본값을 깔고 인증 라우트는 컨트롤러에서 더 조인다.
   //
-  // keyGenerator가 x-forwarded-for를 보는 이유: 실제 클라이언트 IP가 Cloudflare →
-  // cloudflared → caddy를 거쳐 오므로 소켓 IP는 항상 내부 프록시 주소다(전원이 한
-  // 버킷을 공유하게 됨). 헤더는 위조 가능하지만, 신뢰 경계 밖에서 오는 트래픽은
-  // 전부 Cloudflare를 통과하므로 이 환경에서는 이 값이 최선의 근사다.
+  // keyGenerator가 헤더를 보는 이유: 실제 클라이언트 IP가 Cloudflare → cloudflared →
+  // caddy를 거쳐 오므로 소켓 IP는 항상 내부 프록시 주소다(전원이 한 버킷을 공유하게 됨).
+  //
+  // ⚠️ `x-forwarded-for`의 **첫 요소**를 쓰면 안 된다. 클라이언트가 그 헤더를 직접
+  // 실어 보내면 Cloudflare는 기존 값을 지우지 않고 뒤에 append하므로, 첫 요소는
+  // 공격자가 정하는 값이 된다 — 매 요청 다른 값을 넣으면 버킷이 매번 새로 생겨
+  // 리밋이 통째로 무력화되고, argon2id 검증으로 홈서버 CPU를 고갈시킬 수 있다.
+  //
+  // `cf-connecting-ip`는 Cloudflare가 **항상 덮어쓰는** 헤더라 통과하는 한 위조되지
+  // 않는다. 이 API의 외부 노출 경로는 Cloudflare Tunnel 하나뿐이므로 이 값이 신뢰
+  // 가능한 유일한 클라이언트 식별자다. 헤더가 없는 요청(호스트 로컬·컨테이너 내부
+  // 헬스체크)은 CF를 거치지 않은 것이므로 소켓 IP로 폴백한다.
   await app.register(fastifyRateLimit, {
     global: true,
     timeWindow: '1 minute',
     // 인증 경로는 별도 버킷 + 훨씬 낮은 상한. 버킷을 나누지 않으면 정상 사용
     // (대시보드 폴링·SSE)이 로그인 시도와 같은 카운터를 공유해 서로를 굶긴다.
     keyGenerator: (req) => {
-      const forwarded = req.headers['x-forwarded-for'];
-      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-      const ip = first?.split(',')[0]?.trim() || req.ip;
+      const cfIp = req.headers['cf-connecting-ip'];
+      const first = Array.isArray(cfIp) ? cfIp[0] : cfIp;
+      const ip = first?.trim() || req.ip;
       return `${AUTH_RATE_LIMITED_PATHS.test(req.url) ? 'auth' : 'general'}:${ip}`;
     },
     // 가족 전원이 같은 공인 IP(가정 회선)를 공유하므로 일반 상한은 넉넉해야 한다 —
