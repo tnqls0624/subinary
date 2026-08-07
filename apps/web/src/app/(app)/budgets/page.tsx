@@ -292,8 +292,12 @@ export default function BudgetsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      {/* 페이지 헤더 + 월 스위처 + 주 CTA(상단 우측) ----------------------- */}
-      <div className="flex items-start justify-between gap-3">
+      {/* 페이지 헤더 + 월 스위처 + 주 CTA ---------------------------------
+          좁은 화면에서는 세로로 쌓는다. 한 줄에 두면 월 스위처(~172px)와
+          '예산 만들기'(~110px)가 `shrink-0`라 360px 기기에서 가로 오버플로가 나고,
+          그러면 `fixed`인 하단 탭바와 `sticky`인 상단 헤더가 가로 스크롤을 따라
+          흔들려 화면 전체가 깨져 보인다. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="sr-only">예산</h1>
           <p className="text-muted-foreground text-sm">
@@ -302,7 +306,7 @@ export default function BudgetsPage() {
               : "지난 달 기록이에요"}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex items-center justify-between gap-1 sm:shrink-0">
           <MonthSwitcher
             month={month}
             months={availableMonths}

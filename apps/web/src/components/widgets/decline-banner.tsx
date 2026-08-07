@@ -43,7 +43,12 @@ export function DeclineBanner() {
 
   return (
     <Link href="/declines" className="block">
-      <Card className="border-destructive/30 bg-destructive/5 flex items-center gap-3 p-4 transition-colors hover:bg-destructive/10">
+      {/* `flex-row`를 반드시 명시한다 — Card의 기본 클래스가 `flex flex-col`이라
+          `items-center`만 주면 세로로 쌓인 채 가로 중앙 정렬이 되고, 그 안의
+          `min-w-0 flex-1`이 가로 폭을 제약하지 못해 `truncate`가 무력화된다.
+          실측(안드로이드 앱): 아이콘이 중앙 상단에 놓이고 가맹점 문구가 카드를
+          좌우로 넘쳐 화면 전체가 가로 스크롤됐다. */}
+      <Card className="border-destructive/30 bg-destructive/5 flex flex-row items-center gap-3 p-4 transition-colors hover:bg-destructive/10">
         <span className="bg-destructive/10 text-destructive flex size-10 shrink-0 items-center justify-center rounded-full">
           <AlertTriangle className="size-5" />
         </span>
