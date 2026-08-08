@@ -71,6 +71,14 @@ export const queryKeys = {
     ["card-sms-declines", householdId] as const,
   householdMembers: (householdId: string | null) =>
     ["household-members", householdId] as const,
+  // 알림 계열은 household가 아니라 **user** 스코프다. 키에 userId를 넣어 같은 기기에서
+  // 계정이 바뀌었을 때 캐시가 섞이지 않게 한다(로그아웃 시 clear가 1차 방어, 이건 2차).
+  // 앞 요소를 유지하므로 ["notifications"] 같은 접두 무효화는 그대로 동작한다.
+  notifications: (userId: string | null) => ["notifications", userId] as const,
+  notificationUnread: (userId: string | null) =>
+    ["notification-unread", userId] as const,
+  notificationPreferences: (userId: string | null) =>
+    ["notification-preferences", userId] as const,
 };
 
 /**
@@ -414,9 +422,9 @@ export function useDeleteMerchantAlias() {
 
 /** 현재 사용자의 알림 선호(user 스코프, household 무관). 행 없으면 서버가 기본값. */
 export function useNotificationPreferences(): UseQueryResult<NotificationPreferences> {
-  const { authedFetch } = useAuth();
+  const { authedFetch, user } = useAuth();
   return useQuery({
-    queryKey: ["notification-preferences"],
+    queryKey: queryKeys.notificationPreferences(user?.id ?? null),
     queryFn: () =>
       authedFetch((token) => api.notifications.getPreferences(token)),
   });
@@ -424,22 +432,23 @@ export function useNotificationPreferences(): UseQueryResult<NotificationPrefere
 
 /** 알림 선호 전체 대체(PUT). 성공 시 캐시를 응답으로 갱신. */
 export function useUpdateNotificationPreferences() {
-  const { authedFetch } = useAuth();
+  const { authedFetch, user } = useAuth();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: NotificationPreferencesUpdateRequest) =>
       authedFetch((token) => api.notifications.updatePreferences(token, body)),
     onSuccess: (data) => {
-      qc.setQueryData(["notification-preferences"], data);
+      // setQueryData는 접두가 아니라 **완전 일치** 키를 쓴다 — 훅과 같은 팩토리로 만든다.
+      qc.setQueryData(queryKeys.notificationPreferences(user?.id ?? null), data);
     },
   });
 }
 
 /** 인앱 알림함 목록(최신순, 커서 무한스크롤). */
 export function useNotifications() {
-  const { authedFetch } = useAuth();
+  const { authedFetch, user } = useAuth();
   return useInfiniteQuery({
-    queryKey: ["notifications"],
+    queryKey: queryKeys.notifications(user?.id ?? null),
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
       authedFetch((token) =>
@@ -451,9 +460,9 @@ export function useNotifications() {
 
 /** 안읽음 개수(헤더 벨 뱃지). 포커스 복귀 시 재조회. */
 export function useUnreadCount(): UseQueryResult<{ count: number }> {
-  const { authedFetch } = useAuth();
+  const { authedFetch, user } = useAuth();
   return useQuery({
-    queryKey: ["notification-unread"],
+    queryKey: queryKeys.notificationUnread(user?.id ?? null),
     queryFn: () => authedFetch((token) => api.notifications.unreadCount(token)),
     refetchOnWindowFocus: true,
   });

@@ -28,6 +28,7 @@ import {
   ActivityProvider,
   useActivityStore,
 } from "@/components/activity-provider";
+import { ConnectionError } from "@/components/connection-error";
 import { Onboarding } from "@/components/onboarding";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { HouseholdSwitcher } from "@/components/household-switcher";
@@ -216,12 +217,17 @@ export default function AppLayout({
 }: Readonly<{ children: ReactNode }>) {
   const router = useRouter();
   const pathname = usePathname();
-  const { status, memberships } = useAuth();
+  const { status, memberships, retryBootstrap } = useAuth();
   const { householdId } = useHousehold();
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
+
+  // 통신 실패로 세션을 확인하지 못한 상태 — 리다이렉트하지 않고 재시도만 제안한다.
+  if (status === "offline") {
+    return <ConnectionError onRetry={retryBootstrap} />;
+  }
 
   if (status !== "authenticated") {
     return (

@@ -10,7 +10,10 @@
  *  - 네이티브 생체인식 잠금(lib/biometric.ts): 켜져 있으면 bootstrap의 저장 토큰
  *    사용 전에 본인 확인 게이트를 세운다. 세션이 이미 열린 뒤의 401 재시도
  *    경로는 게이트를 다시 세우지 않는다(콜드 스타트 잠금이 목적).
+ *  - 부트스트랩이 401이 아닌 이유(오프라인·타임아웃·5xx)로 실패하면 세션을 버리지
+ *    않고 "offline"로 두고 재시도(retryBootstrap)를 제안한다.
  * ------------------------------------------------------------------------- */
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
@@ -70,8 +73,32 @@ function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
     : fn();
 }
 
-/** 인증 부트스트랩/세션 상태. */
-export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+/**
+ * 인증 부트스트랩/세션 상태.
+ *
+ * "offline"은 **세션 상태를 모르는** 상태다 — 통신이 안 돼 확인을 못 했을 뿐이라
+ * unauthenticated와 섞으면 안 된다. 이 값에서 /login으로 보내면 안 된다(멀쩡한
+ * 세션을 가진 사용자에게 재로그인을 요구하는 게 정확히 그 버그였다).
+ */
+export type AuthStatus =
+  | "loading"
+  | "authenticated"
+  | "unauthenticated"
+  | "offline";
+
+/**
+ * 부트스트랩 실패를 "재시도하면 복구될 수 있음"과 "세션이 죽었음"으로 가른다.
+ *
+ * ApiError가 아니면 HTTP 응답 자체가 없었던 것(오프라인·DNS·타임아웃·CORS)이다 —
+ * status가 없는 실패를 인증 실패로 뭉개면, 지하철에서 앱을 연 것만으로 1년 세션이
+ * 날아간다. 5xx/429는 서버·프록시 사정이라 세션과 무관하다(터널 재연결 중 502).
+ * 그 밖의 4xx는 예상 못 한 계약 위반이므로 보수적으로 세션을 파기해 기존 동작
+ * (로그인 화면)을 유지한다 — 무한 재시도 화면에 갇히는 것보다 낫다.
+ */
+function isRetriableFailure(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.status === 429;
+}
 
 interface AuthContextValue {
   user: UserSummary | null;
@@ -90,6 +117,8 @@ interface AuthContextValue {
   authedFetch: <T>(fn: (token: AccessToken) => Promise<T>) => Promise<T>;
   /** me()를 다시 불러 멤버십을 갱신한다(초대 수락/가족 생성 후 사용). */
   refreshMemberships: () => Promise<void>;
+  /** status가 "offline"일 때 세션 복원을 다시 시도한다(연결 실패 화면의 버튼). */
+  retryBootstrap: () => void;
   /**
    * 네이티브 생체인식으로 저장된 세션을 복원한다(로그인 화면 보조 버튼).
    * "cancelled"/"failed"는 그대로 반환하고, 게이트 통과 후 refresh 실패
@@ -107,6 +136,8 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   );
   const [accessToken, setAccessTokenState] = useState<AccessToken>(null);
   const [status, setStatus] = useState<AuthStatus>("loading");
+  // AuthProvider는 QueryClientProvider 안쪽(providers.tsx)이라 그대로 쓸 수 있다.
+  const queryClient = useQueryClient();
 
   // authedFetch가 최신 토큰을 동기적으로 읽을 수 있도록 ref로도 보관한다.
   const accessTokenRef = useRef<AccessToken>(null);
@@ -120,7 +151,16 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     setUser(null);
     setMemberships([]);
     setStatus("unauthenticated");
-  }, [setAccessToken]);
+    // 서버 데이터 캐시까지 함께 버린다. 알림함·안읽음 뱃지·알림 설정은 user 스코프인데
+    // 키에 userId가 없어(queries.ts), 같은 기기에서 다음 사용자가 로그인하면 staleTime
+    // 30초 동안 **이전 사용자의 알림 제목·가맹점명·금액**이 먼저 렌더된다. household
+    // 스코프 쿼리도 가족을 옮긴 계정 사이에서 같은 문제가 된다.
+    //
+    // 세션 만료(authedFetch의 refresh 실패)·부트스트랩 401 경로도 여기를 지난다 —
+    // "로그아웃했는가"와 "이 캐시의 주인이 바뀔 수 있는가"는 다른 질문이고, 후자가
+    // 참인 건 세션이 닫히는 모든 경로에서 동일하다. 재로그인하면 다시 받아온다.
+    queryClient.clear();
+  }, [setAccessToken, queryClient]);
 
   const getAccessToken = useCallback<() => AccessToken>(
     () => accessTokenRef.current,
@@ -260,6 +300,13 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     }
   }, [clearSession]);
 
+  // "offline"에서 사용자가 재시도를 누르면 올라가는 카운터(부트스트랩 이펙트 재실행).
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const retryBootstrap = useCallback(() => {
+    setStatus("loading");
+    setBootstrapAttempt((n) => n + 1);
+  }, []);
+
   // 마운트 시 1회 부트스트랩: refresh 쿠키가 있으면 자동 로그인 복원.
   useEffect(() => {
     let cancelled = false;
@@ -285,15 +332,19 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
         if (cancelled) return;
         setMemberships(me.memberships);
         setStatus("authenticated");
-      } catch {
+      } catch (error) {
         if (cancelled) return;
-        clearSession();
+        // 통신 실패(오프라인·타임아웃·5xx)를 미인증으로 처리하면 refresh 쿠키가
+        // 멀쩡한데도 로그인 화면으로 튕긴다. refreshSession도 이미 401만 저장 토큰을
+        // 지우도록 구분하고 있으니, 여기서도 같은 기준으로 나눈다.
+        if (isRetriableFailure(error)) setStatus("offline");
+        else clearSession();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [clearSession, refreshSession]);
+  }, [clearSession, refreshSession, bootstrapAttempt]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -307,6 +358,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       getAccessToken,
       authedFetch,
       refreshMemberships,
+      retryBootstrap,
       biometricLogin,
     }),
     [
@@ -320,6 +372,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       getAccessToken,
       authedFetch,
       refreshMemberships,
+      retryBootstrap,
       biometricLogin,
     ],
   );

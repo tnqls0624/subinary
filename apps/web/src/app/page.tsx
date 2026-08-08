@@ -8,11 +8,12 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { ConnectionError } from "@/components/connection-error";
 import { useAuth } from "@/lib/auth-context";
 
 export default function RootPage() {
   const router = useRouter();
-  const { status } = useAuth();
+  const { status, retryBootstrap } = useAuth();
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -21,6 +22,12 @@ export default function RootPage() {
       router.replace("/login");
     }
   }, [status, router]);
+
+  // 세션 상태를 확인하지 못한 상태에서 아무 데로도 보내면 안 된다(로그인 화면으로
+  // 보내는 게 정확히 그 버그였다). 여기서 멈추고 재시도만 제안한다.
+  if (status === "offline") {
+    return <ConnectionError onRetry={retryBootstrap} />;
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center">

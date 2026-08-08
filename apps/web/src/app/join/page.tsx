@@ -4,6 +4,8 @@
  *
  * (app) 그룹 밖 최상위 라우트 → 인증은 필요하되 가족 소속은 불필요(신규 가입자도 수락).
  * - loading: 스피너 / unauthenticated: 로그인 안내 / token 없음: 유효하지 않은 초대.
+ * - offline: 세션 확인 실패 → 수락 화면을 그리면 authedFetch가 확실히 실패하므로
+ *   연결 안내 + 재시도로 막는다.
  * - authenticated: 동의 체크 후 수락 → POST /household-invitations/:token/accept
  *   → refreshMemberships + 활성 가족 전환 → 대시보드.
  * consent는 계약상 z.literal(true) 필수 → 체크 안 하면 수락 버튼 비활성.
@@ -18,6 +20,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
+import { ConnectionError } from "@/components/connection-error";
 import { Button } from "@/components/ui/button";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -35,7 +38,8 @@ function JoinInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
-  const { status, authedFetch, refreshMemberships, user } = useAuth();
+  const { status, authedFetch, refreshMemberships, user, retryBootstrap } =
+    useAuth();
   const setSelectedId = useHouseholdStore((s) => s.setSelectedId);
 
   const [consent, setConsent] = useState(false);
@@ -73,6 +77,10 @@ function JoinInner() {
         </div>
       </Centered>
     );
+  }
+
+  if (status === "offline") {
+    return <ConnectionError onRetry={retryBootstrap} />;
   }
 
   // 토큰 없이 진입(직접 URL/딥링크 파싱 실패) → 수락할 대상이 없다.

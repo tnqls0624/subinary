@@ -88,16 +88,30 @@ export const API_BASE_URL = API;
 /** access token 타입 별칭(메모리 보관, 없을 수 있음). */
 export type AccessToken = string | null;
 
-/** 실패한 API 응답을 표현하는 에러(HTTP status + 서버 메시지 보존). */
+/**
+ * 실패한 API 응답을 표현하는 에러(HTTP status + 서버 메시지 보존).
+ *
+ * `message`는 **화면에 그대로 띄울 수 있는 한국어**다(아래 매핑 결과). 서버 원문은
+ * 진단용으로 `serverMessage`/`body`에 남는다 — 원문이 사라지면 로그만 보고
+ * 어느 예외였는지 되짚을 수 없다.
+ */
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
+  /** 서버가 준 원문 메시지(대부분 영문 도메인 언어). 로그·디버깅 전용. */
+  readonly serverMessage: string | null;
 
-  constructor(status: number, message: string, body?: unknown) {
+  constructor(
+    status: number,
+    message: string,
+    body?: unknown,
+    serverMessage?: string | null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.serverMessage = serverMessage ?? null;
   }
 }
 
@@ -113,8 +127,8 @@ interface ApiFetchOptions {
   refreshToken?: string;
 }
 
-/** 서버 에러 본문(`{ statusCode, message, error }`)에서 사람이 읽을 메시지를 추출한다. */
-function extractErrorMessage(status: number, body: unknown): string {
+/** 서버 에러 본문(`{ statusCode, message, error }`)에서 원문 메시지를 뽑는다(번역 전). */
+function extractServerMessage(body: unknown): string | null {
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
     const message = record.message;
@@ -124,7 +138,128 @@ function extractErrorMessage(status: number, body: unknown): string {
     }
     if (typeof record.error === "string") return record.error;
   }
-  return `요청이 실패했습니다 (HTTP ${status})`;
+  return null;
+}
+
+/**
+ * 서버 도메인 메시지(영문) → 사용자 문구(한국어).
+ *
+ * **번역은 표현 계층(여기)에서만 한다.** API의 예외 메시지는 도메인 언어이자
+ * 로그·테스트·다른 클라이언트가 함께 읽는 계약이므로, 화면 문구 때문에 서버를 고치면
+ * 그쪽이 깨진다(테스트가 문자열을 검사한다). 대신 이 한 파일이 모든 화면의 에러
+ * 문구를 담당한다 — 여기 한 줄이 10개 넘는 화면을 동시에 고친다.
+ *
+ * 표에 없는 **영문 메시지는 사용자에게 보여주지 않는다**(상태 코드 폴백으로 내려감).
+ * 원문은 ApiError.serverMessage로 남으므로 진단은 그대로 가능하다. 서버가 이미 한국어로
+ * 던지는 메시지(category.service 등)는 손대지 않고 통과시킨다.
+ *
+ * 키는 `apps/api/src`의 `throw new *Exception('...')` 중 웹에서 도달 가능한 것들이다.
+ */
+const SERVER_MESSAGE_KO: Readonly<Record<string, string>> = {
+  // auth
+  "invalid credentials": "이메일 또는 비밀번호가 맞지 않아요",
+  "invalid session": "로그인이 만료됐어요. 다시 로그인해 주세요",
+  unauthorized: "로그인이 필요해요",
+  "email already registered": "이미 가입된 이메일이에요",
+  "registration is closed": "지금은 회원가입을 받지 않아요",
+  "an invitation is required to register": "가입하려면 초대 링크가 필요해요",
+  "device authentication failed": "기기 인증에 실패했어요",
+  // household · 구성원 · 초대
+  "not a household member": "이 가족의 구성원이 아니에요",
+  "insufficient role": "권한이 부족해요",
+  "insufficient permission": "권한이 부족해요",
+  "insufficient permission for this transaction":
+    "이 거래를 수정할 권한이 없어요",
+  "household owner or admin required": "가족 관리자만 할 수 있어요",
+  "household not found": "가족을 찾을 수 없어요",
+  "member not found": "구성원을 찾을 수 없어요",
+  "member does not belong to this household": "이 가족의 구성원이 아니에요",
+  "cannot change an owner role": "소유자의 역할은 바꿀 수 없어요",
+  "cannot remove the last owner": "마지막 소유자는 내보낼 수 없어요",
+  "cannot set color for a removed member":
+    "내보낸 구성원의 색은 바꿀 수 없어요",
+  "consent is required to join a household": "가족 참여에 동의가 필요해요",
+  "invitation not found": "초대를 찾을 수 없어요",
+  "invitation is no longer pending": "이미 처리된 초대예요",
+  "invitation has already been accepted": "이미 수락된 초대예요",
+  "invitation has been revoked": "취소된 초대예요",
+  "invitation has expired": "만료된 초대예요",
+  "invitation is for a different account": "다른 계정으로 보낸 초대예요",
+  // 카드
+  "card not found": "카드를 찾을 수 없어요",
+  "card not found in household": "이 가족에 등록된 카드가 아니에요",
+  "card does not belong to this household": "이 가족의 카드가 아니에요",
+  "owner must be an active household member":
+    "카드 소유자는 현재 가족 구성원이어야 해요",
+  // 카테고리 · 가맹점
+  "category not found": "카테고리를 찾을 수 없어요",
+  "invalid category": "선택한 카테고리를 쓸 수 없어요",
+  "merchant alias not found": "가맹점 묶음을 찾을 수 없어요",
+  // 거래
+  "transaction not found": "거래를 찾을 수 없어요",
+  "transaction is not pending review": "확인이 필요한 거래가 아니에요",
+  "source is not a cancellation transaction": "취소 거래가 아니에요",
+  "target is not an approval transaction": "승인 거래가 아니에요",
+  "cancellation is already linked": "이미 연결된 취소 거래예요",
+  "transactions belong to different households":
+    "서로 다른 가족의 거래는 연결할 수 없어요",
+  "transactions have different currencies":
+    "통화가 다른 거래는 연결할 수 없어요",
+  // 예산
+  "budget not found": "예산을 찾을 수 없어요",
+  "a budget for this scope already exists": "같은 조건의 예산이 이미 있어요",
+  // 기기
+  "device not found": "기기를 찾을 수 없어요",
+  // 카드문자(수동 등록 · 검토)
+  "card-sms event not found": "문자 내역을 찾을 수 없어요",
+  "card-sms event not found after ingest":
+    "등록한 문자를 찾지 못했어요. 잠시 후 다시 시도해 주세요",
+  "a transaction already exists for this card-sms event":
+    "이미 거래로 등록된 문자예요",
+  "amount is required for a non-declined review": "금액을 입력해 주세요",
+  "occurredAt is required for a non-declined review":
+    "결제 일시를 입력해 주세요",
+  "merchantRaw is required for a non-declined review":
+    "가맹점명을 입력해 주세요",
+  // 공통(전역 ZodValidationPipe · 필수 파라미터)
+  "validation failed": "입력한 내용을 다시 확인해 주세요",
+  "householdid is required": "가족을 먼저 선택해 주세요",
+};
+
+/**
+ * 매핑에 없는 실패의 상태 코드별 문구. 원인을 특정하지 못해도 **사용자가 다음에
+ * 무엇을 할지**는 알려줄 수 있다. 429는 @fastify/rate-limit이 영문으로 내려주는
+ * 경로라 여기서 잡는 게 유일한 방법이다.
+ */
+const STATUS_FALLBACK_KO: Readonly<Record<number, string>> = {
+  400: "입력한 내용을 다시 확인해 주세요",
+  401: "로그인이 필요해요",
+  403: "권한이 없어요",
+  404: "찾을 수 없어요",
+  409: "이미 처리됐거나 중복된 요청이에요",
+  410: "만료된 링크예요",
+  413: "보낸 내용이 너무 커요",
+  429: "요청이 너무 많아요. 잠시 후 다시 시도해 주세요",
+};
+
+/** 이미 한국어인 메시지는 서버가 사용자에게 말하려고 쓴 것이므로 그대로 통과시킨다. */
+function isKorean(message: string): boolean {
+  return /[가-힣]/.test(message);
+}
+
+/** 서버 실패를 화면에 그대로 띄울 수 있는 한국어 문구로 만든다. */
+function toUserMessage(status: number, serverMessage: string | null): string {
+  if (serverMessage) {
+    if (isKorean(serverMessage)) return serverMessage;
+    const mapped = SERVER_MESSAGE_KO[serverMessage.trim().toLowerCase()];
+    if (mapped) return mapped;
+  }
+  const fallback = STATUS_FALLBACK_KO[status];
+  if (fallback) return fallback;
+  if (status >= 500) {
+    return "서버에 문제가 생겼어요. 잠시 후 다시 시도해 주세요";
+  }
+  return `요청이 실패했어요 (HTTP ${status})`;
 }
 
 /**
@@ -165,10 +300,12 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
+    const serverMessage = extractServerMessage(parsed);
     throw new ApiError(
       response.status,
-      extractErrorMessage(response.status, parsed),
+      toUserMessage(response.status, serverMessage),
       parsed,
+      serverMessage,
     );
   }
 

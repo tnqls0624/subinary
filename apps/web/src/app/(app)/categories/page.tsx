@@ -410,6 +410,24 @@ export default function CategoriesPage() {
           <div className="text-muted-foreground flex items-center gap-2 px-1 py-6 text-sm">
             <Loader2 className="size-4 animate-spin" /> 불러오는 중…
           </div>
+        ) : categoriesQuery.isError ? (
+          // 조회 실패를 "없음"으로 보여주면 사용자가 이미 있는 카테고리를 다시 만들려
+          // 하거나(유니크 충돌) 데이터가 사라졌다고 오인한다 — 에러와 빈 상태는 다르다.
+          <Card
+            className="text-destructive flex flex-col items-center gap-3 p-8 text-center text-sm"
+            role="alert"
+          >
+            카테고리를 불러오지 못했어요.
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void categoriesQuery.refetch()}
+              disabled={categoriesQuery.isFetching}
+            >
+              <RotateCcw className="size-4" /> 다시 시도
+            </Button>
+          </Card>
         ) : custom.length === 0 ? (
           <Card className="text-muted-foreground flex flex-col items-center gap-2 p-8 text-center text-sm">
             <Tags className="size-6" />
@@ -514,25 +532,29 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      {/* 시스템 기본 카테고리(읽기 전용) */}
-      <div className="flex flex-col gap-2">
-        <h2 className="text-muted-foreground px-1 text-[13px] font-medium">
-          기본 카테고리
-        </h2>
-        <Card className="flex flex-wrap gap-2 p-4">
-          {system.map((cat) => (
-            <span
-              key={cat.id}
-              className="bg-muted text-muted-foreground rounded-full px-3 py-1 text-[13px]"
-            >
-              {cat.name}
-            </span>
-          ))}
-        </Card>
-        <p className="text-muted-foreground px-1 text-[12px]">
-          기본 카테고리는 수정·삭제할 수 없어요.
-        </p>
-      </div>
+      {/* 시스템 기본 카테고리(읽기 전용).
+          조회 실패·로딩 중에는 섹션 자체를 감춘다 — 빈 카드에 "수정·삭제할 수 없어요"만
+          남으면 기본 카테고리가 없어진 것처럼 읽힌다(위 에러 카드가 이미 상황을 말한다). */}
+      {system.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-muted-foreground px-1 text-[13px] font-medium">
+            기본 카테고리
+          </h2>
+          <Card className="flex flex-wrap gap-2 p-4">
+            {system.map((cat) => (
+              <span
+                key={cat.id}
+                className="bg-muted text-muted-foreground rounded-full px-3 py-1 text-[13px]"
+              >
+                {cat.name}
+              </span>
+            ))}
+          </Card>
+          <p className="text-muted-foreground px-1 text-[12px]">
+            기본 카테고리는 수정·삭제할 수 없어요.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

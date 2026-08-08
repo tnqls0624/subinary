@@ -7,6 +7,8 @@
  * 나눠 보여준다. 항목 탭 → 해당 화면으로 딥링크 이동. 커서 무한스크롤.
  * ------------------------------------------------------------------------- */
 import {
+  AlertTriangle,
+  Bell,
   ChartColumn,
   CircleAlert,
   CircleCheck,
@@ -26,13 +28,35 @@ import {
 import { cn } from "@/lib/utils";
 import type { NotificationItem, NotificationKind } from "@family/contracts";
 
+interface KindMeta {
+  icon: LucideIcon;
+  className: string;
+}
+
 /** 알림 유형별 아이콘 + 원형 배경색. */
-const KIND_META: Record<NotificationKind, { icon: LucideIcon; className: string }> = {
+const KIND_META: Record<NotificationKind, KindMeta> = {
   transaction: { icon: CreditCard, className: "bg-primary/15 text-primary" },
   budget: { icon: CircleAlert, className: "bg-warning/15 text-warning" },
   reminder: { icon: CircleCheck, className: "bg-accent text-accent-foreground" },
   summary: { icon: ChartColumn, className: "bg-primary/15 text-primary" },
+  decline: { icon: AlertTriangle, className: "bg-destructive/10 text-destructive" },
 };
+
+/** 계약에 없는 kind용 중립 메타. */
+const UNKNOWN_KIND_META: KindMeta = {
+  icon: Bell,
+  className: "bg-muted text-muted-foreground",
+};
+
+/**
+ * kind → 메타. 표를 그대로 인덱싱하지 않는 이유: 서버(worker)가 계약보다 **앞서** 새
+ * kind를 보낼 수 있다(워커·API 배포가 웹보다 먼저 나가는 게 정상 순서다). 그때
+ * `undefined.icon`이 되면 알림 한 건이 알림함 전체를 렌더 예외로 끌어내린다 —
+ * `decline`이 실제로 그렇게 터졌다.
+ */
+function kindMeta(kind: string): KindMeta {
+  return (KIND_META as Record<string, KindMeta>)[kind] ?? UNKNOWN_KIND_META;
+}
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -56,7 +80,7 @@ export default function NotificationsPage() {
   }, [loaded, hasUnread, markAll]);
 
   function renderRow(item: NotificationItem, isUnread: boolean) {
-    const meta = KIND_META[item.kind];
+    const meta = kindMeta(item.kind);
     const Icon = meta.icon;
     return (
       <ListRow

@@ -73,6 +73,7 @@ export const notificationKindSchema = z.enum([
   'budget',
   'reminder',
   'summary',
+  'decline',
 ]);
 export type NotificationKind = z.infer<typeof notificationKindSchema>;
 
