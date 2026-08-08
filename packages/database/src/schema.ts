@@ -15,10 +15,12 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  date,
   doublePrecision,
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -1015,6 +1017,99 @@ export const cardSmsDeclineDismissals = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* fxRateSnapshots                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 역사 환율 스냅샷 — `(원통화, 기준일, 금액 계약 버전)`당 **불변** 1행 (ADR-0027 §3).
+ *
+ * 왜 필요한가: 승격 경로의 `getRateToKrw(currency)`는 거래일을 받지 않고 `new Date()`의
+ * 서울 날짜로 환율을 조회한다. 그래서 **언제 재시도하느냐가 KRW 금액을 바꾸고**, 승인과
+ * 취소가 서로 다른 날 환율로 환산돼 같은 건의 전액취소가 상계되지 않는다(USD 100 승인
+ * @1,300 = 130,000원, 전액취소 @1,400 = 140,000원 → 잔액 비교 탈락 → 130,000원이 지출로
+ * 남는다). 기준일을 명령 입력으로 고정하고 그 날짜의 값을 한 번만 못 박으면 재시도가
+ * 결과를 바꾸지 못한다.
+ *
+ * `rate` 단위는 **원통화 1 major unit당 KRW**이며 `numeric(24,12)` 고정 소수다.
+ * `doublePrecision`을 쓰지 않는 이유는 이진 부동소수가 십진 환율을 정확히 담지 못해
+ * 같은 입력이 실행 환경에 따라 1원 차이를 낼 수 있기 때문이다. Drizzle이 이 컬럼을
+ * `string`으로 매핑하는 것도 의도한 것이다 — number로 받는 순간 정밀도가 날아간다.
+ *
+ * `asOfDate`가 timestamp가 아니라 `date`(문자열 `YYYY-MM-DD`)인 이유: 기준일은 "서울의
+ * 그 날"이지 순간이 아니다. timestamptz로 두면 읽는 쪽 타임존에 따라 하루가 밀린다.
+ *
+ * **행을 수정하지 않는다.** 공급자 오류로 잘못 고정된 값도 UPDATE하지 않고 새 계약
+ * 버전의 정정 스냅샷을 만든다. 마이그레이션 `0049`가 UPDATE/DELETE를 거부하는 트리거
+ * (`fx_rate_snapshots_immutable`)로 이를 DB에서 강제한다. 그래서 채우기는
+ * `onConflictDoUpdate`가 아니라 **`onConflictDoNothing` 후 SELECT**여야 한다 —
+ * DO UPDATE는 UPDATE라 트리거에 걸린다.
+ *
+ * 통화 지수(ISO 4217 exponent)는 여기 두지 않는다 — 지수는 코드의 단일 ISO 매핑에서만
+ * 가져온다. 두 곳에 두면 어긋났을 때 어느 쪽이 맞는지 판단할 수 없다.
+ */
+export const fxRateSnapshots = pgTable(
+  'fx_rate_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** 원통화(ISO 4217 alpha-3). */
+    baseCurrency: text('base_currency').notNull(),
+    /** 환산 대상 통화. 현재 계약은 KRW만 허용한다(아래 CHECK). */
+    quoteCurrency: text('quote_currency').notNull().default('KRW'),
+    /** 서울 기준 거래일 `YYYY-MM-DD`. 이 값이 스냅샷의 신원이다. */
+    asOfDate: date('as_of_date', { mode: 'string' }).notNull(),
+    /** 원통화 1 major unit당 KRW. 정수 스케일(10^12)로 올려서 산술한다. */
+    rate: numeric('rate', { precision: 24, scale: 12 }).notNull(),
+    provider: text('provider').notNull(),
+    providerVersion: text('provider_version').notNull(),
+    /** 공급자 응답 식별자(요청 URL·응답 id 등). 사후 감사용. */
+    providerReference: text('provider_reference'),
+    /**
+     * 이 스냅샷이 속한 금액 계약 버전. **기본값을 두지 않는다** — 어느 계약의 값인지는
+     * 호출자가 매번 명시해야 하고, 기본값이 있으면 그 판단이 조용히 생략된다.
+     */
+    moneyContractVersion: integer('money_contract_version').notNull(),
+    /** 운영자 승인 대체 환율 등의 출처 메모. */
+    note: text('note'),
+    /** 운영자가 직접 고정한 스냅샷이면 그 사용자. 공급자 자동 취득이면 null. */
+    createdBy: uuid('created_by').references(() => users.id),
+    /** 공급자에서 값을 받은 시각(기준일과 다르다). */
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // 첫 성공 값이 곧 영구 값이다. 재시도는 전부 이 한 행을 참조한다.
+    unique('fx_rate_snapshots_natural_key_unique').on(
+      table.baseCurrency,
+      table.quoteCurrency,
+      table.asOfDate,
+      table.moneyContractVersion,
+    ),
+    check('fx_rate_snapshots_rate_positive_check', sql`${table.rate} > 0`),
+    check(
+      'fx_rate_snapshots_currency_format_check',
+      sql`${table.baseCurrency} ~ '^[A-Z]{3}$' and ${table.quoteCurrency} ~ '^[A-Z]{3}$'`,
+    ),
+    // 다통화 기준통화가 실제로 필요해지면 이 CHECK 하나만 DROP한다. 제약 없이 두면
+    // KRW가 아닌 행이 조용히 들어와 KRW를 가정한 금액 산술이 틀린다.
+    check(
+      'fx_rate_snapshots_quote_krw_check',
+      sql`${table.quoteCurrency} = 'KRW'`,
+    ),
+    check(
+      'fx_rate_snapshots_base_not_quote_check',
+      sql`${table.baseCurrency} <> ${table.quoteCurrency}`,
+    ),
+    // 스냅샷은 v2 계약에서 처음 생긴 개념이다. v1을 담을 자리가 없다.
+    check(
+      'fx_rate_snapshots_contract_version_check',
+      sql`${table.moneyContractVersion} >= 2`,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* cardTransactions                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -1059,6 +1154,32 @@ export const cardTransactions = pgTable(
     originalAmount: integer('original_amount'),
     originalCurrency: text('original_currency'),
     exchangeRate: doublePrecision('exchange_rate'),
+    /**
+     * 원통화 기준 취소 누계 (ADR-0027 §4, 마이그레이션 `0049`). KRW 거래는 null이다.
+     *
+     * 왜 KRW 누계로 부족한가: 취소 후보를 **환산된 KRW 잔액**으로 비교하면 승인과 취소가
+     * 다른 날 환율을 쓸 때 같은 원통화 전액취소가 잔액 비교에서 탈락한다. 원통화 잔액
+     * (`originalAmount - originalCancelledAmount`)으로 비교해야 환율 방향과 무관하게
+     * 연결되고, 잔액이 0이면 순액도 정확히 0이 된다.
+     */
+    originalCancelledAmount: integer('original_cancelled_amount'),
+    /**
+     * 이 거래를 환산한 환율 스냅샷 (ADR-0027 §3).
+     *
+     * 연결된 외화 취소는 취소일 환율이 아니라 **부모 승인에 저장된 이 스냅샷**을
+     * 재사용한다. 자식이 환율을 다시 조회하면 그 순간 두 날짜의 환율이 섞인다.
+     */
+    fxRateSnapshotId: uuid('fx_rate_snapshot_id').references(
+      () => fxRateSnapshots.id,
+    ),
+    /**
+     * 금액 계약 버전 (ADR-0027). **기본값 1(v1)** — 기존 행과 롤백 창의 이전 바이너리가
+     * 만드는 행은 전부 v1로 남고, 새 금액 서비스만 v2를 명시적으로 쓴다. 조건부 v2
+     * CHECK(`card_transactions_v2_*`)는 이 값이 2 이상인 행에만 걸린다.
+     */
+    moneyContractVersion: integer('money_contract_version')
+      .notNull()
+      .default(1),
     merchantRaw: text('merchant_raw'),
     merchantNormalized: text('merchant_normalized'),
     categoryId: uuid('category_id').references(() => expenseCategories.id),
@@ -1096,6 +1217,152 @@ export const cardTransactions = pgTable(
     index('card_transactions_parent_transaction_id_idx').on(
       table.parentTransactionId,
     ),
+    index('card_transactions_fx_rate_snapshot_id_idx').on(
+      table.fxRateSnapshotId,
+    ),
+    // 새 컬럼 자체의 정합성만 본다. 기존 행은 전부 null/1이라 위반할 수 없어 즉시 검증된다.
+    check(
+      'card_transactions_original_cancelled_amount_check',
+      sql`${table.originalCancelledAmount} is null or ${table.originalCancelledAmount} >= 0`,
+    ),
+    check(
+      'card_transactions_money_contract_version_check',
+      sql`${table.moneyContractVersion} >= 1`,
+    ),
+    // ⚠️ v2 금액 계약 불변식(`card_transactions_v2_*` 6종)은 여기 선언하지 않는다.
+    //    Drizzle이 NOT VALID를 표현하지 못하는데, 그 6개는 기존 v1 행이 이미 어기고 있어
+    //    (ADR-0027 D-1~D-3) 즉시 검증되는 형태로 생성되면 배포가 그 자리에서 멈춘다.
+    //    정의는 마이그레이션 `0049`에만 있고, 기존 행 검증(VALIDATE)은 데이터 수리가
+    //    끝난 뒤 `0050`이 한다.
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* transactionMoneyRepairLog                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 금액 수리 배치가 한 거래에 가한 조치 (ADR-0027 §데이터 마이그레이션 계획 §3).
+ *
+ * pgEnum이 아니라 text + CHECK인 이유: 수리 작업(롤아웃 7단계)은 아직 구현되지 않았고,
+ * 조치 목록이 늘어날 여지가 있다. `ALTER TYPE ... ADD VALUE`는 같은 트랜잭션에서 곧바로
+ * 쓸 수 없어 마이그레이션이 두 개로 갈라진다. CHECK는 한 줄 교체로 끝난다.
+ */
+export const TRANSACTION_MONEY_REPAIR_ACTIONS = [
+  /** 승인-취소 체인을 거래일 스냅샷으로 재계산(D-1). */
+  'recalculate_chain',
+  /** 저장 통화를 원통화로 승격하고 KRW로 환산(D-3). */
+  'normalize_currency',
+  /** 떠 있는 취소를 원승인에 연결하고 상계(D-2). */
+  'link_cancellation',
+  /** 잘못 연결된 취소를 해제하고 승인 잔액 복원. */
+  'unlink_cancellation',
+  /** 비거래로 확정된 D-4 행 제거. `restoreImage` 필수. */
+  'delete',
+] as const;
+
+export type TransactionMoneyRepairAction =
+  (typeof TRANSACTION_MONEY_REPAIR_ACTIONS)[number];
+
+/**
+ * 금액 수리 로그 — 무엇을 왜 바꿨고 어떻게 되돌리는지의 **유일한 근거**
+ * (ADR-0027 §데이터 마이그레이션 계획).
+ *
+ * `transactionId`에 FK를 걸지 않는다. 광고 문자가 거래로 승격된 D-4 행은 사람이 비거래로
+ * 확정하면 제거될 수 있는데, FK가 있으면 그 제거가 막히거나(NO ACTION) 로그가 함께
+ * 지워진다(CASCADE). 둘 다 최악이다 — **감사 로그는 감사 대상보다 오래 살아야 한다.**
+ * `sourceEventId`도 같은 이유로 FK가 없다. `householdId`만 FK를 둔다(가구를 지우려면
+ * 어차피 거래부터 지워야 한다).
+ *
+ * `beforeMoney`/`afterMoney`가 jsonb인 이유: 보호 컬럼이 12개라(→ {@link MONEY_PROTECTED_COLUMNS})
+ * 스칼라로 펼치면 24개가 된다. 대신 ADR-0026 무회귀 대조에 실제로 쓰이는 `netAmount`와
+ * `currency`만 별도 컬럼으로 승격했다.
+ *
+ * `netAmountDelta`는 생성 컬럼이다. ADR-0027의 회귀 기준이 "수리 전후 월 합계 차이 =
+ * 수리 로그의 행별 delta 합"인데, 조회할 때마다 손으로 계산하면 조회마다 다른 식이 생겨
+ * "설명되지 않는 delta 0건"을 증명할 수 없다. 제거(`action='delete'`)는 after가 null이라
+ * delta가 `-before`가 된다 — 의도한 부호다.
+ *
+ * 체크섬이 둘인 이유: `checksumBefore`는 **적용 직전** 대상 행을 다시 읽어 manifest가
+ * 낡지 않았는지 보는 값이고(그 사이 새 거래·사용자 수정이 끼어들 수 있다),
+ * `checksumAfter`는 **되돌릴 때** 사용자가 그 뒤로 이 거래를 손댔는지 보는 값이다.
+ * 하나로 합치면 둘 중 하나를 못 본다. 두 값 모두 {@link transactionMoneyChecksum}으로 만든다.
+ *
+ * `appliedAt`이 null이면 아직 적용되지 않은 dry-run manifest이고, `after*`는 그때의
+ * **계획값**이다. 적용 시점에 대상 행을 다시 읽어 실제값으로 덮어쓴다.
+ *
+ * ⚠️ 이 테이블은 금액과 (`restoreImage`를 통해) 가맹점명을 담는다. **운영 로그·관측
+ * 싱크로 내보내지 마십시오.** ADR-0027은 운영 로그에는 집계 수치만 쓰라고 정한다.
+ */
+export const transactionMoneyRepairLog = pgTable(
+  'transaction_money_repair_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** 되돌림 단위. 실패한 배치만 batch id로 역순 복원한다. */
+    batchId: uuid('batch_id').notNull(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /** 대상 거래 id. FK 없음(위 주석 참고) — 제거된 거래도 같은 id로 복원한다. */
+    transactionId: uuid('transaction_id').notNull(),
+    /** 원문 이벤트 id. FK 없음. 제거 시 이벤트를 `quarantined`로 남기는 근거. */
+    sourceEventId: uuid('source_event_id'),
+    /** {@link TransactionMoneyRepairAction} 중 하나. */
+    action: text('action').$type<TransactionMoneyRepairAction>().notNull(),
+    /** ADR-0027 §데이터 마이그레이션 계획 §2의 분류 코드. */
+    reason: text('reason').notNull(),
+    note: text('note'),
+    /** 보호 컬럼 12개의 적용 전 값({@link buildTransactionMoneyImage} 출력). */
+    beforeMoney: jsonb('before_money')
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    /** 적용 후(또는 dry-run 계획) 값. 제거면 null. */
+    afterMoney: jsonb('after_money').$type<Record<string, unknown>>(),
+    netAmountBefore: integer('net_amount_before'),
+    netAmountAfter: integer('net_amount_after'),
+    currencyBefore: text('currency_before'),
+    currencyAfter: text('currency_after'),
+    /** 생성 컬럼. 쓰지 마십시오 — DB가 계산한다. */
+    netAmountDelta: integer('net_amount_delta').generatedAlwaysAs(
+      sql`coalesce("net_amount_after", 0) - coalesce("net_amount_before", 0)`,
+    ),
+    checksumBefore: text('checksum_before').notNull(),
+    checksumAfter: text('checksum_after'),
+    /** 제거된 거래의 전체 복원 이미지(거래 행 · 연결 관계 · source event 상태). */
+    restoreImage: jsonb('restore_image').$type<Record<string, unknown>>(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    /** null이면 아직 적용 전(dry-run manifest). */
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+    revertedAt: timestamp('reverted_at', { withTimezone: true }),
+    /** 체크섬 불일치 등으로 자동 되돌림을 중단한 사유. 사람이 병합해야 한다. */
+    revertBlockedReason: text('revert_blocked_reason'),
+  },
+  (table) => [
+    // 한 배치가 같은 거래를 두 번 기록하면 delta 합이 두 배가 된다.
+    unique('transaction_money_repair_log_batch_transaction_unique').on(
+      table.batchId,
+      table.transactionId,
+    ),
+    check(
+      'transaction_money_repair_log_action_check',
+      sql`${table.action} in ('recalculate_chain', 'normalize_currency', 'link_cancellation', 'unlink_cancellation', 'delete')`,
+    ),
+    // 적용 전 / 제거 적용 / 일반 적용 — 세 상태 외의 조합은 만들 수 없게 한다.
+    check(
+      'transaction_money_repair_log_lifecycle_check',
+      sql`(${table.appliedAt} is null and ${table.checksumAfter} is null and ${table.revertedAt} is null) or (${table.appliedAt} is not null and ${table.action} = 'delete' and ${table.checksumAfter} is null and ${table.restoreImage} is not null) or (${table.appliedAt} is not null and ${table.action} <> 'delete' and ${table.checksumAfter} is not null)`,
+    ),
+    index('transaction_money_repair_log_batch_id_idx').on(table.batchId),
+    index('transaction_money_repair_log_transaction_id_idx').on(
+      table.transactionId,
+    ),
+    index('transaction_money_repair_log_household_id_created_at_idx').on(
+      table.householdId,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -1114,6 +1381,14 @@ export type NewMerchantCategoryRule = typeof merchantCategoryRules.$inferInsert;
 
 export type CardTransaction = typeof cardTransactions.$inferSelect;
 export type NewCardTransaction = typeof cardTransactions.$inferInsert;
+
+export type FxRateSnapshot = typeof fxRateSnapshots.$inferSelect;
+export type NewFxRateSnapshot = typeof fxRateSnapshots.$inferInsert;
+
+export type TransactionMoneyRepairLogEntry =
+  typeof transactionMoneyRepairLog.$inferSelect;
+export type NewTransactionMoneyRepairLogEntry =
+  typeof transactionMoneyRepairLog.$inferInsert;
 
 /* ========================================================================== */
 /* Phase 5 — 예산 (Phase 5 Build Spec §2)                                      */

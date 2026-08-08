@@ -344,6 +344,13 @@
       "when": 1786108442626,
       "tag": "0048_budget_household_scope_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786108443626,
+      "tag": "0049_transaction_money_contract",
+      "breakpoints": true
     }
   ]
 }
