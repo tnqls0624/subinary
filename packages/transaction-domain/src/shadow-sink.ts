@@ -138,6 +138,8 @@ export class TransactionMoneyShadowSink {
  * 적용하지 않지만, 나중에 수리 manifest를 만들 때 이 분류가 그대로 쓰인다.
  */
 function shadowAction(record: MoneyShadowRecord): TransactionMoneyRepairAction {
+  // 진짜로 다른 승인을 골랐을 때만 재연결이 수리 대상이다. `link_manual_only`는
+  // 사람이 고른 연결을 신규 규칙이 자동으로 특정하지 못한 것뿐이라 바꿀 게 없다.
   if (record.verdict === 'link_target_differs') return 'link_cancellation';
   // 저장 통화가 KRW가 아니면(D-3) 통화 정규화가 먼저다.
   if (record.actual.currency.toUpperCase() !== 'KRW') return 'normalize_currency';

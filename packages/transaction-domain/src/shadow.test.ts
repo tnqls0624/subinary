@@ -101,6 +101,44 @@ describe('shadow 분류', () => {
     expect(record.plannedParentTransactionId).toBe('a9');
   });
 
+  it('신규가 자동 연결을 거부(null)했고 사람이 골랐으면 link_manual_only로 센다', () => {
+    // ADR §4는 후보가 정확히 하나일 때만 자동 연결하고 아니면 사람에게 넘긴다.
+    // 사람이 고른 결과와 갈리는 것은 설계된 동작이므로 진짜 불일치와 같은 통에
+    // 담으면 안 된다 — 2026-08-09 관측에서 8건 전부 이쪽이었다.
+    const record = classifyMoneyShadow(
+      input({
+        transactionType: 'cancellation',
+        actual: { ...actualKrw, parentTransactionId: 'a1', netAmount: 0 },
+        planned: { ...plannedKrw, netAmount: 0 },
+        plannedParentTransactionId: null,
+      }),
+    );
+    expect(record.verdict).toBe('link_manual_only');
+    expect(record.plannedParentTransactionId).toBeNull();
+  });
+
+  it('link_manual_only와 link_target_differs가 요약에서 따로 집계된다', () => {
+    const manual = classifyMoneyShadow(
+      input({
+        transactionType: 'cancellation',
+        actual: { ...actualKrw, parentTransactionId: 'a1', netAmount: 0 },
+        planned: { ...plannedKrw, netAmount: 0 },
+        plannedParentTransactionId: null,
+      }),
+    );
+    const real = classifyMoneyShadow(
+      input({
+        transactionType: 'cancellation',
+        actual: { ...actualKrw, parentTransactionId: 'a1', netAmount: 0 },
+        planned: { ...plannedKrw, netAmount: 0 },
+        plannedParentTransactionId: 'a2',
+      }),
+    );
+    const summary = summarizeMoneyShadow([manual, real]);
+    expect(summary.byVerdict.link_manual_only).toBe(1);
+    expect(summary.byVerdict.link_target_differs).toBe(1);
+  });
+
   it('연결 판정을 하지 않은 경우(undefined)는 link 비교를 하지 않는다', () => {
     const record = classifyMoneyShadow(input({ plannedParentTransactionId: undefined }));
     expect(record.verdict).toBe('match');

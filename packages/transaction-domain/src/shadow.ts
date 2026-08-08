@@ -28,8 +28,22 @@ export type MoneyShadowVerdict =
   | 'fx_amount_delta'
   /** 신규가 계산 실패 — 대부분 기준일 환율 스냅샷이 아직 없다는 뜻이다. */
   | 'plan_failed'
-  /** 연결 대상 다름 — 취소가 붙을 승인이 갈렸다. */
-  | 'link_target_differs';
+  /**
+   * 연결 대상 다름 — 신규 규칙과 실제가 **서로 다른 승인**을 골랐다.
+   *
+   * ⚠️ 전환 게이트에서 **0건이어야 하는 항목**이다. 금액이 같아도 체인 구조가
+   * 달라지므로 enforce 이후 상계 대상이 바뀐다.
+   */
+  | 'link_target_differs'
+  /**
+   * 신규 규칙은 자동 연결을 거부(후보가 유일하지 않음)했는데 사람이 수동으로 골랐다.
+   *
+   * ADR §4가 "후보가 정확히 하나일 때만 자동 연결하고 아니면 사람에게 넘긴다"고
+   * 규정했으므로 **설계대로 동작한 것**이며 위험하지 않다. `link_target_differs`와
+   * 합쳐 세면 무해한 수동 연결이 진짜 불일치를 가린다 — 실제로 2026-08-09 관측에서
+   * 8건 전부 이쪽이었고 진짜 불일치는 0건이었다.
+   */
+  | 'link_manual_only';
 
 /** 비교에 쓰는 실제 저장값(= 기존 경로의 결과). */
 export interface MoneyShadowActual {
@@ -119,7 +133,12 @@ export function classifyMoneyShadow(input: ClassifyMoneyShadowInput): MoneyShado
     input.plannedParentTransactionId !== undefined &&
     input.plannedParentTransactionId !== input.actual.parentTransactionId
   ) {
-    return { ...base, verdict: 'link_target_differs', netAmountDelta };
+    // 신규가 `null`이면 "붙을 승인을 자동으로 특정하지 못했다"는 뜻이고, 사람이 고른
+    // 결과와 갈리는 것은 ADR §4가 의도한 동작이다. 실제로 다른 승인을 고른 경우와
+    // 섞어 세면 게이트에서 무해한 쪽이 위험한 쪽을 가린다.
+    const verdict =
+      input.plannedParentTransactionId === null ? 'link_manual_only' : 'link_target_differs';
+    return { ...base, verdict, netAmountDelta };
   }
 
   const same =
@@ -156,6 +175,7 @@ export function summarizeMoneyShadow(
     fx_amount_delta: 0,
     plan_failed: 0,
     link_target_differs: 0,
+    link_manual_only: 0,
   };
   let krwAbsoluteDelta = 0;
   for (const record of records) {
