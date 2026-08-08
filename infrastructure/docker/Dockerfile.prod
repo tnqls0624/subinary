@@ -30,6 +30,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # 의존성 manifest를 소스보다 먼저 복사해 코드만 바뀐 재빌드에서 install cache를 재사용한다.
+#
+# ⚠️ **워크스페이스를 추가하면 이 목록에 반드시 한 줄을 더해야 한다.** 빠뜨리면 install이
+# 그 패키지의 devDeps를 건너뛰어 아래 build 단계가 `tsup: not found`로 죽는다. Dockerfile.dev는
+# `COPY . .`라 이 실수를 가려주고, 로컬 `pnpm install --frozen-lockfile`도 node_modules가
+# 이미 있어 통과한다 — 운영 이미지 빌드에서만 드러난다(2026-08-08 transaction-domain).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/mcp/package.json apps/mcp/package.json
@@ -45,6 +50,7 @@ COPY packages/database/package.json packages/database/package.json
 COPY packages/rag/package.json packages/rag/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/slack-parser/package.json packages/slack-parser/package.json
+COPY packages/transaction-domain/package.json packages/transaction-domain/package.json
 
 # 빌드에는 devDeps(nest/next/tsup/typescript)가 필요 → 전체 설치(frozen).
 # BuildKit 캐시를 사용해 중단·재빌드 시 이미 받은 패키지를 다시 내려받지 않는다.
