@@ -330,6 +330,20 @@
       "when": 1786108440626,
       "tag": "0046_backfill_revoked_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786108441626,
+      "tag": "0047_device_eligibility_and_credential_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786108442626,
+      "tag": "0048_budget_household_scope_unique",
+      "breakpoints": true
     }
   ]
 }

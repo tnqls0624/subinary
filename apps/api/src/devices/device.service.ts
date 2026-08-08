@@ -19,19 +19,20 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 import type {
   DeviceRegisterRequest,
   DeviceSecretResponse,
   DeviceSummary,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { isUniqueViolation, schema, type Db } from '@family/database';
 
 import { TokenService } from '../auth/token.service';
 import { DB } from '../database/database.constants';
@@ -228,31 +229,56 @@ export class DeviceService {
     const collectTokenHash = hashCollectToken(rawCollectToken);
     const now = new Date();
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(schema.deviceCredentials)
-        .set({ status: 'revoked', revokedAt: now })
-        .where(
-          and(
-            eq(schema.deviceCredentials.deviceId, deviceId),
-            eq(schema.deviceCredentials.status, 'active'),
-          ),
-        );
+    try {
+      await this.db.transaction(async (tx) => {
+        // 장치 행을 잠가 장치별로 회전을 직렬화한다. 잠그지 않으면 두 회전이 서로의
+        // revoke 이전 스냅샷을 보고 각각 active credential을 남겨, 서버가 임의로
+        // 고른 쪽과 클라이언트가 받은 secret이 달라 401이 난다.
+        // revokeDevice도 같은 행을 잠그므로 회전/폐기가 교차하지 않는다.
+        const [locked] = await tx
+          .select({ id: schema.registeredDevices.id })
+          .from(schema.registeredDevices)
+          .where(eq(schema.registeredDevices.id, deviceId))
+          .for('update')
+          .limit(1);
+        if (!locked) {
+          throw new NotFoundException('device not found');
+        }
 
-      await tx.insert(schema.deviceCredentials).values({
-        deviceId,
-        secretCiphertext: encrypted.ciphertext,
-        secretIv: encrypted.iv,
-        secretAuthTag: encrypted.authTag,
-        keyVersion: encrypted.keyVersion,
-        status: 'active',
+        await tx
+          .update(schema.deviceCredentials)
+          .set({ status: 'revoked', revokedAt: now })
+          .where(
+            and(
+              eq(schema.deviceCredentials.deviceId, deviceId),
+              eq(schema.deviceCredentials.status, 'active'),
+            ),
+          );
+
+        await tx.insert(schema.deviceCredentials).values({
+          deviceId,
+          secretCiphertext: encrypted.ciphertext,
+          secretIv: encrypted.iv,
+          secretAuthTag: encrypted.authTag,
+          keyVersion: encrypted.keyVersion,
+          status: 'active',
+        });
+
+        await tx
+          .update(schema.registeredDevices)
+          .set({ collectTokenHash, updatedAt: now })
+          .where(eq(schema.registeredDevices.id, deviceId));
       });
-
-      await tx
-        .update(schema.registeredDevices)
-        .set({ collectTokenHash, updatedAt: now })
-        .where(eq(schema.registeredDevices.id, deviceId));
-    });
+    } catch (error) {
+      // 부분 유니크(device_credentials_device_active_unique) 위반은 잠금이 있는 한
+      // 애플리케이션 경합으로는 나올 수 없다 — 마이그레이션 이전에 생긴 잔여 중복이나
+      // 앱 밖 쓰기가 원인이다. 재시도하면 같은 데이터 문제로 계속 실패하므로 409로
+      // 돌려주고 운영자가 정리하게 한다(secret은 이미 폐기되지 않았다 — 롤백됐다).
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('device credential rotation conflicted');
+      }
+      throw error;
+    }
 
     return this.buildSecretResponse(device, rawSecret, rawCollectToken);
   }
@@ -269,6 +295,14 @@ export class DeviceService {
 
     const now = new Date();
     await this.db.transaction(async (tx) => {
+      // rotateSecret과 같은 잠금 지점 — 폐기 직후 회전이 새 active를 끼워 넣는 것을 막는다.
+      await tx
+        .select({ id: schema.registeredDevices.id })
+        .from(schema.registeredDevices)
+        .where(eq(schema.registeredDevices.id, deviceId))
+        .for('update')
+        .limit(1);
+
       await tx
         .update(schema.registeredDevices)
         .set({ status: 'revoked', revokedAt: now, updatedAt: now })
@@ -308,6 +342,10 @@ export class DeviceService {
           eq(schema.deviceCredentials.status, 'active'),
         ),
       )
+      // 부분 유니크가 붙은 뒤에는 최대 1행이지만, 그 이전에 생긴 잔여 중복이 있으면
+      // 정렬 없는 limit(1)은 요청마다 다른 credential을 고를 수 있다. 최신 것을
+      // 고정 선택해 마이그레이션의 정리 규칙(가장 최근 회전분을 남긴다)과 맞춘다.
+      .orderBy(desc(schema.deviceCredentials.createdAt))
       .limit(1);
 
     return credential ?? null;

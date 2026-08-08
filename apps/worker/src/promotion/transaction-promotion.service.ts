@@ -566,13 +566,65 @@ export class TransactionPromotionService {
         };
       }
 
-      const approval = matches[0];
+      // 후보 탐색은 잠금 없이 했다(후보가 많을 수 있어 전부 잠그면 승격이 서로 막힌다).
+      // 확정된 승인 **하나만** FOR UPDATE로 잠그고, 잠근 뒤 값으로 잔액을 다시 판정한다.
+      // 잠그기 전 값으로 누적하면 두 취소가 같은 초기 cancelledAmount를 읽어 마지막
+      // update만 남고 취소액이 유실된다(순지출·예산 사용률이 실제보다 크게 나온다).
+      const [approval] = await tx
+        .select()
+        .from(schema.cardTransactions)
+        .where(eq(schema.cardTransactions.id, matches[0].id))
+        .for('update')
+        .limit(1);
+
+      // 잠금을 기다리는 사이 다른 승격이 같은 승인에 붙어 잔액이 모자라졌거나 후보
+      // 조건에서 벗어났으면 연결하지 않는다 — 잘못 연결해 음수 잔액을 만드는 것보다
+      // pending_review가 낫다. 후보 탐색과 **같은 술어**로 다시 판정한다.
+      if (
+        !approval ||
+        !['approved', 'partially_cancelled'].includes(approval.status) ||
+        approval.amount - approval.cancelledAmount < amount
+      ) {
+        return {
+          status: 'pending_review',
+          linked: false,
+          skipped: false,
+          transactionId: inserted.id,
+        };
+      }
+
       const newCancelledAmount = approval.cancelledAmount + amount;
       const newNetAmount = approval.amount - newCancelledAmount;
       assertKrwInteger(newNetAmount);
       const approvalStatus: TransactionStatus =
         newCancelledAmount >= approval.amount ? 'cancelled' : 'partially_cancelled';
       const now = new Date();
+
+      // 취소 행 연결을 먼저 claim한다(`parent_transaction_id IS NULL` 조건 + RETURNING).
+      // 방금 삽입한 행이라 이 트랜잭션 밖에서는 보이지 않지만, 승인 누적을 claim 성공
+      // 뒤로 두면 "연결되지 않았는데 잔액만 깎이는" 상태가 어떤 경로로도 생기지 않는다.
+      const [linked] = await tx
+        .update(schema.cardTransactions)
+        .set({
+          parentTransactionId: approval.id,
+          status: 'approved',
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.cardTransactions.id, inserted.id),
+            isNull(schema.cardTransactions.parentTransactionId),
+          ),
+        )
+        .returning({ id: schema.cardTransactions.id });
+      if (!linked) {
+        return {
+          status: 'pending_review',
+          linked: false,
+          skipped: false,
+          transactionId: inserted.id,
+        };
+      }
 
       await tx
         .update(schema.cardTransactions)
@@ -583,15 +635,6 @@ export class TransactionPromotionService {
           updatedAt: now,
         })
         .where(eq(schema.cardTransactions.id, approval.id));
-
-      await tx
-        .update(schema.cardTransactions)
-        .set({
-          parentTransactionId: approval.id,
-          status: 'approved',
-          updatedAt: now,
-        })
-        .where(eq(schema.cardTransactions.id, inserted.id));
 
       return {
         status: approvalStatus,

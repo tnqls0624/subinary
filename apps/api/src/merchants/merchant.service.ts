@@ -13,7 +13,12 @@
  *   사용자 기대에 맞는다. 원문(`merchant_raw`)은 건드리지 않으므로 되돌릴 수 있다.
  */
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { schema, type Db } from '@family/database';
+import {
+  redactedMerchantLabel,
+  schema,
+  visibilityScope,
+  type Db,
+} from '@family/database';
 import { normalizeMerchant } from '@family/shared';
 import type {
   MerchantAliasCreateRequest,
@@ -42,11 +47,15 @@ export class MerchantService {
     userId: string,
     householdId: string,
   ): Promise<MerchantSummary[]> {
-    await this.requireMembership(householdId, userId);
+    const actorMemberId = await this.requireMembership(householdId, userId);
 
+    // 공개범위는 analytics와 **같은 헬퍼**를 쓴다. 이 목록은 가맹점명과 순지출을 그대로
+    // 보여주므로 조건이 빠지면 타인의 private 거래가 통째로 노출된다(실제 누락 사례).
+    // 타인의 summary_only는 금액만 남기고 이름을 '(비공개)'로 접는다.
+    const merchantLabel = redactedMerchantLabel(actorMemberId);
     const aggregates = await this.db
       .select({
-        name: schema.cardTransactions.merchantNormalized,
+        name: merchantLabel,
         transactionCount: sql<string>`count(*)`,
         netTotal: sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`,
         lastTransactionAt: sql<Date | null>`max(${schema.cardTransactions.approvedAt})`,
@@ -58,9 +67,12 @@ export class MerchantService {
           eq(schema.cardTransactions.transactionType, 'approval'),
           isNull(schema.cardTransactions.excludedAt),
           sql`${schema.cardTransactions.merchantNormalized} is not null`,
+          visibilityScope(actorMemberId),
         ),
       )
-      .groupBy(schema.cardTransactions.merchantNormalized);
+      // ordinal로 묶는다 — 표현식 객체를 다시 넘기면 placeholder가 어긋나 masking에
+      // 쓰인 member_id/visibility가 "ungrouped"로 남는다(analytics.merchants와 동일).
+      .groupBy(sql`1`);
 
     const aliases = await this.db
       .select({
@@ -104,7 +116,7 @@ export class MerchantService {
       names.add(a.canonical);
     }
 
-    const aggByName = new Map(aggregates.map((r) => [r.name ?? '', r]));
+    const aggByName = new Map(aggregates.map((r) => [r.name, r]));
     const items: MerchantSummary[] = [...names].map((name) => {
       const agg = aggByName.get(name);
       const rule = ruleByPattern.get(name);
@@ -346,16 +358,20 @@ export class MerchantService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * `userId`가 `householdId`의 활성 구성원인지(그리고 `roles` 중 하나인지) 강제한다.
+   * `userId`가 `householdId`의 활성 구성원인지(그리고 `roles` 중 하나인지) 강제하고
+   * 액터의 `memberId`를 돌려준다(공개범위 스코프에 필요).
    * 비구성원에게는 가구 존재 여부를 드러내지 않는 403을 준다(PRD §26).
    */
   private async requireMembership(
     householdId: string,
     userId: string,
     roles?: readonly string[],
-  ): Promise<void> {
+  ): Promise<string> {
     const [member] = await this.db
-      .select({ role: schema.householdMembers.role })
+      .select({
+        id: schema.householdMembers.id,
+        role: schema.householdMembers.role,
+      })
       .from(schema.householdMembers)
       .where(
         and(
@@ -369,5 +385,6 @@ export class MerchantService {
     if (roles && !roles.includes(member.role)) {
       throw new ForbiddenException('insufficient role');
     }
+    return member.id;
   }
 }

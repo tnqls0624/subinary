@@ -56,15 +56,34 @@ export class DeviceTokenGuard implements CanActivate {
       this.fail();
     }
 
-    // 2. Match sha256(token) against an active device (existence never leaks).
+    // 2. Match sha256(token) against an active device *whose owning member is
+    //    still an active household member* (existence never leaks).
+    //    가구를 나가거나 제거된 구성원의 장치는 여기서 끊긴다. 제거 트랜잭션이
+    //    장치를 함께 폐기하지만(HouseholdService.removeMember), 그 이전에 만들어진
+    //    장치나 다른 경로로 생긴 누락은 이 조인이 최종 방어선이다.
+    //    비용은 member_id(PK) 단건 조회라 수집 요청마다 붙어도 무시할 수준이다.
     const tokenHash = createHash('sha256').update(token, 'utf8').digest('hex');
     const [device] = await this.db
-      .select()
+      .select({
+        id: schema.registeredDevices.id,
+        householdId: schema.registeredDevices.householdId,
+        memberId: schema.registeredDevices.memberId,
+      })
       .from(schema.registeredDevices)
+      .innerJoin(
+        schema.householdMembers,
+        eq(schema.householdMembers.id, schema.registeredDevices.memberId),
+      )
       .where(
         and(
           eq(schema.registeredDevices.collectTokenHash, tokenHash),
           eq(schema.registeredDevices.status, 'active'),
+          eq(schema.householdMembers.status, 'active'),
+          // 장치와 멤버십이 같은 가구를 가리키는지도 확인한다(가구 경계 불변식).
+          eq(
+            schema.householdMembers.householdId,
+            schema.registeredDevices.householdId,
+          ),
         ),
       )
       .limit(1);

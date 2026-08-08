@@ -26,7 +26,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type {
   BudgetCreateRequest,
@@ -41,6 +41,7 @@ import {
   type Db,
   notTransferCategory,
   spendPeriodWindow,
+  visibilityScope,
 } from '@family/database';
 import { assertKrwInteger } from '@family/shared';
 
@@ -244,7 +245,7 @@ export class BudgetService {
       // 기간 창은 analytics/요약과 같은 공통 헬퍼(ADR-0026). approvedAt strict 비교였을
       // 때는 승인시각 미파싱 거래가 사용률에서 통째로 빠져 analytics 총액과 어긋났다.
       spendPeriodWindow(period.from, period.to),
-      this.visibilityScope(actorMemberId),
+      visibilityScope(actorMemberId),
     ];
 
     switch (budget.scopeType) {
@@ -280,19 +281,6 @@ export class BudgetService {
     const spent = toInt(agg?.spent);
     assertKrwInteger(spent);
     return spent;
-  }
-
-  /**
-   * The visibility WHERE fragment (§1.2): own rows ∪ `household`/`summary_only`.
-   * Another member's `private` rows are excluded from aggregation.
-   */
-  private visibilityScope(actorMemberId: string): SQL {
-    const scope = or(
-      eq(schema.cardTransactions.memberId, actorMemberId),
-      inArray(schema.cardTransactions.visibility, ['household', 'summary_only']),
-    );
-    // Both operands are defined, so `or` always yields a SQL fragment.
-    return scope as SQL;
   }
 
   /* ---------------------------------------------------------------------- */
@@ -475,9 +463,11 @@ export class BudgetService {
   }
 
   /**
-   * Pre-checks the `(householdId, scopeType, scopeRefId)` uniqueness before
-   * insert — the DB unique constraint treats NULL `scopeRefId` (household scope)
-   * as distinct, so it alone would not block a second household budget.
+   * `(householdId, scopeType, scopeRefId)` 중복을 미리 잡아 **친절한 409 메시지**를
+   * 준다. 최종 권위는 DB다 — 이 조회와 insert 사이에는 직렬화 지점이 없어 동시 요청
+   * 두 건은 둘 다 여기를 통과한다. household 스코프는 `scopeRefId`가 NULL이라 3열
+   * UNIQUE로는 막히지 않으므로 부분 유니크 인덱스(`budgets_household_scope_unique`,
+   * 0048)가 그 자리를 대신하고, 위반은 create()가 23505로 받아 같은 409로 변환한다.
    */
   private async assertNoDuplicate(
     householdId: string,

@@ -27,7 +27,7 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, sql, type SQL } from 'drizzle-orm';
 
 import type {
   CardBreakdown,
@@ -41,7 +41,9 @@ import {
   schema,
   type Db,
   notTransferCategory,
+  redactedMerchantLabel,
   spendPeriodWindow,
+  visibilityScope,
 } from '@family/database';
 import { assertKrwInteger, DEFAULT_TIMEZONE } from '@family/shared';
 
@@ -57,11 +59,14 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 /** Top-N merchants returned by the merchants breakdown (spec §5.1). */
 const TOP_MERCHANTS = 20;
 
-/** Labels for null/redacted grouping keys (spec §5.1). */
+/**
+ * Labels for null grouping keys (spec §5.1). 가려진 가맹점 라벨은
+ * `@family/database`의 `REDACTED_MERCHANT_LABEL`을 쓴다 — 가맹점 목록 API도 같은
+ * 문자열로 그룹핑해야 하므로 여기에 사본을 두지 않는다.
+ */
 const LABEL_UNCATEGORIZED = '미분류';
 const LABEL_UNLINKED_CARD = '미연결';
 const LABEL_UNKNOWN_MERCHANT = '미확인 가맹점';
-const LABEL_REDACTED = '(비공개)';
 
 /* -------------------------------------------------------------------------- */
 /* Query shapes                                                               */
@@ -364,14 +369,10 @@ export class AnalyticsService {
 
     // Merchant label — masks another member's summary_only merchant name and
     // normalizes null merchants, all as a groupable SQL expression.
-    const merchantLabel = sql<string>`case
-      when ${schema.cardTransactions.memberId} <> ${actorMemberId}::uuid
-        and ${schema.cardTransactions.visibility} = 'summary_only'
-        then ${LABEL_REDACTED}
-      when ${schema.cardTransactions.merchantNormalized} is null
-        then ${LABEL_UNKNOWN_MERCHANT}
-      else ${schema.cardTransactions.merchantNormalized}
-    end`;
+    const merchantLabel = redactedMerchantLabel(
+      actorMemberId,
+      LABEL_UNKNOWN_MERCHANT,
+    );
     const netExpr = sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`;
 
     // Group by ordinal position (`GROUP BY 1` = the first SELECT column, the
@@ -496,22 +497,10 @@ export class AnalyticsService {
       // 원화(₩2,200=2200)가 정수로 구분되지 않으므로, 이 단일 초크포인트에서 통화를
       // 걸러 monthly/categories/members/cards/merchants/sumNet 전부를 정화한다.
       eq(schema.cardTransactions.currency, 'KRW'),
-      this.visibilityScope(actorMemberId),
+      // 공개범위도 @family/database의 공통 헬퍼다 — 집계 API마다 복사돼 있던 조건이
+      // /v1/merchants에서 통째로 누락된 적이 있다(2026-08).
+      visibilityScope(actorMemberId),
     ];
-  }
-
-  /**
-   * Visibility WHERE fragment (spec §1.2): the actor's own rows ∪
-   * `household`/`summary_only`. Another member's `private` rows are excluded
-   * (and counted separately as `excludedByPermission`).
-   */
-  private visibilityScope(actorMemberId: string): SQL {
-    const scope = or(
-      eq(schema.cardTransactions.memberId, actorMemberId),
-      inArray(schema.cardTransactions.visibility, ['household', 'summary_only']),
-    );
-    // Both operands are defined, so `or` always yields a SQL fragment.
-    return scope as SQL;
   }
 
   /** SQL sum of `netAmount` over the given conditions (the ratio denominator). */

@@ -38,7 +38,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Queue } from 'bullmq';
-import { and, asc, eq, gt, ilike, isNull, lte, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  or,
+  type SQL,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import type {
@@ -439,6 +450,28 @@ export class GraphService {
     const now = new Date();
 
     const newRelationshipId = await this.db.transaction(async (tx) => {
+      // 두 엔티티가 **이 workspace**의 것인지 먼저 확인한다. `assertOwnedWorkspace`는
+      // 기존 관계의 workspace만 보므로, 검증이 없으면 다른 workspace의 entity UUID를
+      // 넣어 교차 workspace 관계를 만들 수 있고 응답이 그 이름까지 돌려준다
+      // (`getRelationshipSummary`가 두 엔티티를 join한다).
+      // 순서가 중요하다 — 검증 실패로 기존 관계가 닫히면 안 된다.
+      const entityIds = [
+        ...new Set([input.sourceEntityId, input.targetEntityId]),
+      ];
+      const owned = await tx
+        .select({ id: schema.entities.id })
+        .from(schema.entities)
+        .where(
+          and(
+            inArray(schema.entities.id, entityIds),
+            eq(schema.entities.workspaceId, existing.workspaceId),
+          ),
+        );
+      if (owned.length !== entityIds.length) {
+        // 다른 workspace에 존재한다는 사실도 흘리지 않도록 loadEntity와 같은 404를 쓴다.
+        throw new NotFoundException('entity not found');
+      }
+
       await tx
         .update(schema.relationships)
         .set({ validUntil: now, updatedAt: now })

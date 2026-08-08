@@ -23,16 +23,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  or,
-  sql,
-  type SQL,
-} from 'drizzle-orm';
+import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { ProviderSet } from '@family/ai-providers';
@@ -48,7 +39,9 @@ import {
   schema,
   type Db,
   notTransferCategory,
+  redactedMerchantLabel,
   spendPeriodWindow,
+  visibilityScope,
 } from '@family/database';
 import { DEFAULT_CATEGORIES } from '@family/shared';
 
@@ -89,7 +82,6 @@ const ANOMALY_MULTIPLIER = 3;
 const MIN_ELAPSED_RATE = 1 / 31;
 
 /** 타 구성원 summary_only 가맹점 마스킹 라벨(analytics.merchants와 동일). */
-const LABEL_REDACTED = '(비공개)';
 const LABEL_UNKNOWN_MERCHANT = '미확인 가맹점';
 
 /** 예산 이름이 없을 때 스코프별 대체 라벨. */
@@ -563,14 +555,10 @@ export class FinanceAiService {
     if (transactionCount < 2 || totalNet <= 0) return null;
 
     const { from, to } = seoulMonthRange(month);
-    const merchantLabel = sql<string>`case
-      when ${schema.cardTransactions.memberId} <> ${actorMemberId}::uuid
-        and ${schema.cardTransactions.visibility} = 'summary_only'
-        then ${LABEL_REDACTED}
-      when ${schema.cardTransactions.merchantNormalized} is null
-        then ${LABEL_UNKNOWN_MERCHANT}
-      else ${schema.cardTransactions.merchantNormalized}
-    end`;
+    const merchantLabel = redactedMerchantLabel(
+      actorMemberId,
+      LABEL_UNKNOWN_MERCHANT,
+    );
 
     // netAmount(취소 반영 순액)로 최고액을 뽑고 isNull(excludedAt)로 '제외' 거래를
     // 배제한다 — 평균(totalNet/count)도 net·제외반영 기준이므로 분자/분모를 정렬해
@@ -593,7 +581,7 @@ export class FinanceAiService {
           // KRW 전용(평균·formatWon이 원 기준). 외화 minor units가 최고액 정렬을
           // 오염시키지 않게 한다(grounding 정확성 = LLM 답변 정확성).
           eq(schema.cardTransactions.currency, 'KRW'),
-          this.visibilityScope(actorMemberId),
+          visibilityScope(actorMemberId),
           // 기간 창도 analytics와 같은 공통 헬퍼로 — 분자(최고액)와 분모(평균)의
           // 모집단이 어긋나면 3배 판정 자체가 흔들린다.
           spendPeriodWindow(from, to),
@@ -778,18 +766,6 @@ export class FinanceAiService {
       throw new ForbiddenException('not a household member');
     }
     return member.id;
-  }
-
-  /** 공개범위 WHERE 조각(analytics와 동일: 본인 ∪ household/summary_only). */
-  private visibilityScope(actorMemberId: string): SQL {
-    const scope = or(
-      eq(schema.cardTransactions.memberId, actorMemberId),
-      inArray(schema.cardTransactions.visibility, [
-        'household',
-        'summary_only',
-      ]),
-    );
-    return scope as SQL;
   }
 
   /** 쿼리스트링 householdId 검증(형식 오류 400, 누락 400). */

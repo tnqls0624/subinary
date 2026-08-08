@@ -24,7 +24,7 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 
 import type { AppConfig } from '@family/config';
@@ -80,13 +80,35 @@ export class DeviceHmacGuard implements CanActivate {
       this.fail();
     }
 
-    // 3. Device must exist and be active (existence is never disclosed).
+    // 3. Device must exist, be active, and its owning member must still be an
+    //    active household member (existence is never disclosed).
+    //    구성원 제거 트랜잭션이 장치도 함께 폐기하지만, 그 이전에 만들어진 장치나
+    //    다른 경로로 생긴 누락은 이 조인이 최종 방어선이다. member_id는 PK 조회라
+    //    서명 검증 경로에 붙는 비용이 무시할 수준이다.
     const [device] = await this.db
-      .select()
+      .select({
+        id: schema.registeredDevices.id,
+        householdId: schema.registeredDevices.householdId,
+        memberId: schema.registeredDevices.memberId,
+      })
       .from(schema.registeredDevices)
-      .where(eq(schema.registeredDevices.id, deviceId))
+      .innerJoin(
+        schema.householdMembers,
+        eq(schema.householdMembers.id, schema.registeredDevices.memberId),
+      )
+      .where(
+        and(
+          eq(schema.registeredDevices.id, deviceId),
+          eq(schema.registeredDevices.status, 'active'),
+          eq(schema.householdMembers.status, 'active'),
+          eq(
+            schema.householdMembers.householdId,
+            schema.registeredDevices.householdId,
+          ),
+        ),
+      )
       .limit(1);
-    if (!device || device.status !== 'active') {
+    if (!device) {
       this.fail();
     }
 

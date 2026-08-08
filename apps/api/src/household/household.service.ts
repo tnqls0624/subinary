@@ -21,7 +21,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import type {
   AcceptInvitationRequest,
@@ -36,7 +36,7 @@ import type {
   MemberRoleUpdateRequest,
   MemberSummary,
 } from '@family/contracts';
-import { schema, type Db } from '@family/database';
+import { schema, type Db, type DbExecutor } from '@family/database';
 
 import { TokenService } from '../auth/token.service';
 import { DB } from '../database/database.constants';
@@ -328,10 +328,50 @@ export class HouseholdService {
       }
     }
 
-    await this.db
-      .update(schema.householdMembers)
-      .set({ status: 'removed', updatedAt: new Date() })
-      .where(eq(schema.householdMembers.id, targetMemberId));
+    // 멤버십 제거와 장치 폐기는 **같은 트랜잭션**이어야 한다. 멤버십만 removed가 되고
+    // 장치가 살아남는 중간 상태에서는 떠난 사람의 폰이 계속 카드 문자를 밀어 넣는다
+    // (양방향 침해: 떠난 사람은 동의 철회 후에도 수집되고, 남은 가족은 제거한
+    // 구성원의 데이터를 계속 받는다).
+    await this.db.transaction(async (tx) => {
+      const now = new Date();
+      await tx
+        .update(schema.householdMembers)
+        .set({ status: 'removed', updatedAt: now })
+        .where(eq(schema.householdMembers.id, targetMemberId));
+
+      const revokedDevices = await tx
+        .update(schema.registeredDevices)
+        .set({
+          status: 'revoked',
+          revokedAt: now,
+          updatedAt: now,
+          // 수집 토큰 해시까지 지운다 — 장치 행이 어떤 경로로 다시 active가 되더라도
+          // 이미 유출됐을 수 있는 옛 Bearer 토큰이 되살아나면 안 된다.
+          collectTokenHash: null,
+        })
+        .where(
+          and(
+            eq(schema.registeredDevices.memberId, targetMemberId),
+            eq(schema.registeredDevices.status, 'active'),
+          ),
+        )
+        .returning({ id: schema.registeredDevices.id });
+
+      if (revokedDevices.length > 0) {
+        await tx
+          .update(schema.deviceCredentials)
+          .set({ status: 'revoked', revokedAt: now })
+          .where(
+            and(
+              inArray(
+                schema.deviceCredentials.deviceId,
+                revokedDevices.map((device) => device.id),
+              ),
+              eq(schema.deviceCredentials.status, 'active'),
+            ),
+          );
+      }
+    });
 
     return { removed: true };
   }
@@ -408,38 +448,48 @@ export class HouseholdService {
   ): Promise<InvitationSummary> {
     await this.requireMembership(householdId, userId, ['owner']);
 
-    const [invitation] = await this.db
-      .select()
-      .from(schema.householdInvitations)
-      .where(
-        and(
-          eq(schema.householdInvitations.id, invitationId),
-          eq(schema.householdInvitations.householdId, householdId),
-        ),
-      )
-      .limit(1);
+    // 수락과 같은 잠금 순서(초대 행 FOR UPDATE → 상태 전이)를 쓴다. 잠그지 않으면
+    // revoke와 accept가 겹칠 때 늦게 끝난 쪽이 상대의 상태를 덮어쓴다.
+    return this.db.transaction(async (tx) => {
+      const [invitation] = await tx
+        .select()
+        .from(schema.householdInvitations)
+        .where(
+          and(
+            eq(schema.householdInvitations.id, invitationId),
+            eq(schema.householdInvitations.householdId, householdId),
+          ),
+        )
+        .for('update')
+        .limit(1);
 
-    if (!invitation) {
-      throw new NotFoundException('invitation not found');
-    }
-    if (invitation.status === 'revoked') {
-      return toInvitationSummary(invitation);
-    }
-    if (invitation.status !== 'pending') {
-      throw new ConflictException('invitation is no longer pending');
-    }
+      if (!invitation) {
+        throw new NotFoundException('invitation not found');
+      }
+      if (invitation.status === 'revoked') {
+        return toInvitationSummary(invitation);
+      }
+      if (invitation.status !== 'pending') {
+        throw new ConflictException('invitation is no longer pending');
+      }
 
-    const now = new Date();
-    const [updated] = await this.db
-      .update(schema.householdInvitations)
-      .set({ status: 'revoked', revokedAt: now, updatedAt: now })
-      .where(eq(schema.householdInvitations.id, invitationId))
-      .returning();
+      const now = new Date();
+      const [updated] = await tx
+        .update(schema.householdInvitations)
+        .set({ status: 'revoked', revokedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(schema.householdInvitations.id, invitationId),
+            eq(schema.householdInvitations.status, 'pending'),
+          ),
+        )
+        .returning();
 
-    if (!updated) {
-      throw new NotFoundException('invitation not found');
-    }
-    return toInvitationSummary(updated);
+      if (!updated) {
+        throw new NotFoundException('invitation not found');
+      }
+      return toInvitationSummary(updated);
+    });
   }
 
   /**
@@ -462,66 +512,89 @@ export class HouseholdService {
     }
 
     const tokenHash = this.tokenService.hashToken(rawToken);
-    const [invitation] = await this.db
-      .select()
-      .from(schema.householdInvitations)
-      .where(eq(schema.householdInvitations.tokenHash, tokenHash))
-      .limit(1);
 
-    if (!invitation) {
-      throw new NotFoundException('invitation not found');
-    }
-
-    switch (invitation.status) {
-      case 'accepted':
-        throw new ConflictException('invitation has already been accepted');
-      case 'revoked':
-        throw new GoneException('invitation has been revoked');
-      case 'expired':
-        throw new GoneException('invitation has expired');
-      case 'pending':
-        break;
-    }
-
-    if (invitation.expiresAt.getTime() < Date.now()) {
-      await this.db
-        .update(schema.householdInvitations)
-        .set({ status: 'expired', updatedAt: new Date() })
-        .where(eq(schema.householdInvitations.id, invitation.id));
-      throw new GoneException('invitation has expired');
-    }
-
-    if (invitation.email) {
-      const [user] = await this.db
-        .select({ email: schema.users.email })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
+    /*
+     * 수락 **전 과정**을 한 트랜잭션에 넣고 초대 행을 `FOR UPDATE`로 잠근다.
+     *
+     * 왜 잠금인가(조건부 UPDATE claim 대신): 이메일 미지정 초대는 수락자가 정해져
+     * 있지 않아 claim을 먼저 하면 이메일 불일치·비활성 가구 같은 정상 거절 경로에서도
+     * 초대가 소모된다. 또 실패한 claim의 원인을 알려면 상태를 다시 읽어야 하는데,
+     * 그 재조회가 또 경합한다. 행을 잠그면 기존 검사 순서와 에러 의미론
+     * (accepted→409 / revoked·expired→410 / 이메일 불일치→403)을 **그대로 두고**
+     * 동시 수락만 직렬화된다 — 뒤에 온 쪽은 잠금이 풀린 뒤 `accepted`를 보고 409다.
+     *
+     * DB unique는 (householdId, userId)뿐이라 **서로 다른 두 사용자**는 각각 다른 키로
+     * 둘 다 커밋에 성공한다. 즉 이 잠금이 유일한 직렬화 지점이다.
+     */
+    const outcome = await this.db.transaction(async (tx) => {
+      const [invitation] = await tx
+        .select()
+        .from(schema.householdInvitations)
+        .where(eq(schema.householdInvitations.tokenHash, tokenHash))
+        .for('update')
         .limit(1);
-      if (!user || user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-        throw new ForbiddenException('invitation is for a different account');
+
+      if (!invitation) {
+        throw new NotFoundException('invitation not found');
       }
-    }
 
-    const [existing] = await this.db
-      .select()
-      .from(schema.householdMembers)
-      .where(
-        and(
-          eq(schema.householdMembers.householdId, invitation.householdId),
-          eq(schema.householdMembers.userId, userId),
-        ),
-      )
-      .limit(1);
+      switch (invitation.status) {
+        case 'accepted':
+          throw new ConflictException('invitation has already been accepted');
+        case 'revoked':
+          throw new GoneException('invitation has been revoked');
+        case 'expired':
+          throw new GoneException('invitation has expired');
+        case 'pending':
+          break;
+      }
 
-    // Already an active member: mark the invitation accepted and return the
-    // existing membership (idempotent — no duplicate consent, no role change).
-    if (existing && existing.status === 'active') {
-      await this.markInvitationAccepted(invitation.id, userId);
-      const household = await this.loadHousehold(invitation.householdId);
-      return toHouseholdSummary(household, existing.role);
-    }
+      if (invitation.expiresAt.getTime() < Date.now()) {
+        // 만료 표기는 커밋되어야 하므로 여기서 던지지 않고 밖에서 410을 던진다.
+        await tx
+          .update(schema.householdInvitations)
+          .set({ status: 'expired', updatedAt: new Date() })
+          .where(eq(schema.householdInvitations.id, invitation.id));
+        return { kind: 'expired' as const };
+      }
 
-    const household = await this.db.transaction(async (tx) => {
+      if (invitation.email) {
+        const [user] = await tx
+          .select({ email: schema.users.email })
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .limit(1);
+        if (
+          !user ||
+          user.email.toLowerCase() !== invitation.email.toLowerCase()
+        ) {
+          throw new ForbiddenException('invitation is for a different account');
+        }
+      }
+
+      const [existing] = await tx
+        .select()
+        .from(schema.householdMembers)
+        .where(
+          and(
+            eq(schema.householdMembers.householdId, invitation.householdId),
+            eq(schema.householdMembers.userId, userId),
+          ),
+        )
+        .limit(1);
+
+      // Already an active member: mark the invitation accepted and return the
+      // existing membership (idempotent — no duplicate consent, no role change).
+      if (existing && existing.status === 'active') {
+        await this.markInvitationAccepted(tx, invitation.id, userId);
+        const household = await this.loadHousehold(invitation.householdId, tx);
+        return {
+          kind: 'joined' as const,
+          household,
+          role: existing.role,
+        };
+      }
+
       if (existing) {
         // Re-activate a previously removed membership with the invited role
         // (avoids violating the unique (householdId, userId) constraint).
@@ -549,37 +622,34 @@ export class HouseholdService {
         consentType: 'household_join',
       });
 
-      const acceptedAt = new Date();
-      await tx
-        .update(schema.householdInvitations)
-        .set({
-          status: 'accepted',
-          acceptedByUserId: userId,
-          acceptedAt,
-          updatedAt: acceptedAt,
-        })
-        .where(eq(schema.householdInvitations.id, invitation.id));
+      await this.markInvitationAccepted(tx, invitation.id, userId);
 
       const [row] = await tx
         .select()
         .from(schema.households)
         .where(eq(schema.households.id, invitation.householdId))
         .limit(1);
-      return row;
+      if (!row) {
+        throw new NotFoundException('household not found');
+      }
+      return { kind: 'joined' as const, household: row, role: invitation.role };
     });
 
-    if (!household) {
-      throw new NotFoundException('household not found');
+    if (outcome.kind === 'expired') {
+      throw new GoneException('invitation has expired');
     }
-    return toHouseholdSummary(household, invitation.role);
+    return toHouseholdSummary(outcome.household, outcome.role);
   }
 
   /* ---------------------------------------------------------------------- */
   /* Internal loaders                                                        */
   /* ---------------------------------------------------------------------- */
 
-  private async loadHousehold(householdId: string): Promise<schema.Household> {
-    const [household] = await this.db
+  private async loadHousehold(
+    householdId: string,
+    executor: DbExecutor = this.db,
+  ): Promise<schema.Household> {
+    const [household] = await executor
       .select()
       .from(schema.households)
       .where(eq(schema.households.id, householdId))
@@ -626,12 +696,18 @@ export class HouseholdService {
     return toMemberSummary(row);
   }
 
+  /**
+   * 초대를 `accepted`로 마감한다. 호출부는 이미 초대 행을 `FOR UPDATE`로 잠근
+   * 트랜잭션 안이므로 여기서 상태를 다시 확인하지 않는다 — 대신 실행기를 반드시
+   * 그 트랜잭션(`tx`)으로 받아 잠금 밖에서 쓰이는 일이 없게 한다.
+   */
   private async markInvitationAccepted(
+    executor: DbExecutor,
     invitationId: string,
     userId: string,
   ): Promise<void> {
     const acceptedAt = new Date();
-    await this.db
+    await executor
       .update(schema.householdInvitations)
       .set({
         status: 'accepted',

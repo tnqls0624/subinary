@@ -455,7 +455,15 @@ export const deviceCredentials = pgTable(
       .notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
-  (table) => [index('device_credentials_device_id_idx').on(table.deviceId)],
+  (table) => [
+    // 앱 로직(회전 시 기존 active→revoked)만으로는 동시 회전 두 건이 각각 active를
+    // 남겨 서버가 임의로 고른 쪽과 클라이언트가 받은 secret이 어긋난다(401). 장치당
+    // active 1개를 DB가 강제한다.
+    uniqueIndex('device_credentials_device_active_unique')
+      .on(table.deviceId)
+      .where(sql`${table.status} = 'active'`),
+    index('device_credentials_device_id_idx').on(table.deviceId),
+  ],
 );
 
 /* -------------------------------------------------------------------------- */
@@ -1172,6 +1180,11 @@ export const budgets = pgTable(
       table.scopeType,
       table.scopeRefId,
     ),
+    // household 스코프는 scopeRefId가 NULL이라 위 UNIQUE가 서로 다른 값으로 취급한다
+    // (NULL != NULL). 동시 생성 시 가구 전체 예산이 둘 생기므로 부분 유니크로 막는다.
+    uniqueIndex('budgets_household_scope_unique')
+      .on(table.householdId)
+      .where(sql`${table.scopeType} = 'household'`),
     index('budgets_household_id_idx').on(table.householdId),
   ],
 );
