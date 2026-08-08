@@ -121,6 +121,37 @@ export const invitationCreatedSchema = z.object({
 });
 export type InvitationCreated = z.infer<typeof invitationCreatedSchema>;
 
+/**
+ * `GET /v1/household-invitations/:token` — 수락 전 미리보기.
+ *
+ * **비인증 공개 경로다.** 토큰을 아는 사람에게만 응답하지만, 초대 링크는 메신저·
+ * 메일로 전달되며 그 대화방에 남는다. 그래서 노출 범위를 이렇게 나눴다.
+ *
+ * - `householdName`: 그대로 준다. "어느 가족이 초대했는지"가 이 화면의 존재 이유고,
+ *   사용자가 직접 지은 별칭('우리집')이라 개인 식별력이 낮다.
+ * - `inviterName`: **가운데를 가린다**(`홍*동`). 받는 사람은 누가 보냈는지 이미 알기
+ *   때문에 확인에는 충분하고, 링크가 흘러나갔을 때 수집되는 값은 줄어든다.
+ * - `email`: 절대 주지 않는다. 지정 초대인지 여부(`emailRestricted`)만 알린다 —
+ *   "다른 계정으로 로그인하면 거절돼요"를 안내하는 데는 이 불리언이면 된다.
+ * - `pending`이 아니면(수락·취소·만료) 위 정보를 **전부 `null`로 막는다.** 이미 죽은
+ *   링크로 가족 정보를 계속 조회할 수 있으면 토큰 하나가 영구 조회권이 된다.
+ *   상태와 만료 시각만 남겨 화면이 정확한 사유를 안내하게 한다.
+ */
+export const invitationPreviewSchema = z.object({
+  status: invitationStatusSchema,
+  /** 만료 시각(ISO). 시각만으로는 가족을 특정할 수 없어 상태와 무관하게 준다. */
+  expiresAt: z.string(),
+  /** 가족 이름. `pending`이 아니면 `null`. */
+  householdName: z.string().nullable(),
+  /** 초대한 사람의 마스킹된 이름. `pending`이 아니면 `null`. */
+  inviterName: z.string().nullable(),
+  /** 수락 시 부여될 역할. `pending`이 아니면 `null`. */
+  role: householdRoleSchema.nullable(),
+  /** 특정 이메일 앞으로 온 초대인지. 이메일 자체는 노출하지 않는다. */
+  emailRestricted: z.boolean(),
+});
+export type InvitationPreview = z.infer<typeof invitationPreviewSchema>;
+
 /** Invitation listing entry (never exposes the raw token). */
 export const invitationSummarySchema = z.object({
   id: z.string(),

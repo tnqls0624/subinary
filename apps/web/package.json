@@ -8,6 +8,7 @@
     "build:mobile": "NODE_ENV=production NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://app.subinary.cloud} BUILD_TARGET=mobile next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "next lint || echo noop"
   },
   "dependencies": {

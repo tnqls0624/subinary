@@ -1,8 +1,13 @@
 "use client";
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 로그인 (오늘의집 톤)
- * loginRequestSchema로 클라 검증 → useAuth().login → /dashboard.
+ * loginRequestSchema로 클라 검증 → useAuth().login → `returnTo`(기본 /dashboard).
  * 카드 없는 화이트 베이스 센터 컬럼: 브랜드 마크 + 큰 제목 + 필드 + 풀폭 CTA.
+ *
+ * `?returnTo=`는 초대 링크가 로그인에서 끊기지 않게 한다(C-1). 회원가입은 이미
+ * invite를 보존했는데 **기존 계정 로그인만** 무조건 /dashboard로 가서, 초대받은
+ * 사람이 수락 화면으로 돌아오지 못했다. 값은 공격자가 심을 수 있는 입력이므로
+ * `safeInternalPath`로 앱 내부 경로만 통과시킨다(오픈 리다이렉트 차단).
  *
  * 네이티브 전용 흐름 2가지(웹에서는 둘 다 비활성):
  *  - 생체인식 재시도: 잠금이 켜진 채 부트스트랩 게이트를 취소/실패해 여기로
@@ -13,8 +18,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreditCard, Fingerprint, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -47,9 +52,38 @@ import {
   setBiometricPref,
 } from "@/lib/biometric";
 import { getStoredRefreshToken, isNative } from "@/lib/native";
+import { safeInternalPath } from "@/lib/safe-redirect";
 
+/**
+ * 로그인 화면의 '회원가입하기' 링크.
+ *
+ * 초대 수락(`/join?token=…`)으로 돌아갈 예정이면 가입 폼에도 그 토큰을 넘겨야 한다 —
+ * 서버 가입 게이트가 초대 토큰을 요구하고, 가입 직후 수락 화면으로 되돌리는 것도
+ * 같은 토큰이다. 없으면 여기서 또 여정이 끊긴다.
+ */
+function registerHrefFor(returnTo: string): string {
+  const queryAt = returnTo.indexOf("?");
+  if (!returnTo.startsWith("/join") || queryAt === -1) return "/register";
+  const token = new URLSearchParams(returnTo.slice(queryAt + 1)).get("token");
+  return token ? `/register?invite=${encodeURIComponent(token)}` : "/register";
+}
+
+/** `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함). */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // 검증 실패(외부 URL·스킴·프로토콜 상대)는 조용히 홈으로 되돌린다 — 사용자에게
+  // 알릴 것이 없고, 알리면 어떤 값이 통과하는지 알려 주는 셈이다.
+  const returnTo =
+    safeInternalPath(searchParams.get("returnTo")) ?? "/dashboard";
   const { login, status, biometricLogin } = useAuth();
 
   const form = useForm<LoginRequest>({
@@ -82,9 +116,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (status === "authenticated" && !holdRedirect.current) {
-      router.replace("/dashboard");
+      router.replace(returnTo);
     }
-  }, [status, router]);
+  }, [status, router, returnTo]);
 
   async function onSubmit(values: LoginRequest) {
     // 옵트인 대상이면 login()이 status를 authenticated로 바꾸기 전에 리다이렉트
@@ -96,7 +130,7 @@ export default function LoginPage() {
       if (optInEligible.current) {
         setOptInOpen(true);
       } else {
-        router.replace("/dashboard");
+        router.replace(returnTo);
       }
     } catch (err) {
       holdRedirect.current = false;
@@ -109,7 +143,7 @@ export default function LoginPage() {
     }
   }
 
-  /** 옵트인 응답 처리 — 어느 쪽이든 다이얼로그를 닫고 대시보드로 보낸다. */
+  /** 옵트인 응답 처리 — 어느 쪽이든 다이얼로그를 닫고 복귀 경로로 보낸다. */
   async function answerOptIn(enable: boolean) {
     if (enable) {
       const gate = await authenticateBiometric(
@@ -130,7 +164,7 @@ export default function LoginPage() {
     }
     setOptInOpen(false);
     holdRedirect.current = false;
-    router.replace("/dashboard");
+    router.replace(returnTo);
   }
 
   async function onBiometricRetry() {
@@ -249,7 +283,7 @@ export default function LoginPage() {
         <p className="text-muted-foreground text-center text-sm">
           아직 계정이 없나요?{" "}
           <Link
-            href="/register"
+            href={registerHrefFor(returnTo)}
             className="text-accent-foreground font-medium hover:underline"
           >
             회원가입하기
@@ -266,7 +300,7 @@ export default function LoginPage() {
           if (!open) {
             setOptInOpen(false);
             holdRedirect.current = false;
-            router.replace("/dashboard");
+            router.replace(returnTo);
           }
         }}
       >

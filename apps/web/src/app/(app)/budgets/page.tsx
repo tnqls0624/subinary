@@ -2,8 +2,11 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 예산 (오늘의집 톤)
  *
- * - 예산 목록: 예산 1건 = Card 1장(UsageBar + 상태 해요체 카피 + 수정/삭제).
+ * - 예산 목록: 예산 1건 = Card 1장(UsageBar + 상태 해요체 카피 + 주 액션).
  *   서버가 현재월 순지출을 SQL로 집계·공개범위 반영해 내려준 값을 그대로 표시.
+ * - 주 액션은 '어디서 썼는지 보기'(→ 그 예산 스코프로 필터된 거래 목록, C-7).
+ *   수정/삭제는 `⋯` 메뉴로 내렸다 — 초과를 알린 뒤 '예산을 늘려라/지워라'만
+ *   제안하는 건 가계부가 줄 수 있는 최악의 조언이다.
  * - 상태 카피: usageRate 80%↑ 경고(text-warning), 100%↑ 초과(text-destructive).
  * - 생성: 상단 우측 "예산 만들기" 주 CTA → Dialog("얼마까지 쓸까요?").
  *   scopeType + (member/category/card면) 대상 select + 월 예산 금액(KRW 정수).
@@ -11,8 +14,9 @@
  *   (PRD §7.2, 서버에서도 강제). 조건부 대상 필드가 있어 폼은 useState 유지.
  * ------------------------------------------------------------------------- */
 import { useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Wallet } from "lucide-react";
+import { Loader2, MoreHorizontal, Plus, Wallet } from "lucide-react";
 
 import type {
   BudgetCreateRequest,
@@ -41,6 +45,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -54,6 +64,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MonthSwitcher, UsageBar } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { budgetTransactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
 import { addMonths } from "@/lib/month";
 import {
@@ -381,7 +392,13 @@ export default function BudgetsPage() {
             </CardContent>
           </Card>
         ) : (
-          items.map((budget) => (
+          items.map((budget) => {
+            const spentHref = budgetTransactionsHref(
+              budget.scopeType,
+              budget.scopeRefId,
+              month,
+            );
+            return (
             <Card key={budget.id}>
               <CardContent className="flex flex-col gap-3">
                 <UsageBar
@@ -396,34 +413,57 @@ export default function BudgetsPage() {
                       : SCOPE_TYPE_LABEL[budget.scopeType]
                   }
                 />
-                <div className="flex items-center justify-between gap-2">
-                  <BudgetStatusLine budget={budget} />
+                <BudgetStatusLine budget={budget} />
+                {/* 주 액션은 '어디서 썼는지 보기'다. 예산을 넘었다고 알린 뒤
+                    줄 수 있는 게 '예산 늘리기'와 '예산 삭제'뿐이면 가계부가
+                    최악의 조언을 하는 셈이다 — 수정·삭제는 ⋯로 내린다.
+                    딥링크에는 지금 보고 있는 달을 함께 싣는다(이 화면의 월은
+                    URL이 아니라 로컬 state라 그냥 두면 거래 화면이 이번 달을 연다). */}
+                <div className="flex items-center gap-2">
+                  {spentHref ? (
+                    <Button
+                      asChild
+                      variant="tint"
+                      size="sm"
+                      className="h-11 flex-1"
+                    >
+                      <Link href={spentHref}>어디서 썼는지 보기</Link>
+                    </Button>
+                  ) : (
+                    <span className="flex-1" />
+                  )}
                   {canEdit ? (
-                    <span className="flex shrink-0 items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(budget)}
-                      >
-                        수정
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(budget)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        삭제
-                      </Button>
-                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 shrink-0"
+                          aria-label={`${budget.name ?? budget.scopeLabel} 예산 관리 메뉴`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => openEdit(budget)}>
+                          예산 수정
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={deleteMutation.isPending}
+                          onSelect={() => setDeleteTarget(budget)}
+                        >
+                          예산 삭제
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   ) : null}
                 </div>
               </CardContent>
             </Card>
-          ))
+            );
+          })
         )}
 
         {deleteMutation.isError ? (

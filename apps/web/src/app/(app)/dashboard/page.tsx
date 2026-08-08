@@ -10,10 +10,19 @@
  *  - "어디에 많이 썼나요?" 카테고리 BarList / 구성원·카드는 ListRow(analytics.*)
  *  - 최근 거래: ListRow 5건(transactions.list limit 10 중 상위 5) + 전체 보기 링크
  *
+ * 금액이 적힌 집계 행은 전부 **필터가 걸린 거래 목록으로 가는 링크**다(C-7).
+ * 거래 화면이 이미 `month`/`memberId`/`cardId`/`categoryId`/`q`를 초기 필터로 읽으므로
+ * 링크만 만들면 되고 새 백엔드가 필요 없다(lib/deep-link.ts).
+ *
+ * 거래도 카드도 없는 새 가족에게는 빈 카드 6장 대신 3단계 온보딩 체크리스트를
+ * 보여준다(C-1). 완료 판정은 이미 로딩 중인 쿼리(useCardList/useDevices/
+ * useTransactions)로만 계산한다.
+ *
  * 모든 집계는 서버(SQL)에서 끝났다고 가정하며 여기서는 표시만 한다(합산/계산 금지).
  * 데이터는 React Query 훅(queries.ts) + authedFetch(401→refresh)로 가져온다.
  * ------------------------------------------------------------------------- */
 import {
+  Check,
   CircleAlert,
   CreditCard,
   MailWarning,
@@ -73,6 +82,7 @@ import {
   type BarListItem,
 } from "@/components/widgets";
 import { MonthlyInsightsCard } from "@/components/monthly-insights-card";
+import { AddTransactionDialog } from "../transactions/add-transaction-dialog";
 import { api, ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -83,6 +93,7 @@ import {
   percent,
 } from "@/lib/format";
 import { categoryIcon } from "@/lib/category-icon";
+import { budgetTransactionsHref, transactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
 import { memberColorClass } from "@/lib/member-color";
 import { addMonths, isMonthKey } from "@/lib/month";
@@ -93,6 +104,7 @@ import {
   useCards,
   useCategories,
   useCategoryList,
+  useDevices,
   useHouseholdMembers,
   useMembers,
   useMerchants,
@@ -121,6 +133,21 @@ const RECENT_DISPLAY_N = 5;
 // 저빈도(60초)로 둔다. staleTime 30초 + 포커스 리페치가 2차 안전망.
 const REALTIME_POLL_MS = 60_000;
 
+/** 온보딩 체크리스트 1단계. `done`은 이미 로딩 중인 쿼리로만 판정한다. */
+interface ChecklistStep {
+  key: string;
+  title: string;
+  description: string;
+  done: boolean;
+  /** 미완료일 때 이동할 설정 화면. */
+  href?: string;
+  /** 미완료일 때 버튼 라벨('등록'/'연결'). */
+  cta?: string;
+}
+
+/** 공개범위로 마스킹된 가맹점 라벨(서버 analytics가 이 문자열로 접는다). */
+const MASKED_MERCHANT = "(비공개)";
+
 /** 예산 스코프 → 한국어 보조 라벨(UsageBar meta). */
 const SCOPE_LABEL: Record<BudgetScopeType, string> = {
   household: "가족 전체",
@@ -142,7 +169,7 @@ export default function DashboardPage() {
   const month = monthParam && isMonthKey(monthParam) ? monthParam : thisMonth;
   const isCurrentMonth = month === thisMonth;
 
-  const { householdId } = useHousehold();
+  const { householdId, activeMembership } = useHousehold();
   const { authedFetch } = useAuth();
   const [parseFailedOpen, setParseFailedOpen] = useState(false);
 
@@ -230,6 +257,9 @@ export default function DashboardPage() {
 
   // --- 파생 데이터 ----------------------------------------------------------
 
+  // 집계 행 → 거래 목록 딥링크(C-7). 축 값이 없는 행(미분류/미연결/마스킹)은
+  // 링크를 걸지 않는다 — 필터가 안 걸린 전체 목록으로 보내면 사용자는 자기가
+  // 누른 행과 무관한 화면을 보게 된다.
   const memberItems = useMemo<BarListItem[]>(
     () =>
       (membersQuery.data?.items ?? [])
@@ -240,8 +270,9 @@ export default function DashboardPage() {
           value: m.net,
           ratio: m.ratio,
           meta: `${m.count}건`,
+          href: transactionsHref({ month, memberId: m.memberId }),
         })),
-    [membersQuery.data],
+    [membersQuery.data, month],
   );
 
   const cardItems = useMemo<BarListItem[]>(
@@ -252,8 +283,11 @@ export default function DashboardPage() {
         value: c.net,
         ratio: c.ratio,
         meta: `${c.count}건`,
+        ...(c.cardId
+          ? { href: transactionsHref({ month, cardId: c.cardId }) }
+          : {}),
       })),
-    [cardsQuery.data],
+    [cardsQuery.data, month],
   );
 
   const categoryItems = useMemo<BarListItem[]>(
@@ -266,11 +300,16 @@ export default function DashboardPage() {
           value: c.net,
           ratio: c.ratio,
           meta: `${c.count}건`,
+          ...(c.categoryId
+            ? { href: transactionsHref({ month, categoryId: c.categoryId }) }
+            : {}),
         })),
-    [categoriesQuery.data],
+    [categoriesQuery.data, month],
   );
 
   // 가맹점 상위 — 서버가 이미 net 내림차순 top 20을 주므로 앞에서 잘라 쓴다.
+  // 거래 화면에 가맹점 필터는 없고 검색(`q`)이 그 역할을 한다. 공개범위로
+  // 마스킹된 '(비공개)' 행은 검색해도 남의 거래가 나오지 않으므로 링크를 뺀다.
   const merchantItems = useMemo<BarListItem[]>(
     () =>
       (merchantsQuery.data?.items ?? [])
@@ -281,8 +320,11 @@ export default function DashboardPage() {
           value: m.net,
           ratio: m.ratio,
           meta: `${m.count}건`,
+          ...(m.merchant === MASKED_MERCHANT
+            ? {}
+            : { href: transactionsHref({ month, q: m.merchant }) }),
         })),
-    [merchantsQuery.data],
+    [merchantsQuery.data, month],
   );
 
   // 상위 사용률 예산(사용률 내림차순).
@@ -342,6 +384,59 @@ export default function DashboardPage() {
   const showParseFailedRow = parseFailedQuery.isError || parseFailedCount > 0;
   const showReviewCard = showReviewRow || showParseFailedRow;
 
+  // --- 온보딩 체크리스트(C-1) ------------------------------------------------
+  // 합류 직후 홈은 빈 카드 6장이라 다음 행동이 없었다. 거래가 아직 하나도 없고
+  // 3단계를 다 끝내지 않았으면 빈 카드 대신 체크리스트를 보여준다.
+  //
+  // 완료 판정은 **이미 로딩 중인 쿼리로만** 계산한다(새 백엔드 없음):
+  //  1) 가족 만들기 — 이 화면이 렌더된다는 것 자체가 활성 가족이 있다는 뜻이다.
+  //  2) 카드 등록  — useCardList
+  //  3) 휴대폰 연결 — useDevices
+  // 3/3이 되면 조건이 깨져 체크리스트가 사라지고 평소 홈으로 돌아간다.
+  const devicesQuery = useDevices();
+  const [addTxnOpen, setAddTxnOpen] = useState(false);
+
+  const checklistSteps = useMemo<ChecklistStep[]>(
+    () => [
+      {
+        key: "household",
+        title: "가족 만들기",
+        description: activeMembership
+          ? `'${activeMembership.name}' 가족을 만들었어요`
+          : "가족을 만들었어요",
+        done: true,
+      },
+      {
+        key: "card",
+        title: "결제 카드 등록하기",
+        description: "뒤 4자리를 넣으면 문자가 자동으로 연결돼요",
+        done: (cardListQuery.data ?? []).length > 0,
+        href: "/cards",
+        cta: "등록",
+      },
+      {
+        key: "device",
+        title: "휴대폰 연결하기",
+        description: "카드 문자를 자동으로 모아와요",
+        done: (devicesQuery.data ?? []).length > 0,
+        href: "/devices",
+        cta: "연결",
+      },
+    ],
+    [activeMembership, cardListQuery.data, devicesQuery.data],
+  );
+  const checklistDone = checklistSteps.filter((s) => s.done).length;
+  // 참조 쿼리가 아직 안 왔을 때 체크리스트를 먼저 그리면, 이미 설정을 끝낸
+  // 사용자에게 "카드를 등록하세요"가 한 번 깜빡인다 → 로딩 중에는 판단을 미룬다.
+  // 실패한 쿼리도 같다 — 못 읽은 것을 '없음'으로 읽으면 없는 할 일을 만들어 낸다
+  // (권한이 좁은 구성원은 장치 목록에서 403을 받을 수 있다).
+  const setupLoaded =
+    cardListQuery.isSuccess && devicesQuery.isSuccess && recentQuery.isSuccess;
+  const showChecklist =
+    setupLoaded &&
+    checklistDone < checklistSteps.length &&
+    (recentQuery.data?.items.length ?? 0) === 0;
+
   const monthly = monthlyQuery.data;
   // 비교 대상 호칭: 이번 달이면 '지난달', 과거월이면 그 달의 직전 달을 명시한다.
   const prevLabel = isCurrentMonth
@@ -363,20 +458,35 @@ export default function DashboardPage() {
       {/* 제목은 하단 탭('홈')과 중복이라 시각적으로 숨긴다(스크린리더용 h1만 유지).
           월 라벨이 있던 자리가 그대로 스위처가 된다 — 누적 지출의 대부분이 지난달에
           있는데도 이 화면이 이번 달만 보여주고 있었다(ADR-0026). */}
-      <div className="flex items-center justify-end">
-        <h1 className="sr-only">홈</h1>
-        <MonthSwitcher
-          month={month}
-          months={availableMonths}
-          onChange={changeMonth}
-          className="-mr-2"
-        />
-      </div>
+      <h1 className="sr-only">홈</h1>
+      {/* 거래가 한 건도 없으면 달을 옮길 이유가 없다 — 체크리스트 화면에서는 감춘다. */}
+      {showChecklist ? null : (
+        <div className="flex items-center justify-end">
+          <MonthSwitcher
+            month={month}
+            months={availableMonths}
+            onChange={changeMonth}
+            className="-mr-2"
+          />
+        </div>
+      )}
 
       {/* 결제 실패 배너 — 미해결 반복 거절이 있을 때만 나타난다(없으면 렌더 안 함).
           declined는 거래로 승격되지 않아 아래 어떤 집계에도 안 잡히므로 여기서 알린다. */}
       <DeclineBanner />
 
+      {/* 온보딩 체크리스트 — 아직 거래가 없고 3단계를 다 못 끝낸 새 가족에게만.
+          아래 집계 카드들은 전부 빈 상태가 되므로 그 자리를 이걸로 대신한다. */}
+      {showChecklist ? (
+        <OnboardingChecklist
+          steps={checklistSteps}
+          doneCount={checklistDone}
+          onPasteSms={() => setAddTxnOpen(true)}
+        />
+      ) : null}
+
+      {showChecklist ? null : (
+      <>
       {/* 히어로 — 이번 달 소비 */}
       <Card>
         <CardContent className="flex flex-col gap-4">
@@ -438,15 +548,17 @@ export default function DashboardPage() {
 
       {/* AI 인사이트(있을 때만 렌더). 자연어 질의는 하단 탭 중앙 'AI'(/ai)로 분리. */}
       <MonthlyInsightsCard month={month} />
+      </>
+      )}
 
-      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·확인 필요 문자가 모두 없으면 숨김. */}
+      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·확인 필요 문자가 모두 없으면 숨김.
+          체크리스트 화면에서도 남긴다 — 문자가 왔는데 읽지 못한 상태는 알려야 한다. */}
       {showReviewCard ? (
         <Card className="gap-0 py-2">
           <CardContent className="px-3">
             {showReviewRow ? (
-              <Link href="/transactions" className="block">
             <ListRow
-              className="hover:bg-muted/70 transition-colors"
+              href="/transactions"
               icon={<CircleAlert />}
               iconClassName="bg-warning/15 text-warning"
               title="확인이 필요한 거래"
@@ -473,15 +585,9 @@ export default function DashboardPage() {
               }
               chevron
             />
-              </Link>
             ) : null}
             {showParseFailedRow ? (
           <ListRow
-            className={
-              parseFailedCount > 0
-                ? "hover:bg-muted/70 cursor-pointer transition-colors"
-                : undefined
-            }
             icon={<MailWarning />}
             iconClassName="bg-warning/15 text-warning"
             title="확인이 필요한 문자"
@@ -520,6 +626,8 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
+      {showChecklist ? null : (
+      <>
       {/* 예산 요약 */}
       <Card>
         <CardHeader>
@@ -561,10 +669,16 @@ export default function DashboardPage() {
                 const scope = b.name
                   ? `${SCOPE_LABEL[b.scopeType]} · ${b.scopeLabel}`
                   : SCOPE_LABEL[b.scopeType];
+                const href = budgetTransactionsHref(
+                  b.scopeType,
+                  b.scopeRefId,
+                  month,
+                );
                 return (
                   <UsageBar
                     key={b.id}
                     label={b.name ?? b.scopeLabel}
+                    {...(href ? { href, hrefLabel: "어디서 썼는지 보기" } : {})}
                     meta={
                       b.usageRate >= 1 ? (
                         <span className="text-destructive font-semibold">
@@ -664,6 +778,7 @@ export default function DashboardPage() {
                 {memberItems.map((item) => (
                   <ListRow
                     key={item.key}
+                    {...(item.href ? { href: item.href } : {})}
                     icon={
                       <span className="text-sm font-semibold">
                         {initialOf(item.label)}
@@ -677,6 +792,7 @@ export default function DashboardPage() {
                     subtitle={`전체의 ${percent(item.ratio)}`}
                     value={<Money amount={item.value} />}
                     valueSub={item.meta}
+                    chevron={item.href != null}
                   />
                 ))}
               </div>
@@ -705,6 +821,7 @@ export default function DashboardPage() {
                   return (
                     <ListRow
                       key={item.key}
+                      {...(item.href ? { href: item.href } : {})}
                       icon={<CreditCard />}
                       iconClassName={
                         ownerId
@@ -715,6 +832,7 @@ export default function DashboardPage() {
                       subtitle={`전체의 ${percent(item.ratio)}`}
                       value={<Money amount={item.value} />}
                       valueSub={item.meta}
+                      chevron={item.href != null}
                     />
                   );
                 })}
@@ -812,6 +930,8 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
 
       {/* 확인 필요 문자 검토(원문+교정) 다이얼로그 — 네이티브/웹 공통. */}
       <ReviewInboxDialog
@@ -819,7 +939,111 @@ export default function DashboardPage() {
         events={parseFailedRecent}
         onClose={() => setParseFailedOpen(false)}
       />
+
+      {/* 체크리스트의 '문자 붙여넣어 거래 추가하기' — 거래 화면과 같은 다이얼로그를
+          그대로 재사용한다(장치 연결 전에도 첫 거래를 만들어 볼 수 있게). */}
+      <AddTransactionDialog open={addTxnOpen} onOpenChange={setAddTxnOpen} />
     </div>
+  );
+}
+
+/**
+ * 온보딩 체크리스트 (C-1 · 디자인 진단 E-1).
+ *
+ * 합류 직후 홈이 빈 카드 6장이면 "다음에 뭘 해야 하는지"가 아무 데도 없다.
+ * 진행률 + 3단계 + 지금 당장 해볼 수 있는 행동(문자 붙여넣기) 하나를 준다.
+ */
+function OnboardingChecklist({
+  steps,
+  doneCount,
+  onPasteSms,
+}: Readonly<{
+  steps: ReadonlyArray<ChecklistStep>;
+  doneCount: number;
+  onPasteSms: () => void;
+}>) {
+  const progress = Math.round((doneCount / steps.length) * 100);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>시작하기</CardTitle>
+        <CardDescription>
+          카드 문자가 자동으로 모이기까지 {steps.length - doneCount}단계 남았어요
+        </CardDescription>
+        <CardAction>
+          <span className="text-muted-foreground text-[13px] tabular-nums">
+            {doneCount} / {steps.length}
+          </span>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div
+          className="bg-muted h-2 w-full overflow-hidden rounded-full"
+          role="progressbar"
+          aria-valuenow={doneCount}
+          aria-valuemin={0}
+          aria-valuemax={steps.length}
+          aria-label="시작하기 진행률"
+        >
+          <div
+            className="bg-primary h-full rounded-full transition-[width]"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
+        <ul className="flex flex-col divide-y">
+          {steps.map((step, index) => (
+            <li key={step.key} className="flex items-center gap-3 py-3">
+              <span
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold",
+                  step.done
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-muted text-muted-foreground",
+                )}
+                aria-hidden="true"
+              >
+                {step.done ? <Check className="size-4" /> : index + 1}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span
+                  className={cn(
+                    "text-[15px] font-medium",
+                    step.done && "text-muted-foreground",
+                  )}
+                >
+                  {step.title}
+                </span>
+                <span className="text-muted-foreground text-[13px]">
+                  {step.description}
+                </span>
+              </span>
+              {!step.done && step.href && step.cta ? (
+                <Button asChild size="sm" variant="tint" className="h-9 shrink-0">
+                  <Link href={step.href}>{step.cta}</Link>
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex flex-col gap-2 border-t pt-4">
+          <p className="text-[15px] font-semibold">지금 바로 넣어볼까요?</p>
+          <p className="text-muted-foreground text-[13px]">
+            받은 카드 문자를 붙여넣으면 거래 한 건을 바로 만들어 볼 수 있어요.
+          </p>
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            className="mt-1 h-11 w-full"
+            onClick={onPasteSms}
+          >
+            문자 붙여넣어 거래 추가하기
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

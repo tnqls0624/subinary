@@ -31,6 +31,7 @@ import type {
   HouseholdUpdateRequest,
   InvitationCreateRequest,
   InvitationCreated,
+  InvitationPreview,
   InvitationSummary,
   MemberColorUpdateRequest,
   MemberRoleUpdateRequest,
@@ -88,6 +89,27 @@ function toHouseholdSummary(
     createdAt: household.createdAt.toISOString(),
     myRole,
   };
+}
+
+/**
+ * 초대자 이름 마스킹(`홍길동` → `홍*동`, `김철` → `김*`, `이` → `이`).
+ *
+ * 미리보기는 비인증 경로다. 받는 사람은 누가 초대했는지 이미 알고 있으므로 확인에는
+ * 첫 글자와 끝 글자면 충분하고, 링크가 대화방·메일로 흘러나갔을 때 수집되는 값은
+ * 줄어든다. 공백이 든 이름(영문 'Gil Dong Hong')은 토큰 단위로 각각 가린다.
+ */
+function maskPersonName(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed === '') return '';
+  return trimmed
+    .split(/\s+/)
+    .map((part) => {
+      const chars = [...part];
+      if (chars.length <= 1) return part;
+      if (chars.length === 2) return `${chars[0]}*`;
+      return `${chars[0]}${'*'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;
+    })
+    .join(' ');
 }
 
 function toInvitationSummary(
@@ -421,6 +443,68 @@ export class HouseholdService {
       expiresAt: invitation.expiresAt.toISOString(),
       role: invitation.role,
       acceptUrlPath: `/v1/household-invitations/${rawToken}/accept`,
+    };
+  }
+
+  /**
+   * 초대 미리보기 (`GET /v1/household-invitations/:token`, **비인증**).
+   *
+   * `/join`이 "어느 가족이, 누가, 어떤 역할로 초대했는지"를 보여준 뒤 동의를 받게
+   * 하려면 로그인 전에 읽을 수 있어야 한다. 노출 범위와 그 근거는 계약
+   * (`invitationPreviewSchema`)에 적어 뒀다 — 요약하면 `pending`일 때만 가족명·
+   * 마스킹된 초대자명·역할을 주고, 그 외 상태에서는 상태와 만료 시각만 준다.
+   *
+   * 만료된 초대를 여기서 `expired`로 **기록하지 않는다.** GET은 쓰기를 하지 않으며,
+   * 상태 전이는 수락 경로가 잠금 안에서 소유한다(그쪽이 유일한 직렬화 지점이다).
+   * 대신 `expiresAt`이 지났으면 응답에서만 `expired`로 계산해 보여준다.
+   *
+   * 토큰이 없으면 404. 토큰은 256비트 난수(`randomBytes(32)`)라 추측으로 존재를
+   * 캐낼 수 없으므로, 404/200 구분이 의미 있는 오라클이 되지 않는다.
+   */
+  async previewInvitation(rawToken: string): Promise<InvitationPreview> {
+    const tokenHash = this.tokenService.hashToken(rawToken);
+
+    const [row] = await this.db
+      .select({
+        status: schema.householdInvitations.status,
+        role: schema.householdInvitations.role,
+        email: schema.householdInvitations.email,
+        expiresAt: schema.householdInvitations.expiresAt,
+        householdName: schema.households.name,
+        householdDeletedAt: schema.households.deletedAt,
+        inviterName: schema.users.name,
+      })
+      .from(schema.householdInvitations)
+      .innerJoin(
+        schema.households,
+        eq(schema.households.id, schema.householdInvitations.householdId),
+      )
+      .innerJoin(
+        schema.users,
+        eq(schema.users.id, schema.householdInvitations.createdBy),
+      )
+      .where(eq(schema.householdInvitations.tokenHash, tokenHash))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException('invitation not found');
+    }
+
+    // 삭제된 가구의 초대는 수락해도 들어갈 곳이 없다 — 만료와 같게 취급해 이름을 막는다.
+    const dead =
+      row.householdDeletedAt !== null ||
+      row.expiresAt.getTime() < Date.now();
+    const status =
+      row.status === 'pending' && dead ? ('expired' as const) : row.status;
+    const usable = status === 'pending';
+
+    return {
+      status,
+      expiresAt: row.expiresAt.toISOString(),
+      householdName: usable ? row.householdName : null,
+      inviterName: usable ? maskPersonName(row.inviterName) : null,
+      role: usable ? row.role : null,
+      emailRestricted: usable && row.email !== null,
     };
   }
 

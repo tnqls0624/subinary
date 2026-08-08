@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
+import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,13 @@ interface ListRowProps {
   valueSub?: ReactNode;
   /** 클릭 가능 행(hover/눌림 피드백 + 커서). */
   onClick?: () => void;
+  /**
+   * 행 전체를 이 경로로 가는 링크로 만든다(보통 필터가 걸린 거래 목록).
+   * `onClick`과 동시에 주지 않는다 — 링크가 우선한다.
+   */
+  href?: string;
+  /** 링크일 때 스크린리더에 읽힐 설명(라벨이 값·아이콘뿐일 때 유용). */
+  ariaLabel?: string;
   /** 우측 끝 chevron 표시. */
   chevron?: boolean;
   className?: string;
@@ -24,6 +32,8 @@ interface ListRowProps {
 /**
  * 리스트 행(오늘의집 톤). 표 대신 쓰는 기본 단위 —
  * [원형 아이콘] 제목/부제 ······ 값/보조 [›]
+ *
+ * 세로 크기는 아이콘(40px) + py-3 = 64px이라 링크·버튼일 때도 터치 타깃 44px을 넘는다.
  */
 export function ListRow({
   icon,
@@ -33,21 +43,21 @@ export function ListRow({
   value,
   valueSub,
   onClick,
+  href,
+  ariaLabel,
   chevron,
   className,
 }: ListRowProps) {
-  const Comp = onClick ? "button" : "div";
-  return (
-    <Comp
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left",
-        onClick &&
-          "hover:bg-muted/70 cursor-pointer transition-[background-color,transform] active:scale-[0.99]",
-        className,
-      )}
-    >
+  const interactive = href != null || onClick != null;
+  const rowClass = cn(
+    "flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left",
+    interactive &&
+      "hover:bg-muted/70 cursor-pointer transition-[background-color,transform] active:scale-[0.99]",
+    className,
+  );
+
+  const body = (
+    <>
       {icon ? (
         <span
           className={cn(
@@ -83,6 +93,22 @@ export function ListRow({
       {chevron ? (
         <ChevronRight className="text-muted-foreground/50 size-4 shrink-0" />
       ) : null}
-    </Comp>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} aria-label={ariaLabel} className={rowClass}>
+        {body}
+      </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={rowClass}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={rowClass}>{body}</div>;
 }

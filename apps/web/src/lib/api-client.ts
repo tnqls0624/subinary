@@ -39,6 +39,7 @@ import type {
   HouseholdSummary,
   InvitationCreateRequest,
   InvitationCreated,
+  InvitationPreview,
   InvitationSummary,
   LinkCancellationRequest,
   LoginRequest,
@@ -426,6 +427,14 @@ export const api = {
         body,
         accessToken,
       }),
+    /**
+     * 초대 미리보기 — **비인증 공개 경로**라 accessToken을 받지 않는다.
+     * 서버는 `pending`일 때만 가족명·(마스킹된) 초대자명·역할을 준다.
+     */
+    previewInvite: (token: string) =>
+      apiFetch<InvitationPreview>(
+        `/v1/household-invitations/${encodeURIComponent(token)}`,
+      ),
     acceptInvite: (
       accessToken: AccessToken,
       token: string,
