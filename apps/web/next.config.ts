@@ -15,6 +15,14 @@ import type { NextConfig } from "next";
  *
  * - transpilePackages: 워크스페이스 패키지를 Next 번들러가 직접 트랜스파일.
  * - devIndicators: false — 개발 화면 구석 dev 인디케이터 숨김.
+ *
+ * package.json의 build 스크립트가 NODE_ENV=production을 **직접 박는 이유**:
+ * `next build`는 NODE_ENV를 덮어쓰지 않고 경고만 하고 진행한다. dev compose의 .env는
+ * NODE_ENV=development를 넣으므로, dev 컨테이너에서 그대로 빌드하면 app-page 런타임은
+ * dev 번들(`app-page-turbo.runtime.dev.js`)이 잡히는데 산출 청크는 프로덕션으로 컴파일된다.
+ * 그 조합에서 SSR용 React(`vendored["react-ssr"].React`)가 null이 되어
+ * `/_global-error`·`/_not-found` 프리렌더가 "Cannot read properties of null" 로 죽는다.
+ * 환경에 상관없이 프로덕션 빌드는 프로덕션 NODE_ENV로 돌아야 한다.
  */
 const isMobile = process.env.BUILD_TARGET === "mobile";
 

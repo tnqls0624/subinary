@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
-    "build": "next build",
-    "build:mobile": "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://app.subinary.cloud} BUILD_TARGET=mobile next build",
+    "build": "NODE_ENV=production next build",
+    "build:mobile": "NODE_ENV=production NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://app.subinary.cloud} BUILD_TARGET=mobile next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
     "lint": "next lint || echo noop"
