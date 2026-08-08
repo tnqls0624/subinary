@@ -6,7 +6,9 @@
 --
 -- v2 금액 계약을 실제로 강제하는 CHECK는 (6)에서 **NOT VALID**로만 붙인다. 기존 행은
 -- 전부 v1이고 그중 일부는 이미 계약을 어기고 있으므로(ADR-0027 D-1~D-3), 지금 검증하면
--- 배포가 그 자리에서 멈춘다. VALIDATE는 데이터 수리가 끝난 뒤 `0050`이 한다.
+-- 배포가 그 자리에서 멈춘다. VALIDATE는 데이터 수리가 끝난 뒤 **후속 VALIDATE 마이그레이션**이 한다
+-- (번호는 착수 시점의 다음 번호. 이 주석을 쓸 당시엔 0050을 예상했으나 P0-9 수집
+--  멱등이 0050을 가져갔다 — 번호를 여기 박아 두지 말 것).
 --
 -- 외부 환율 API를 여기서 호출하지 않는다. ADR-0027이 명시적으로 금지한다 —
 -- 마이그레이션이 네트워크에 의존하면 재현도 롤백도 불가능해진다. 스냅샷 채우기는
@@ -28,7 +30,7 @@
 --   SELECT count(*) FROM card_transactions
 --   WHERE transaction_type = 'cancellation' AND parent_transaction_id IS NULL;
 --
---   -- (d) 0050이 VALIDATE하기 전 반드시 0이 되어야 하는 승인 합 위반 건수
+--   -- (d) VALIDATE 마이그레이션 전에 반드시 0이 되어야 하는 승인 합 위반 건수
 --   SELECT count(*) FROM card_transactions
 --   WHERE transaction_type = 'approval' AND amount <> cancelled_amount + net_amount;
 --
@@ -174,7 +176,7 @@ CREATE INDEX "card_transactions_fx_rate_snapshot_id_idx" ON "card_transactions" 
 --
 -- 왜 이 둘만 즉시 검증하는가: 기존 행의 original_cancelled_amount는 전부 NULL이고
 -- money_contract_version은 전부 1이므로 **어떤 기존 행도 위반할 수 없다**. 검증 스캔이
--- 실패할 여지가 없는 제약을 굳이 NOT VALID로 미루면, 0050에서 진짜 v2 제약과 섞여
+-- 실패할 여지가 없는 제약을 굳이 NOT VALID로 미루면, VALIDATE 단계에서 진짜 v2 제약과 섞여
 -- "무엇이 아직 검증 안 됐는지"가 흐려진다.
 ALTER TABLE "card_transactions" ADD CONSTRAINT "card_transactions_original_cancelled_amount_check" CHECK ("card_transactions"."original_cancelled_amount" is null or "card_transactions"."original_cancelled_amount" >= 0);--> statement-breakpoint
 ALTER TABLE "card_transactions" ADD CONSTRAINT "card_transactions_money_contract_version_check" CHECK ("card_transactions"."money_contract_version" >= 1);--> statement-breakpoint
@@ -247,7 +249,7 @@ CREATE INDEX "transaction_money_repair_log_household_id_created_at_idx" ON "tran
 -- (D-3의 currency='USD' 행, D-2의 상계되지 않은 승인). 지금 VALIDATE하면 그 행들 때문에
 -- ALTER가 실패해 배포가 통째로 멈춘다. NOT VALID는 **기존 행 검증만 건너뛰고 이후의
 -- INSERT/UPDATE에는 그대로 걸린다** — 즉 지금부터 잘못된 v2 행이 새로 생기는 것은 막힌다.
--- 기존 행 검증(VALIDATE CONSTRAINT)은 데이터 수리가 끝난 뒤 0050이 한다.
+-- 기존 행 검증(VALIDATE CONSTRAINT)은 데이터 수리가 끝난 뒤 후속 마이그레이션이 한다.
 --
 -- 모든 조건이 `money_contract_version < 2 or ...` 로 시작하는 이유: v1 행은 v2 계약의
 -- 적용 대상이 아니다. 이 가드가 없으면 롤백 창에서 이전 바이너리가 만든 v1 행이 거부된다.
