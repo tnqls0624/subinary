@@ -68,6 +68,7 @@ import {
 } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import { MoneyShadowService } from '../money/money-shadow.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
 /* -------------------------------------------------------------------------- */
@@ -150,6 +151,10 @@ export class TransactionService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly realtimePublisher: RealtimePublisherService,
+    // ADR-0027 3단계: 금액 수정·취소 연결 결과를 새 계약과 대조해 기록만 한다.
+    // 이 서비스는 취소 산술의 두 번째 사본이다(worker 승격이 첫 번째) — 두 사본이
+    // 같은 답을 내는지가 전환 전에 확인해야 할 값이다.
+    private readonly moneyShadow: MoneyShadowService,
   ) {}
 
   /* ---------------------------------------------------------------------- */
@@ -850,6 +855,10 @@ export class TransactionService {
     const row = await this.loadSummaryRow(id);
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
+    // 금액·거래시각을 바꿨다면 새 계약은 환율 기준일까지 다시 고른다 — 그 차이를 센다.
+    if (input.amount !== undefined || input.occurredAt !== undefined) {
+      this.moneyShadow.observe(id, 'api_transaction_update');
+    }
     return buildSummary(row.txn, row.categorySlug, false);
   }
 
@@ -964,6 +973,8 @@ export class TransactionService {
     const row = await this.loadSummaryRow(input.approvalTransactionId);
     // 취소↔승인 연결을 가족의 다른 열린 화면에 전파(best-effort).
     void this.realtimePublisher.publish(row.txn.householdId);
+    // 사람이 고른 부모와 새 후보 규칙이 고를 부모가 같은지 센다(`link_target_differs`).
+    this.moneyShadow.observe(cancellationId, 'api_link_cancellation');
     return buildSummary(row.txn, row.categorySlug, false);
   }
 

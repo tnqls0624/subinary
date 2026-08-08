@@ -14,6 +14,7 @@
 import { Module } from '@nestjs/common';
 
 import { DevicesModule } from '../devices/devices.module';
+import { MoneyModule } from '../money/money.module';
 import { StorageModule } from '../storage/storage.module';
 import { CardSmsEventsController } from './card-sms-events.controller';
 import { CardSmsIngestService } from './card-sms-ingest.service';
@@ -24,7 +25,9 @@ import { ManualEntryController } from './manual-entry.controller';
 import { ManualEntryService } from './manual-entry.service';
 
 @Module({
-  imports: [DevicesModule, StorageModule],
+  // MoneyModule: ADR-0027 3단계 — 수동 입력·사람 검토가 만든 거래를 새 금액 계약과
+  // 대조해 기록만 한다(쓰기 경로는 그대로).
+  imports: [DevicesModule, MoneyModule, StorageModule],
   controllers: [
     CardSmsController,
     CardSmsEventsController,

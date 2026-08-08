@@ -34,6 +34,7 @@ import { normalizeMerchant } from '@family/shared';
 import { and, eq } from 'drizzle-orm';
 
 import { DB } from '../database/database.constants';
+import { MoneyShadowService } from '../money/money-shadow.service';
 
 /** 검토 확정이 가능한 상태 — 둘 다 아직 거래로 승격되지 않았다. */
 const REVIEWABLE_STATUSES = ['quarantined', 'parse_failed'] as const;
@@ -45,7 +46,13 @@ const FEEDBACK_TARGET_TYPE = 'card-sms-parse';
 
 @Injectable()
 export class CardSmsReviewService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    // ADR-0027 3단계: 사람 검토가 만든 거래를 새 금액 계약과 대조해 기록만 한다.
+    // 이 경로는 D-2의 진원지다 — 취소를 확정해도 승인을 상계하지 않는다. 새 계약이
+    // 어느 승인에 붙였을지를 `link_target_differs`로 세기 시작한다.
+    private readonly moneyShadow: MoneyShadowService,
+  ) {}
 
   /** 사람이 확인한 값으로 이벤트를 확정하고 거래를 만든다. */
   async review(
@@ -89,7 +96,7 @@ export class CardSmsReviewService {
     // 지문은 라벨의 핵심 키다 — 같은 레이아웃의 다음 문자가 이 확정을 재사용한다(S4).
     const fingerprint = templateFingerprint(event.sender, event.rawContent);
 
-    return this.db.transaction(async (tx): Promise<CardSmsReviewResponse> => {
+    const response = await this.db.transaction(async (tx): Promise<CardSmsReviewResponse> => {
       // 카드가 지정되면 소유·활성 검증 후 visibility 상속(없으면 household).
       let visibility: schema.CardTransaction['visibility'] = 'household';
       if (input.cardId) {
@@ -254,6 +261,11 @@ export class CardSmsReviewService {
       }
       return { cardSmsEventId, parseStatus: 'parsed', transactionId: txn.id };
     });
+
+    // 커밋 뒤에 관측한다 — 검토 라벨·레시피 저장과 한 트랜잭션인 이 경로에서
+    // 관측이 실패하면 사람의 확정이 통째로 사라진다. declined는 거래가 없어 no-op.
+    this.moneyShadow.observe(response.transactionId, 'api_human_review');
+    return response;
   }
 
   /** 비회원에게는 가구 존재 여부를 드러내지 않는 403을 준다(PRD §26). */

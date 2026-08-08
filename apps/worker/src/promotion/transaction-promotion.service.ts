@@ -47,6 +47,7 @@ import { createHash } from 'node:crypto';
 
 import { DB } from '../database/database.module';
 import { FxRateService } from './fx-rate.service';
+import { MoneyShadowService } from './money-shadow.service';
 
 /**
  * 외화 환산 결과. KRW 거래는 fx=null. 외화는 amount(KRW 환산 minor units) +
@@ -137,6 +138,8 @@ export class TransactionPromotionService {
     private readonly notificationQueue: Queue,
     // 외화 거래를 승인 시점 환율로 KRW 환산한다.
     private readonly fxRate: FxRateService,
+    // ADR-0027 롤아웃 3단계: 승격 결과를 새 금액 계약과 대조해 기록만 한다(무변경).
+    private readonly moneyShadow: MoneyShadowService,
     configService: ConfigService,
   ) {
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -246,6 +249,8 @@ export class TransactionPromotionService {
         { cardSmsEventId, transactionType, status },
         'promotion completed',
       );
+      // 승격 트랜잭션이 끝난 뒤 새 금액 계약과 대조한다(ADR-0027 3단계, 기록만).
+      await this.moneyShadow.observe(transactionId, 'worker_promotion_approval');
       // 새로 승격됐고 미분류면 LLM 카테고리 제안을 enqueue(가맹점 단위 dedupe).
       if (status !== 'already_promoted' && categoryId === null) {
         await this.enqueueCategorySuggestion(event, merchantNormalized);
@@ -280,6 +285,9 @@ export class TransactionPromotionService {
       },
       outcome.skipped ? 'promotion skipped: already promoted' : 'promotion completed',
     );
+    // 취소는 연결 대상까지 대조한다 — 새 후보 규칙(원통화 잔액·증거 필수)이 같은
+    // 승인을 고르는지가 이 단계에서 재야 할 값이다.
+    await this.moneyShadow.observe(outcome.transactionId, 'worker_promotion_cancellation');
     if (!outcome.skipped && categoryId === null) {
       await this.enqueueCategorySuggestion(event, merchantNormalized);
     }

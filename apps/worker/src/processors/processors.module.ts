@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { FxRateService } from '../promotion/fx-rate.service';
+import { MoneyShadowService } from '../promotion/money-shadow.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { OutboxDispatcherService } from '../outbox/outbox-dispatcher.service';
 import { WorkerModelServingService } from '../model-serving/model-serving.service';
@@ -68,6 +69,8 @@ import { TestProcessor } from './test.processor';
     TransactionPromotionService,
     // 외화 거래 승격 시 승인 시점 환율로 KRW 환산(원화 지출/예산 통합).
     FxRateService,
+    // ADR-0027 3단계: 승격 결과를 새 금액 계약과 대조해 기록만 한다(쓰기 경로 무변경).
+    MoneyShadowService,
     // 거래 승격/파싱 완료를 Redis pub/sub로 발행하는 실시간 힌트 퍼블리셔.
     RealtimePublisherService,
     SlackImportProcessor,

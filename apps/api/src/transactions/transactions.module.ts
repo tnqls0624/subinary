@@ -11,10 +11,13 @@
  */
 import { Module } from '@nestjs/common';
 
+import { MoneyModule } from '../money/money.module';
 import { TransactionController } from './transaction.controller';
 import { TransactionService } from './transaction.service';
 
 @Module({
+  // ADR-0027 3단계: 금액 수정·취소 연결 결과를 새 계약과 대조해 기록만 한다.
+  imports: [MoneyModule],
   controllers: [TransactionController],
   providers: [TransactionService],
 })

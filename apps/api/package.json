@@ -18,6 +18,7 @@
     "@family/database": "workspace:*",
     "@family/rag": "workspace:^",
     "@family/shared": "workspace:*",
+    "@family/transaction-domain": "workspace:*",
     "@fastify/cookie": "^11",
     "@fastify/multipart": "^10.1.0",
     "@fastify/rate-limit": "^11.1.0",

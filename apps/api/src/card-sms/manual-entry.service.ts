@@ -39,6 +39,7 @@ import { schema, type Db } from '@family/database';
 import { normalizeMerchant } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import { MoneyShadowService } from '../money/money-shadow.service';
 import { buildSummary } from '../transactions/transaction.service';
 import { CardSmsIngestService } from './card-sms-ingest.service';
 
@@ -52,6 +53,10 @@ export class ManualEntryService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly ingestService: CardSmsIngestService,
+    // ADR-0027 3단계: 이 경로가 만든 거래를 새 금액 계약과 대조해 기록만 한다.
+    // 수동 입력은 D-3의 진원지다 — 입력 통화를 그대로 저장해 외화가 KRW 계약을
+    // 우회한다. 그 우회가 몇 건인지 여기서 세기 시작한다.
+    private readonly moneyShadow: MoneyShadowService,
   ) {}
 
   /**
@@ -154,7 +159,7 @@ export class ManualEntryService {
     const sizeBytes = Buffer.byteLength(rawContent, 'utf8');
     const now = new Date();
 
-    return this.db.transaction(async (tx): Promise<TransactionSummary> => {
+    const summary = await this.db.transaction(async (tx): Promise<TransactionSummary> => {
       // 카드가 지정되면 소유·활성 검증 후 visibility 상속(없으면 household).
       let visibility: schema.CardTransaction['visibility'] = 'household';
       if (input.cardId) {
@@ -266,6 +271,10 @@ export class ManualEntryService {
       // 본인 입력이므로 masked=false. buildSummary는 transaction.service의 정본 매퍼.
       return buildSummary(txn, categorySlug, false);
     });
+
+    // 커밋 뒤에 관측한다 — 트랜잭션 안에서 하면 관측 실패가 사용자 입력을 롤백한다.
+    this.moneyShadow.observe(summary.id, 'api_manual_fields');
+    return summary;
   }
 
   /* ---------------------------------------------------------------------- */
