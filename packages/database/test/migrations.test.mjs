@@ -207,6 +207,151 @@ describe('0049 — ADR-0027 금액 계약 스키마', () => {
   });
 });
 
+describe('0050 — P0-9 멱등 키 출처 + 중복 원문 보관', () => {
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0050_card_sms_idempotency_provenance.sql'),
+    'utf8',
+  );
+  const statements = sqlText
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('--'))
+    .join('\n');
+
+  it('추가형이다 — 기존 이벤트를 바꾸거나 지우지 않는다', () => {
+    // 되돌리기 절차(DROP ...)는 주석이므로 실행문만 본다.
+    assert.ok(!/\bDROP\b/i.test(statements), 'DROP 구문이 있다');
+    assert.ok(!/\bDELETE\s+FROM\b/i.test(statements), 'DELETE 구문이 있다');
+    assert.ok(!/\bTRUNCATE\b/i.test(statements), 'TRUNCATE 구문이 있다');
+    assert.ok(
+      !/\bUPDATE\s+"?card_sms_events/i.test(statements),
+      '기존 카드 문자 이벤트를 갱신한다 — 0050은 보이는 값을 바꾸면 안 된다',
+    );
+  });
+
+  it('key_source는 기본값 없이 붙는다 (적용 이전 행은 NULL로 남아야 한다)', () => {
+    assert.match(statements, /ADD COLUMN "key_source" text;/);
+    assert.ok(
+      !/ADD COLUMN "key_source" text DEFAULT/i.test(statements),
+      '기본값이 있다 — 없는 정보를 있는 것처럼 세게 되고 필수화 판단이 틀린다',
+    );
+  });
+
+  it('key_source 값 집합을 DB가 강제한다 (NULL 허용)', () => {
+    assert.match(
+      statements,
+      /"card_sms_events_key_source_check" CHECK[\s\S]*?"key_source" is null or "card_sms_events"\."key_source" in \('client', 'derived_received_at', 'derived_window'\)/,
+    );
+  });
+
+  it('창 기반 중복 조회 인덱스는 (장치, 지문, 수신시각) 순서다', () => {
+    // 마지막만 범위 조건이다. 순서가 바뀌면 등치 조건이 인덱스를 못 탄다.
+    assert.match(
+      statements,
+      /CREATE INDEX "card_sms_events_device_id_content_hash_received_at_idx" ON "card_sms_events" USING btree \("device_id","content_hash","received_at"\)/,
+    );
+  });
+
+  it('보관 테이블은 원문과 판정 근거를 함께 남긴다', () => {
+    assert.match(statements, /CREATE TABLE "card_sms_ingest_suppressions"/);
+    for (const column of [
+      '"raw_content" text NOT NULL',
+      '"content_hash" text NOT NULL',
+      '"key_source" text NOT NULL',
+      '"reason" text NOT NULL',
+      '"attempts" integer DEFAULT 1 NOT NULL',
+      '"restored_event_id" uuid',
+    ]) {
+      assert.ok(statements.includes(column), `${column} 컬럼이 없다`);
+    }
+  });
+
+  it('같은 시도의 반복은 행이 아니라 attempts로 접힌다', () => {
+    assert.match(
+      statements,
+      /"card_sms_ingest_suppressions_device_event_content_unique" UNIQUE\("device_id","event_id","content_hash"\)/,
+    );
+  });
+
+  it('보관 행은 이벤트에 FK를 걸지 않는다 (감사 기록이 더 오래 살아야 한다)', () => {
+    // FK가 있으면 이벤트 삭제가 막히거나(NO ACTION) 보관이 함께 지워진다(CASCADE).
+    assert.ok(
+      !/FOREIGN KEY \("(matched|restored)_event_id"\)/.test(statements),
+      '이벤트 id에 FK가 있다 — 버려진 원문이 이벤트와 함께 사라진다',
+    );
+    // 스코프 컬럼은 반대로 FK를 둔다.
+    assert.match(statements, /FOREIGN KEY \("household_id"\)/);
+    assert.match(statements, /FOREIGN KEY \("device_id"\)/);
+  });
+
+  it('제약 이름이 PostgreSQL 식별자 한계(63바이트)를 넘지 않는다', () => {
+    // 넘으면 PG가 조용히 잘라 저장해 이후 generate가 같은 제약을 또 만들려 든다.
+    for (const [, name] of statements.matchAll(/CONSTRAINT "([^"]+)"/g)) {
+      assert.ok(
+        Buffer.byteLength(name, 'utf8') <= 63,
+        `${name} (${Buffer.byteLength(name, 'utf8')}바이트)`,
+      );
+    }
+    for (const [, name] of statements.matchAll(/CREATE INDEX "([^"]+)"/g)) {
+      assert.ok(
+        Buffer.byteLength(name, 'utf8') <= 63,
+        `${name} (${Buffer.byteLength(name, 'utf8')}바이트)`,
+      );
+    }
+  });
+});
+
+describe('0050 — 스키마 선언과 마이그레이션의 일치', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0050_card_sms_idempotency_provenance.sql'),
+    'utf8',
+  );
+
+  it('새 테이블·컬럼이 schema.ts에도 선언돼 있다', () => {
+    for (const declaration of [
+      'export const cardSmsIngestSuppressions = pgTable(',
+      "'card_sms_ingest_suppressions',",
+      "text('key_source')",
+      "uuid('matched_event_id')",
+      "uuid('restored_event_id')",
+    ]) {
+      assert.ok(
+        schemaText.includes(declaration),
+        `schema.ts에 ${declaration} 선언이 없다 — Drizzle 조회가 새 컬럼을 못 본다`,
+      );
+    }
+  });
+
+  it('제약·인덱스 이름이 양쪽에 같다', () => {
+    for (const name of [
+      'card_sms_events_key_source_check',
+      'card_sms_events_device_id_content_hash_received_at_idx',
+      'card_sms_ingest_suppressions_device_event_content_unique',
+      'card_sms_ingest_suppressions_reason_check',
+      'card_sms_ingest_suppressions_key_source_check',
+      'card_sms_ingest_suppressions_attempts_check',
+      'card_sms_ingest_suppressions_household_id_last_seen_at_idx',
+      'card_sms_ingest_suppressions_device_id_content_hash_idx',
+    ]) {
+      assert.ok(schemaText.includes(`'${name}'`), `schema.ts에 ${name}이 없다`);
+      assert.ok(sqlText.includes(`"${name}"`), `0050에 ${name}이 없다`);
+    }
+  });
+
+  it('키 출처 값 집합이 코드·스키마·마이그레이션 셋 다 같다', () => {
+    // 세 곳 중 하나만 늘면 정상 값이 DB에서 거부되거나 오타가 통과한다.
+    const idempotencyText = readFileSync(
+      resolve(here, '../src/card-sms-idempotency.ts'),
+      'utf8',
+    );
+    for (const value of ['client', 'derived_received_at', 'derived_window']) {
+      assert.ok(idempotencyText.includes(`'${value}'`), `코드에 ${value}가 없다`);
+      assert.ok(schemaText.includes(`'${value}'`), `schema.ts에 ${value}가 없다`);
+      assert.ok(sqlText.includes(`'${value}'`), `0050에 ${value}가 없다`);
+    }
+  });
+});
+
 describe('스키마 선언과 마이그레이션의 인덱스 이름이 같다', () => {
   const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
 

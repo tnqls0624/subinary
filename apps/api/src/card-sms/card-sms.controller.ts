@@ -39,10 +39,7 @@ import { Public } from '../auth/decorators/public.decorator';
 import { DeviceHmacGuard } from '../devices/device-hmac.guard';
 import { DeviceTokenGuard } from '../devices/device-token.guard';
 import { Device, type DeviceContext } from '../devices/decorators/device.decorator';
-import {
-  CardSmsIngestService,
-  deriveCardSmsEventId,
-} from './card-sms-ingest.service';
+import { CardSmsIngestService } from './card-sms-ingest.service';
 
 class CardSmsIngestDto extends createZodDto(cardSmsIngestRequestSchema) {}
 
@@ -99,12 +96,16 @@ export class CardSmsController {
    * 따옴표가 든 카드문자를 `Content-Type: text/plain` 본문에 **원문 그대로** 보낸다.
    * 메타데이터(eventId/sender)는 헤더로 받는다 — 헤더 값엔 개행이 없어 안전.
    *
-   * 멱등 키(eventId) 결정 규칙 — `X-Event-Id`(문자당 유니크, 강력 권장) >
-   * `sha256(sender+content[+X-Received-At])` 자동 생성. 카드문자 시각은 분 단위라
+   * 멱등 키(eventId) 결정 규칙 — `X-Event-Id`(문자당 유니크, **강력 권장**) >
+   * `X-Received-At`을 섞은 해시 > 서버 수신 시각 창(추측). 카드문자 시각은 분 단위라
    * 같은 분의 동일 가맹점·금액 결제는 원문이 바이트 단위로 같아질 수 있다 —
    * X-Received-At(문자 수신 시각, 형식 자유·초 단위 권장)을 보내면 해시에 섞여
    * 서로 다른 결제로 구분되고, 같은 문자의 재시도는 같은 값이라 멱등이 유지된다.
+   * 둘 다 없으면 서버가 창으로 추측하며, 그때 같은 창 안의 별개 결제는 뭉친다(P0-9).
    * receivedAt(저장용)은 서버가 now()로 채운다. 파싱/멱등은 기존 ingest와 동일.
+   *
+   * ⚠️ 헤더에서 파생한 키를 `eventId`로 넘기면 안 된다 — 서비스가 "호출자가 키를 줬다"로
+   * 세어 관측(key_source)이 통째로 거짓이 된다. 재료를 그대로 넘기고 판단은 서비스가 한다.
    */
   @Public()
   @UseGuards(DeviceTokenGuard)
@@ -119,14 +120,10 @@ export class CardSmsController {
   ): Promise<CardSmsIngestResponse> {
     const text = typeof content === 'string' ? content : '';
     const sender = decodeHeader(senderHeader);
-    // X-Event-Id 미지정 시 발신자+내용(+수신시각)을 해시해 결정적 생성(재전송 멱등).
-    // JSON 경로(card-sms-token)의 서버측 파생과 동일 recipe를 공유한다.
-    const eventId =
-      (eventIdHeader ?? '').trim() ||
-      deriveCardSmsEventId(sender, text, receivedAtHeader);
+    const eventId = (eventIdHeader ?? '').trim();
 
     const parsed = cardSmsIngestRequestSchema.safeParse({
-      eventId,
+      ...(eventId ? { eventId } : {}),
       sender,
       content: text,
     });
@@ -136,6 +133,12 @@ export class CardSmsController {
         .join(', ');
       throw new BadRequestException(`invalid card-sms-text request — ${detail}`);
     }
-    return this.ingestService.ingest(device, parsed.data);
+    // X-Received-At은 형식이 자유라 계약의 receivedAt(UTC ISO)으로는 못 넘긴다.
+    // 해시 재료로만 쓰는 별도 필드로 넘겨 옛 키 파생 recipe를 그대로 보존한다 —
+    // 이 값을 보내던 기존 자동화의 키가 바뀌면 배포 직후 전부 중복으로 새로 쌓인다.
+    return this.ingestService.ingest(device, {
+      ...parsed.data,
+      receivedAtTag: (receivedAtHeader ?? '').trim() || undefined,
+    });
   }
 }

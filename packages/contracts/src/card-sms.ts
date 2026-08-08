@@ -27,6 +27,27 @@ export type CardSmsTransactionType = z.infer<typeof cardSmsTransactionTypeSchema
 /** Ingest disposition — `queued` on first accept, `duplicate` on idempotent replay. */
 const cardSmsProcessingStatusSchema = z.enum(['queued', 'duplicate']);
 
+/**
+ * 이 수집이 어느 멱등 키로 처리됐는지(P0-9). 정확도 순: `client` > `derived_received_at`
+ * > `derived_window`.
+ *
+ * - `client` — 호출자가 `eventId`를 줬다. 재시도와 별개 결제를 호출자가 구분해 주므로
+ *   서버가 추측하지 않는다. **자동화가 도달해야 할 상태.**
+ * - `derived_received_at` — `eventId`는 없지만 수신 시각을 줬다. 시각 해상도만큼 정확하다.
+ * - `derived_window` — 고유값이 하나도 없다. 서버가 수신 시각을 몇 분 단위 창으로 묶어
+ *   추측한다. **같은 창 안의 별개 결제는 여전히 하나로 뭉친다** — 원문은 보관되지만
+ *   지출에는 잡히지 않는다.
+ *
+ * 응답에 싣는 이유: 수집 마법사(로드맵 C-2)와 장치 진단 화면이 "지금 설정은 추측에
+ * 의존하고 있다"를 사용자에게 보여줄 수 있어야 한다. 서버 로그만으로는 사용자가 알 길이 없다.
+ */
+export const cardSmsIdempotencySourceSchema = z.enum([
+  'client',
+  'derived_received_at',
+  'derived_window',
+]);
+export type CardSmsIdempotencySource = z.infer<typeof cardSmsIdempotencySourceSchema>;
+
 // --- Requests ---
 
 /**
@@ -43,12 +64,30 @@ const cardSmsProcessingStatusSchema = z.enum(['queued', 'duplicate']);
  * will resolve the wrong year. Supply receivedAt when replaying old archives.
  */
 export const cardSmsIngestRequestSchema = z.object({
-  // 멱등 키. 비었거나 없으면 서버가 sha256(sender+content[+receivedAt])로 파생한다
-  // (card-sms-text와 동일 규칙) — 단축어/MacroDroid가 고유값을 만들기 어려운 저마찰
-  // 경로를 위해. 명시하면 그 값이 우선(호출자가 멱등을 직접 제어).
+  /**
+   * **멱등 키 — 문자 한 통당 하나의 고유값. 보내 주십시오(P0-9).**
+   *
+   * 이 값을 주면 서버는 "재시도"와 "우연히 같은 문자를 만든 별개 결제"를 확실히
+   * 구분한다. 주지 않으면 서버가 추측해야 하고, 추측은 반드시 한쪽으로 틀린다 —
+   * 지금 구현은 몇 분 창으로 묶는 쪽이라 **같은 창 안의 별개 결제가 지출에서
+   * 누락된다**(원문은 보관되지만 거래로 승격되지 않는다).
+   *
+   * 그럼에도 선택값인 이유: 이미 배포된 MacroDroid·iOS 단축어 설정이 이 값을 보내지
+   * 않는다. 필수로 바꾸면 **모든 기존 사용자의 수집이 그 자리에서 끊긴다** — 이
+   * 서비스에서 카드 문자는 유일한 데이터 유입 경로이므로 그건 이 버그보다 나쁘다.
+   * 응답의 `idempotencySource`가 어느 경로로 처리됐는지 알려주고, 서버는 그 비율을
+   * 집계한다. 키 없는 수집이 충분히 사라지면 그때 필수화한다.
+   *
+   * 좋은 값: MacroDroid `{sms_message_id}`/`{triggertimestamp}` 조합, 단축어의
+   * 수신 시각(초 단위) + 본문 해시 등. 같은 문자를 다시 보낼 때 **같은 값**이면 된다.
+   */
   eventId: z.string().max(200).optional(),
   sender: z.string().min(1).max(100),
   content: z.string().min(1).max(4000),
+  /**
+   * 문자 수신 시각(UTC ISO-8601). `eventId`가 없을 때의 차선 — 초 단위 해상도면
+   * 같은 분의 서로 다른 결제도 구분된다. 이것도 없으면 서버 창 추측으로 떨어진다.
+   */
   receivedAt: z.string().datetime().optional(),
 });
 export type CardSmsIngestRequest = z.infer<typeof cardSmsIngestRequestSchema>;
@@ -58,12 +97,18 @@ export type CardSmsIngestRequest = z.infer<typeof cardSmsIngestRequestSchema>;
 /**
  * Ingest acknowledgement. `accepted` is always `true`; `duplicate` distinguishes
  * a fresh enqueue (`processingStatus: 'queued'`) from an idempotent replay.
+ *
+ * `eventId`는 **이 문자가 속한 이벤트의 키**다. 중복으로 판정됐다면 새로 파생한 키가
+ * 아니라 **흡수된 기존 이벤트의 키**가 온다 — 그래야 호출자가 그 키로 상태를 조회할 수
+ * 있다(파생 키는 DB에 없다).
  */
 export const cardSmsIngestResponseSchema = z.object({
   accepted: z.literal(true),
   eventId: z.string(),
   processingStatus: cardSmsProcessingStatusSchema,
   duplicate: z.boolean(),
+  /** 이 수집이 어느 멱등 키 경로로 처리됐는지. `client`가 아니면 서버가 추측했다는 뜻. */
+  idempotencySource: cardSmsIdempotencySourceSchema,
 });
 export type CardSmsIngestResponse = z.infer<typeof cardSmsIngestResponseSchema>;
 

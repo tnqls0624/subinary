@@ -636,6 +636,18 @@ export const cardSmsEvents = pgTable(
       .notNull()
       .references(() => sourceItems.id),
     eventId: text('event_id').notNull(),
+    /**
+     * 이 행의 `event_id`가 어디서 왔는가 — `client`(호출자가 준 멱등 키) /
+     * `derived_received_at`(수신 시각으로 파생) / `derived_window`(서버 창으로 파생).
+     * 값의 정의는 `card-sms-idempotency.ts`의 `CARD_SMS_KEY_SOURCES`가 정본이다.
+     *
+     * **NULL은 0050 적용 이전 행이다**(어느 경로였는지 판별 불가). nullable로 두는
+     * 이유가 그것이다 — 기본값으로 채우면 없는 사실을 있는 것처럼 세게 된다.
+     *
+     * 왜 세는가: 멱등 키를 언제 필수화해도 되는지는 "키 없는 수집이 충분히 사라졌는가"로만
+     * 판단할 수 있다. 이 컬럼이 그 유일한 근거다(P0-9).
+     */
+    keySource: text('key_source'),
     sender: text('sender').notNull(),
     rawContent: text('raw_content').notNull(),
     contentHash: text('content_hash').notNull(),
@@ -680,6 +692,111 @@ export const cardSmsEvents = pgTable(
     index('card_sms_events_household_id_parse_status_idx').on(
       table.householdId,
       table.parseStatus,
+    ),
+    // 창 기반 중복 판정의 조회 경로: (장치, 본문 지문, 최근 N분). 수집 요청마다 타는
+    // 조회라 인덱스가 없으면 이벤트가 쌓일수록 수집 지연이 선형으로 늘어난다.
+    index('card_sms_events_device_id_content_hash_received_at_idx').on(
+      table.deviceId,
+      table.contentHash,
+      table.receivedAt,
+    ),
+    // 값 집합은 코드(CARD_SMS_KEY_SOURCES)와 DB 양쪽에 있어야 한다. 오타 난 값이
+    // 들어오면 집계가 조용히 한 갈래를 통째로 놓치고, 그게 필수화 판단을 틀리게 한다.
+    check(
+      'card_sms_events_key_source_check',
+      sql`"card_sms_events"."key_source" is null or "card_sms_events"."key_source" in ('client', 'derived_received_at', 'derived_window')`,
+    ),
+  ],
+);
+
+/**
+ * 중복으로 판정해 `card_sms_events`에 넣지 않은 수집 시도의 **원문 보관소**(P0-9).
+ *
+ * 왜 필요한가: 지금까지 중복 판정된 문자는 아무 흔적도 남기지 않았다. 나중에 그 판정이
+ * 오판(= 같은 문자를 만든 별개 결제)으로 밝혀져도 **복구할 근거가 없었다** — 지출이
+ * 조용히 과소집계되고 사용자는 이유를 알 방법이 없다. 이 테이블이 그 근거다.
+ *
+ * 왜 `card_sms_events`에 넣지 않는가: 그 테이블의 행은 곧 거래 승격 후보다. 중복
+ * 판정된 시도를 같이 넣으면 승격·집계·목록이 전부 다시 이 문제를 안는다. 승격 대상이
+ * 아닌 원문은 승격 대상과 다른 테이블에 있어야 한다.
+ *
+ * `UNIQUE(device_id, event_id, content_hash)` + `attempts`로 접는 이유: 자동화가
+ * 공격적으로 재시도하면(설정 실수·연결 플랩) 같은 시도가 수십 건 쌓인다. 보관의 목적은
+ * "무엇이 버려졌는가"이지 "몇 번 눌렀는가"의 낱개 이력이 아니다 — 횟수는 카운터로 충분하다.
+ *
+ * ⚠️ `raw_content`는 카드 문자 원문(가맹점·금액·마스킹 카드번호)이다. 운영 로그·관측
+ * 싱크로 내보내지 말 것. 집계 수치만 로그에 쓴다.
+ */
+export const cardSmsIngestSuppressions = pgTable(
+  'card_sms_ingest_suppressions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => householdMembers.id),
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => registeredDevices.id),
+    /** 중복으로 판정될 때 이 시도가 들고 있던 멱등 키. */
+    eventId: text('event_id').notNull(),
+    /** 어느 갈래로 파생된 키였는지(`CARD_SMS_KEY_SOURCES`). */
+    keySource: text('key_source').notNull(),
+    /** 판정 사유(`CARD_SMS_SUPPRESSION_REASONS`). */
+    reason: text('reason').notNull(),
+    /**
+     * 같은 것으로 판정된 기존 이벤트. **FK를 걸지 않는다** — 이벤트가 지워져도 버려진
+     * 원문은 남아야 한다(NO ACTION이면 삭제가 막히고 CASCADE면 보관이 함께 지워진다).
+     * 감사 기록이 감사 대상보다 오래 살아야 한다는 0049 수리 로그의 판단과 같다.
+     * 경합 패배처럼 대상을 읽지 못한 경우 NULL이다.
+     */
+    matchedEventId: uuid('matched_event_id'),
+    sender: text('sender').notNull(),
+    rawContent: text('raw_content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').notNull().default(1),
+    /**
+     * 오판으로 판명돼 실제 이벤트로 되살렸을 때 그 이벤트. 채워지면 이 행은 처리 완료다.
+     * 복구 도구가 아직 없어도 컬럼을 먼저 두는 이유: 복구 시점에 "무엇을 이미 되살렸는지"를
+     * 알 방법이 없으면 두 번 되살려 이번엔 과대집계가 난다.
+     */
+    restoredEventId: uuid('restored_event_id'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('card_sms_ingest_suppressions_device_event_content_unique').on(
+      table.deviceId,
+      table.eventId,
+      table.contentHash,
+    ),
+    index('card_sms_ingest_suppressions_household_id_last_seen_at_idx').on(
+      table.householdId,
+      table.lastSeenAt,
+    ),
+    index('card_sms_ingest_suppressions_device_id_content_hash_idx').on(
+      table.deviceId,
+      table.contentHash,
+    ),
+    check(
+      'card_sms_ingest_suppressions_reason_check',
+      sql`"card_sms_ingest_suppressions"."reason" in ('event_id_conflict', 'fingerprint_window', 'insert_race')`,
+    ),
+    check(
+      'card_sms_ingest_suppressions_key_source_check',
+      sql`"card_sms_ingest_suppressions"."key_source" in ('client', 'derived_received_at', 'derived_window')`,
+    ),
+    check(
+      'card_sms_ingest_suppressions_attempts_check',
+      sql`"card_sms_ingest_suppressions"."attempts" >= 1`,
     ),
   ],
 );
@@ -736,6 +853,10 @@ export type NewSourceItem = typeof sourceItems.$inferInsert;
 
 export type CardSmsEvent = typeof cardSmsEvents.$inferSelect;
 export type NewCardSmsEvent = typeof cardSmsEvents.$inferInsert;
+
+export type CardSmsIngestSuppression = typeof cardSmsIngestSuppressions.$inferSelect;
+export type NewCardSmsIngestSuppression =
+  typeof cardSmsIngestSuppressions.$inferInsert;
 
 /* ========================================================================== */
 /* Phase 4 — 거래 관리 (Phase 4 Build Spec §2)                                 */

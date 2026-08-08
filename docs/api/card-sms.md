@@ -95,13 +95,13 @@ curl -s -i -X POST http://localhost:3001/v1/mobile-events/card-sms \
 신규 수집(파싱 큐 등록됨):
 
 ```json
-{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "queued", "duplicate": false }
+{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "queued", "duplicate": false, "idempotencySource": "client" }
 ```
 
 동일 `eventId` 재전송(멱등 — 중복 저장·재파싱 없음):
 
 ```json
-{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "duplicate", "duplicate": true }
+{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "duplicate", "duplicate": true, "idempotencySource": "client" }
 ```
 
 | 필드 | 의미 |
@@ -109,6 +109,32 @@ curl -s -i -X POST http://localhost:3001/v1/mobile-events/card-sms \
 | `accepted` | 항상 `true`(수락). |
 | `processingStatus` | `queued`(신규, 파싱 enqueue됨) \| `duplicate`(기존 존재, 무작업). |
 | `duplicate` | `processingStatus==='duplicate'` 와 동치. |
+| `eventId` | 이 문자가 속한 이벤트의 키. **중복일 때는 흡수된 기존 이벤트의 키**가 온다(서버가 새로 파생한 키는 DB에 없어 조회가 안 되기 때문). |
+| `idempotencySource` | `client`(호출자가 `eventId`를 줌) \| `derived_received_at`(수신 시각으로 파생) \| `derived_window`(서버 3분 창으로 추측). |
+
+#### 멱등 키가 없을 때 서버가 하는 일 (P0-9)
+
+`eventId`는 선택값이지만 **없으면 서버가 추측한다**. 세 갈래 사다리:
+
+| `idempotencySource` | 조건 | 판정 근거 |
+|---|---|---|
+| `client` | `eventId` 있음 | 그 값. `UNIQUE(device_id, event_id)`가 강제. 서버가 창을 덧씌우지 않는다. |
+| `derived_received_at` | `receivedAt`(또는 text 경로의 `X-Received-At`) 있음 | `sha256(sender\ncontent\n수신시각)`. 시각 해상도만큼 정확. |
+| `derived_window` | 둘 다 없음 | `sha256(sender\ncontent\nw:<3분 창 시작점>)` + `(장치, 본문 지문, 최근 3분)` 슬라이딩 조회. |
+
+`derived_window`가 왜 필요한가: 예전 규칙은 `sha256(sender+content)`뿐이라 시간 축이 **전혀**
+없었다. 그래서 시각이 없는 짧은 문자(`카드 승인 5,000원 가맹점`)를 만든 서로 다른 두 결제 중
+두 번째가 영구히 버려졌다. 창을 씌우면 손실이 "영구"에서 "최대 3분"으로 줄어든다.
+
+창 크기 3분의 근거 · 세 갈래의 전체 설계는
+[`packages/database/src/card-sms-idempotency.ts`](../../packages/database/src/card-sms-idempotency.ts)
+상단 주석과 [addendum §3-1](../addendum-card-sms-token-ingest.md)에 있다.
+
+중복으로 판정해 버린 시도는 **원문째로 `card_sms_ingest_suppressions`에 보관된다**(사유·키
+출처·시도 횟수 포함). 판정이 오판으로 밝혀졌을 때 되살릴 근거다 — 이전에는 아무것도 남지 않았다.
+
+관측: `DATABASE_URL=... node scripts/report-card-sms-idempotency.mjs --days 30`
+(키 있는/없는 수집 비율, 억제 건수, 아직 키를 안 보내는 장치 목록).
 
 오류 규칙(HMAC 실패는 원인 비노출 일반 `401`, devices.md §2와 동일):
 
@@ -172,7 +198,7 @@ curl -s -i -X POST http://localhost:3001/v1/mobile-events/card-sms-token \
 ### 응답 `200 OK` (§1과 동일 `cardSmsIngestResponseSchema`)
 
 ```json
-{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "queued", "duplicate": false }
+{ "accepted": true, "eventId": "b3f1c2a4-…", "processingStatus": "queued", "duplicate": false, "idempotencySource": "client" }
 ```
 
 동일 `eventId` 재전송은 멱등(중복 저장·재파싱 없음) → `{ "processingStatus": "duplicate", "duplicate": true }`.
@@ -189,15 +215,22 @@ curl -s -i -X POST http://localhost:3001/v1/mobile-events/card-sms-token \
 
 ### 단축어(iOS) / MacroDroid(Android) 설정 팁
 
+> 설정 템플릿의 **정본은 [addendum §3-1](../addendum-card-sms-token-ingest.md)**이다(수집 마법사가
+> 그대로 인쇄한다). 아래는 요약이다.
+
 - **iOS 단축어**: "URL 콘텐츠 가져오기" 액션 → 방식 `POST`, 헤더에 `Authorization: Bearer <토큰>`
   와 `Content-Type: application/json` 추가, 본문을 JSON으로 지정하고 필드에 문자 발신자/내용/
-  수신 시각을 매핑한다. `eventId`는 문자마다 고유해야 하므로 메시지 식별자나 `수신 시각 + 발신자`
-  조합을 쓴다(같은 값이 반복되면 멱등으로 중복 저장은 방지되지만, 서로 다른 문자는 반드시 서로
-  다른 `eventId`여야 한다).
+  수신 시각을 매핑한다. `eventId`는 문자마다 고유해야 하므로 메시지 식별자나 `수신 시각(초 단위)
+  + 발신자` 조합을 쓴다.
 - **MacroDroid**: 트리거 "SMS 수신" → 액션 "HTTP 요청(POST)"에서 위 두 헤더를 고정으로 넣고,
   본문 JSON에 매직 텍스트(`[sms_message]`, `[sms_address]`, 수신 시각)를 매핑한다. `eventId`는
-  매직 텍스트로 고유값을 만든다.
+  매직 텍스트로 고유값을 만든다(트리거 시각을 쓸 때는 **초 단위 이상**을 포함해야 한다).
+- `eventId`의 조건은 둘뿐이다: **문자마다 다르고, 같은 문자를 다시 보낼 때는 같다.**
+  앞을 어기면 서로 다른 결제가 하나로 합쳐지고, 뒤를 어기면 재시도가 거래를 두 배로 만든다.
+- `eventId`를 도저히 못 만들면 **`receivedAt`만이라도 초 단위로 보내라.** 둘 다 없으면 서버가
+  3분 창으로 추측하며, 그 창 안의 별개 결제는 지출에서 누락된다(원문은 보관되지만 자동 복구는 없다).
 - `receivedAt`은 ISO 8601 datetime 문자열이어야 한다(파서가 `MM/DD` 연도 보정 기준으로 사용).
+  형식을 맞추기 어려우면 형식이 자유로운 `card-sms-text` 경로의 `X-Received-At`을 쓴다.
 - 토큰은 **평문으로 전송**되므로 반드시 HTTPS로 보낸다.
 
 ### HMAC 경로와의 차이 / 보안 트레이드오프 ([ADR-0016](../adr/0016-device-token-ingest.md))

@@ -12,11 +12,15 @@
  */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { assertVerificationDatabaseSafety } from './lib/verification-database-guard.mjs';
 
-import { createDbClient, schema } from '../packages/database/dist/index.mjs';
+import {
+  CARD_SMS_DEDUPE_WINDOW_MS,
+  createDbClient,
+  schema,
+} from '../packages/database/dist/index.mjs';
 
 const databaseUrl = process.env.DATABASE_URL;
 const { databaseName } = assertVerificationDatabaseSafety({
@@ -27,7 +31,7 @@ const { databaseName } = assertVerificationDatabaseSafety({
 console.log(`[card-sms] 검증 DB 안전 가드 통과: ${databaseName}`);
 
 const require = createRequire(import.meta.url);
-const { eq } = require('../packages/database/node_modules/drizzle-orm');
+const { and, eq } = require('../packages/database/node_modules/drizzle-orm');
 const {
   CardSmsIngestService,
 } = require('../apps/api/dist/card-sms/card-sms-ingest.service.js');
@@ -39,8 +43,15 @@ const storageStub = {
 };
 
 let passed = 0;
-function check(label, fn) {
-  fn();
+/**
+ * 검사 하나를 실행하고 통과 수를 센다. **비동기 콜백을 반드시 await 한다** — 안 그러면
+ * 콜백 안의 assert 실패가 unhandled rejection이 되어 검증이 "통과"로 끝난다.
+ *
+ * @param {string} label
+ * @param {() => void | Promise<void>} fn
+ */
+async function check(label, fn) {
+  await fn();
   passed += 1;
   console.log(`  ✓ ${label}`);
 }
@@ -83,7 +94,7 @@ try {
     })
     .returning();
 
-  check('시드 장치는 수집 이력이 비어 있다', () => {
+  await check('시드 장치는 수집 이력이 비어 있다', () => {
     assert.equal(device.firstEventAt, null);
     assert.equal(device.lastEventAt, null);
   });
@@ -112,7 +123,7 @@ try {
     receivedAt: firstReceivedAt.toISOString(),
   });
 
-  check('최초 수집은 queued 로 수락된다', () => {
+  await check('최초 수집은 queued 로 수락된다', () => {
     assert.equal(first.accepted, true);
     assert.equal(first.duplicate, false);
     assert.equal(first.processingStatus, 'queued');
@@ -123,7 +134,7 @@ try {
     .from(schema.cardSmsEvents)
     .where(eq(schema.cardSmsEvents.eventId, 'verify-event-1'))
     .limit(1);
-  check('card_sms_events 행이 pending 으로 생성된다', () => {
+  await check('card_sms_events 행이 pending 으로 생성된다', () => {
     assert.ok(storedEvent, 'event row missing');
     assert.equal(storedEvent.parseStatus, 'pending');
     assert.equal(storedEvent.householdId, household.id);
@@ -131,7 +142,7 @@ try {
 
   // 여기가 실제 회귀 지점이다 — sql 템플릿에 Date를 보간하면 이 호출 자체가 던진다.
   const afterFirst = await readDevice();
-  check('수집이 firstEventAt/lastEventAt 을 채운다 (회귀 지점)', () => {
+  await check('수집이 firstEventAt/lastEventAt 을 채운다 (회귀 지점)', () => {
     assert.equal(afterFirst.firstEventAt?.getTime(), firstReceivedAt.getTime());
     assert.equal(afterFirst.lastEventAt?.getTime(), firstReceivedAt.getTime());
   });
@@ -143,7 +154,7 @@ try {
     content: '[Web발신]\n삼성2승인 이*빈\n1,169원 일시불\n07/20 14:32 영등포구청',
     receivedAt: firstReceivedAt.toISOString(),
   });
-  check('같은 eventId 재전송은 duplicate 로 흡수된다', () => {
+  await check('같은 eventId 재전송은 duplicate 로 흡수된다', () => {
     assert.equal(duplicate.duplicate, true);
     assert.equal(duplicate.processingStatus, 'duplicate');
   });
@@ -157,10 +168,10 @@ try {
     receivedAt: laterReceivedAt.toISOString(),
   });
   const afterSecond = await readDevice();
-  check('firstEventAt 은 최초 값을 유지한다(coalesce)', () => {
+  await check('firstEventAt 은 최초 값을 유지한다(coalesce)', () => {
     assert.equal(afterSecond.firstEventAt?.getTime(), firstReceivedAt.getTime());
   });
-  check('lastEventAt 은 최신 수집으로 갱신된다', () => {
+  await check('lastEventAt 은 최신 수집으로 갱신된다', () => {
     assert.equal(afterSecond.lastEventAt?.getTime(), laterReceivedAt.getTime());
   });
 
@@ -172,11 +183,182 @@ try {
     content: '[Web발신]\n삼성2승인 이*빈\n3,000원 일시불\n07/22 11:11 쿠팡',
   });
   const afterThird = await readDevice();
-  check('receivedAt 생략 시 서버 시각으로 lastEventAt 이 갱신된다', () => {
+  await check('receivedAt 생략 시 서버 시각으로 lastEventAt 이 갱신된다', () => {
     assert.ok(
       afterThird.lastEventAt.getTime() >= before,
       'lastEventAt should advance to server now()',
     );
+  });
+
+  // --- ⑤ P0-9: 멱등 키 출처 기록 ------------------------------------------
+  // 키 있는 수집 / 키 없는 수집을 셀 수 없으면 "언제 eventId를 필수화해도 되는가"를
+  // 영원히 판단할 수 없다. 그 근거가 실제로 저장되는지 본다.
+  await check('호출자가 준 키로 들어온 이벤트는 key_source=client 로 기록된다', () => {
+    assert.equal(storedEvent.keySource, 'client');
+  });
+
+  const countEvents = async (deviceId, contentHash) => {
+    const rows = await db
+      .select({ id: schema.cardSmsEvents.id })
+      .from(schema.cardSmsEvents)
+      .where(
+        and(
+          eq(schema.cardSmsEvents.deviceId, deviceId),
+          eq(schema.cardSmsEvents.contentHash, contentHash),
+        ),
+      );
+    return rows.length;
+  };
+  const readSuppressions = async (deviceId, contentHash) =>
+    db
+      .select()
+      .from(schema.cardSmsIngestSuppressions)
+      .where(
+        and(
+          eq(schema.cardSmsIngestSuppressions.deviceId, deviceId),
+          eq(schema.cardSmsIngestSuppressions.contentHash, contentHash),
+        ),
+      );
+
+  // --- ⑥ P0-9 (a): 같은 이벤트의 재시도는 여전히 하나다 --------------------
+  // 창을 좁힌 대가로 재시도가 중복 거래를 만들면 이 작업은 실패다. 창 **경계**를
+  // 사이에 두고 갈라지는 재시도가 가장 위험하다 — 키가 달라져 UNIQUE로는 안 잡힌다.
+  const flatSender = '15881688';
+  const flatContent = '카드 승인 5,000원 가맹점';
+  const flatHash = createHash('sha256')
+    .update(`${flatSender}\n${flatContent}`, 'utf8')
+    .digest('hex');
+
+  // 다음 창의 시작점. 이 값을 기준으로 "경계 직전 / 경계 직후"를 만들어 창 경계에서
+  // 갈라지는 재시도(키가 달라져 UNIQUE로는 안 잡히는 경우)를 실제로 재현한다.
+  const windowStart =
+    (Math.floor(Date.now() / CARD_SMS_DEDUPE_WINDOW_MS) + 1) *
+    CARD_SMS_DEDUPE_WINDOW_MS;
+  const retryFirst = await service.ingest(deviceContext, {
+    sender: flatSender,
+    content: flatContent,
+    ingestedAt: new Date(windowStart - 1_000),
+  });
+  const retrySecond = await service.ingest(deviceContext, {
+    sender: flatSender,
+    content: flatContent,
+    ingestedAt: new Date(windowStart + 1_000),
+  });
+
+  await check('(a) 창 경계를 넘긴 재시도도 중복으로 흡수된다 (지문 + 슬라이딩 창)', () => {
+    assert.equal(retryFirst.duplicate, false);
+    assert.equal(retrySecond.duplicate, true);
+    assert.equal(retrySecond.processingStatus, 'duplicate');
+  });
+  await check('(a) 중복 응답의 eventId는 흡수된 실제 이벤트의 키다 (조회 가능해야 한다)', () => {
+    // 새로 파생한 키를 돌려주면 호출자가 그 값으로 아무것도 못 찾는다
+    // (manual-text는 이 값으로 card_sms_events를 조회한다).
+    assert.equal(retrySecond.eventId, retryFirst.eventId);
+  });
+  await check('(a) 재시도가 이벤트를 늘리지 않았다', async () => {
+    assert.equal(await countEvents(device.id, flatHash), 1);
+  });
+
+  // --- ⑦ P0-9 (d): 키 없는 경로의 중복은 원문을 남긴다 ---------------------
+  const suppressed = await readSuppressions(device.id, flatHash);
+  await check('(d) 중복 판정된 문자의 원문이 보관된다 (복구할 근거)', () => {
+    assert.equal(suppressed.length, 1);
+    assert.equal(suppressed[0].rawContent, flatContent);
+    assert.equal(suppressed[0].sender, flatSender);
+    assert.equal(suppressed[0].reason, 'fingerprint_window');
+    assert.equal(suppressed[0].keySource, 'derived_window');
+    assert.ok(suppressed[0].matchedEventId, '흡수 대상 이벤트가 연결되지 않았다');
+  });
+
+  const retryThird = await service.ingest(deviceContext, {
+    sender: flatSender,
+    content: flatContent,
+    ingestedAt: new Date(windowStart + 2_000),
+  });
+  const suppressedAgain = await readSuppressions(device.id, flatHash);
+  await check('(d) 반복 재시도는 행을 늘리지 않고 attempts만 센다', () => {
+    assert.equal(retryThird.duplicate, true);
+    assert.equal(suppressedAgain.length, 1);
+    assert.equal(suppressedAgain[0].attempts, 2);
+  });
+
+  // --- ⑧ P0-9 (b): 창을 넘긴 동일 본문 별개 결제는 이벤트 2건 -------------
+  // 이 작업의 핵심 수정. 예전 규칙에서는 두 번째가 **영구히** 버려졌다.
+  await service.ingest(deviceContext, {
+    sender: flatSender,
+    content: flatContent,
+    ingestedAt: new Date(windowStart + CARD_SMS_DEDUPE_WINDOW_MS + 5_000),
+  });
+  await check('(b) 타임스탬프 없는 동일 본문 별개 결제 2건 → 이벤트 2건', async () => {
+    assert.equal(await countEvents(device.id, flatHash), 2);
+  });
+
+  // --- ⑨ P0-9 (c): 키 있는 경로는 창에 갇히지 않는다 ----------------------
+  // 호출자가 "이 둘은 다른 이벤트"라고 말했으면 서버가 창으로 뒤집으면 안 된다.
+  const keyedSender = '15881688';
+  const keyedContent = '카드 승인 7,700원 같은가맹점';
+  const keyedAt = new Date(windowStart + 10_000);
+  await service.ingest(deviceContext, {
+    eventId: 'p0-9-keyed-a',
+    sender: keyedSender,
+    content: keyedContent,
+    ingestedAt: keyedAt,
+  });
+  const keyedB = await service.ingest(deviceContext, {
+    eventId: 'p0-9-keyed-b',
+    sender: keyedSender,
+    content: keyedContent,
+    ingestedAt: new Date(keyedAt.getTime() + 1_000),
+  });
+  const keyedHash = createHash('sha256')
+    .update(`${keyedSender}\n${keyedContent}`, 'utf8')
+    .digest('hex');
+  await check('(c) 키가 다르면 같은 문자·같은 창이어도 별개 이벤트다', async () => {
+    assert.equal(keyedB.duplicate, false);
+    assert.equal(keyedB.idempotencySource, 'client');
+    assert.equal(await countEvents(device.id, keyedHash), 2);
+  });
+
+  const keyedRetry = await service.ingest(deviceContext, {
+    eventId: 'p0-9-keyed-a',
+    sender: keyedSender,
+    content: keyedContent,
+    ingestedAt: new Date(keyedAt.getTime() + 2_000),
+  });
+  const keyedSuppressed = await readSuppressions(device.id, keyedHash);
+  await check('(c) 같은 키의 재전송은 duplicate + 원문 보관', () => {
+    assert.equal(keyedRetry.duplicate, true);
+    assert.equal(keyedRetry.eventId, 'p0-9-keyed-a');
+    assert.equal(keyedSuppressed.length, 1);
+    assert.equal(keyedSuppressed[0].reason, 'event_id_conflict');
+    assert.equal(keyedSuppressed[0].keySource, 'client');
+  });
+
+  // --- ⑩ P0-9: 수신 시각만 준 경로 ----------------------------------------
+  const tsSender = '15881688';
+  const tsContent = '카드 승인 3,300원 시각있음';
+  const tsAt = new Date(windowStart + 20_000);
+  const tsFirst = await service.ingest(deviceContext, {
+    sender: tsSender,
+    content: tsContent,
+    receivedAt: tsAt.toISOString(),
+  });
+  const tsSecond = await service.ingest(deviceContext, {
+    sender: tsSender,
+    content: tsContent,
+    receivedAt: new Date(tsAt.getTime() + 15_000).toISOString(),
+  });
+  await check('수신 시각이 다르면 같은 창 안이어도 별개 이벤트다', () => {
+    assert.equal(tsFirst.idempotencySource, 'derived_received_at');
+    assert.equal(tsSecond.duplicate, false);
+  });
+  const tsRetry = await service.ingest(deviceContext, {
+    sender: tsSender,
+    content: tsContent,
+    receivedAt: tsAt.toISOString(),
+  });
+  await check('같은 수신 시각의 재전송은 duplicate 다 (멱등 유지)', () => {
+    assert.equal(tsRetry.duplicate, true);
   });
 
   console.log(`\n[card-sms] 통과 ${passed}/${passed}`);
