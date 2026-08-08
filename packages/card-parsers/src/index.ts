@@ -42,6 +42,28 @@ export {
   buildResultFromSpans,
   resolveQuote,
 } from './spans.js';
+
+/**
+ * 액션 결박 금액 추출 (ADR-0027 §5) — **shadow 전용**.
+ *
+ * `parseCardSms`는 이 추출기를 쓰지 않는다. 기존 결과와 병행 비교(롤아웃 3단계)만
+ * 하기 위한 공개 API이며, L0 성공 조건을 이것으로 바꾸는 것은 롤아웃 6단계다.
+ */
+export {
+  compareAmountEvidence,
+  extractActionGroundedAmount,
+  summarizeAmountShadow,
+} from './action-amount.js';
+export type {
+  ActionAmountScope,
+  ActionAmountStatus,
+  ActionGroundedAmount,
+  AmountShadowRecord,
+  AmountShadowSummary,
+  AmountShadowVerdict,
+  DiscardReason,
+  DiscardedAmountCandidate,
+} from './action-amount.js';
 export type {
   CardSmsQuote,
   InvariantViolation,
