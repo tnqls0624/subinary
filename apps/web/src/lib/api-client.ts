@@ -32,6 +32,7 @@ import type {
   CategoryCreateRequest,
   CategorySummary,
   CategoryUpdateRequest,
+  DevicePingResponse,
   DeviceRegisterRequest,
   DeviceSecretResponse,
   DeviceSummary,
@@ -558,6 +559,22 @@ export const api = {
       apiFetch<{ revoked: true }>(`/v1/devices/${id}`, {
         method: "DELETE",
         accessToken,
+      }),
+  },
+
+  mobileEvents: {
+    /**
+     * 연결 테스트 — 수집 토큰(Bearer)이 유효한지만 확인한다(본문 없음).
+     *
+     * 로그인 access token이 아니라 **장치의 collect token**을 Bearer로 보낸다.
+     * 인증 성공과 문자 수신은 다른 문제라, 이 호출로 앞쪽을 먼저 확정해야
+     * 사용자가 원인을 좁힐 수 있다(로드맵 C-2 Signal Doctor).
+     * 서버가 `lastSeenAt`을 갱신하므로 이후 진단에도 그대로 반영된다.
+     */
+    pingWithCollectToken: (collectToken: string) =>
+      apiFetch<DevicePingResponse>("/v1/mobile-events/ping-token", {
+        method: "POST",
+        accessToken: collectToken,
       }),
   },
 

@@ -2,22 +2,22 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 장치 (오늘의집 톤)
  *
- * - 장치 = ListRow(플랫폼 아이콘 · 이름 · 플랫폼/마지막 수신 subtitle · 상태 배지)
- *   + 행 우측 ⋯ DropdownMenu(secret 재발급 / 폐기 — AlertDialog 확인).
- * - "장치 등록" 주 CTA → 등록 Dialog(이름 + 플랫폼).
- * - secret은 register/rotate 응답에서 단 한 번만 노출 → 1회 노출 Dialog + 복사.
- * 쿼리/뮤테이션/상태/핸들러는 기존 로직 그대로 보존.
+ * - 장치 행은 **두 신호를 분리**해 보여준다: 연결 확인(lastSeenAt) / 마지막 문자
+ *   수신(lastEventAt). 하나로 합치면 자동화의 문자 트리거가 죽어도(인증만 계속
+ *   성공) 정상으로 보이고, 사용자는 지출이 왜 비었는지 알 수 없다(진단 D-2).
+ * - 등록/재발급 뒤에는 secret 덤프 대신 **수집 설정 마법사**(로드맵 C-2)를 연다.
+ *   자격증명을 보여주는 것만으로는 설정이 끝나지 않는다 — 첫 문자가 들어와야
+ *   끝난 것이고, 마법사가 그 지점까지 데려간다.
+ * - 첫 문자 전 장치에는 '설정 미완료' 배지 + '설정 계속하기'를 둔다.
  * ------------------------------------------------------------------------- */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
-  Check,
-  Copy,
   MoreHorizontal,
   Plus,
   Smartphone,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 import type {
   DevicePlatform,
@@ -58,6 +58,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CollectSetupWizard } from "@/components/collect-setup-wizard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -71,6 +72,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { isSetupComplete } from "@/lib/device-signal";
 import { useHousehold } from "@/lib/household-context";
 import { useDevices } from "@/lib/queries";
 import { formatDate } from "@/lib/format";
@@ -104,10 +106,16 @@ export default function DevicesPage() {
   // "장치 등록" 주 CTA → 등록 Dialog.
   const [registerOpen, setRegisterOpen] = useState(false);
 
-  // register/rotate 공용: secret 1회 노출 Dialog.
-  const [secret, setSecret] = useState<DeviceSecretResponse | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [tokenCopied, setTokenCopied] = useState(false);
+  /**
+   * 수집 설정 마법사. `issued`는 등록/재발급 응답에서 **한 번만** 오는 자격증명이라
+   * 이 상태 밖에는 저장하지 않는다(뮤테이션 캐시도 닫을 때 reset). 마법사를
+   * '설정 계속하기'로 여는 경우에는 null이며, 그때는 재발급만 제안할 수 있다.
+   */
+  const [wizard, setWizard] = useState<{
+    deviceId: string;
+    issued: DeviceSecretResponse | null;
+    initialStep: 1 | 2;
+  } | null>(null);
 
   // 파괴적 동작 확인 (재발급/폐기).
   const [confirm, setConfirm] = useState<
@@ -125,10 +133,9 @@ export default function DevicesPage() {
       setName("");
       setPlatform("ios");
       setFormError(null);
-      setCopied(false);
-      setTokenCopied(false);
       setRegisterOpen(false);
-      setSecret(result);
+      // 등록은 시작이지 완료가 아니다 — 바로 설정 마법사로 이어 붙인다.
+      setWizard({ deviceId: result.device.id, issued: result, initialStep: 1 });
     },
   });
 
@@ -137,9 +144,9 @@ export default function DevicesPage() {
       authedFetch((token) => api.devices.rotate(token, id)),
     onSuccess: (result) => {
       void invalidateDevices();
-      setCopied(false);
-      setTokenCopied(false);
-      setSecret(result);
+      // 재발급하면 자동화에 넣어둔 옛 값이 즉시 죽는다. 새 값을 어디에 넣어야
+      // 하는지까지 안내해야 수집이 멈춘 채 방치되지 않는다(앱은 이미 깔려 있으므로 2단계).
+      setWizard({ deviceId: result.device.id, issued: result, initialStep: 2 });
     },
   });
 
@@ -174,33 +181,13 @@ export default function DevicesPage() {
     setConfirm(null);
   }
 
-  async function copySecret() {
-    if (!secret) return;
-    try {
-      await navigator.clipboard.writeText(secret.secret);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  async function copyCollectToken() {
-    if (!secret) return;
-    try {
-      await navigator.clipboard.writeText(secret.collectToken);
-      setTokenCopied(true);
-    } catch {
-      setTokenCopied(false);
-    }
-  }
-
   /**
-   * 1회 노출 다이얼로그 닫기. raw secret/collectToken이 mutation cache
+   * 마법사 닫기. raw secret/collectToken이 mutation cache
    * (registerMutation.data / rotateMutation.data)에 남지 않도록 reset까지 수행
    * — '지금만 볼 수 있어요' 계약을 메모리 상태에도 동일하게 적용한다.
    */
-  function closeSecretDialog() {
-    setSecret(null);
+  function closeWizard() {
+    setWizard(null);
     registerMutation.reset();
     rotateMutation.reset();
   }
@@ -208,6 +195,18 @@ export default function DevicesPage() {
   const devices = devicesQuery.data ?? [];
   const isEmpty =
     !devicesQuery.isLoading && !devicesQuery.isError && devices.length === 0;
+
+  // 마법사가 보는 장치는 **목록의 최신 행**이다 — 등록 응답 스냅샷을 계속 보면
+  // 폴링으로 firstEventAt이 채워져도 화면이 영영 '대기 중'에 머문다.
+  const wizardDevice = useMemo(
+    () =>
+      wizard
+        ? (devices.find((d) => d.id === wizard.deviceId) ??
+          wizard.issued?.device ??
+          null)
+        : null,
+    [wizard, devices],
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -261,17 +260,39 @@ export default function DevicesPage() {
           ) : (
             <div className="flex flex-col">
               {devices.map((d) => (
-                <div key={d.id} className="flex items-center gap-1">
+                <div key={d.id} className="flex flex-col">
+                <div className="flex items-center gap-1">
                   <ListRow
                     className="min-w-0 flex-1"
                     icon={d.platform === "other" ? <Bot /> : <Smartphone />}
                     title={d.name}
-                    subtitle={`${PLATFORM_LABEL[d.platform]} · ${
-                      d.lastSeenAt
-                        ? `마지막 수신 ${formatDate(d.lastSeenAt)}`
-                        : "아직 수신이 없어요"
-                    }`}
-                    valueSub={<StatusBadge status={d.status} />}
+                    subtitle={
+                      /* 두 신호를 한 줄로 합치지 않는다 — 인증만 성공하고 문자가
+                         끊긴 상태가 정상으로 보이던 것이 이 화면의 버그였다. */
+                      <span className="flex flex-col gap-0.5">
+                        <span>
+                          {PLATFORM_LABEL[d.platform]} · 연결 확인{" "}
+                          {d.lastSeenAt ? formatDate(d.lastSeenAt) : "아직 없어요"}
+                        </span>
+                        <span>
+                          마지막 문자{" "}
+                          {d.lastEventAt
+                            ? formatDate(d.lastEventAt)
+                            : "아직 받지 못했어요"}
+                        </span>
+                      </span>
+                    }
+                    valueSub={
+                      d.status === "active" && !isSetupComplete(d) ? (
+                        <StatusBadge
+                          status="setup_incomplete"
+                          label="설정 미완료"
+                          tone="warning"
+                        />
+                      ) : (
+                        <StatusBadge status={d.status} />
+                      )
+                    }
                   />
                   {d.status === "active" ? (
                     <DropdownMenu>
@@ -307,6 +328,31 @@ export default function DevicesPage() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : null}
+                </div>
+                {/* 첫 문자가 오기 전까지는 등록이 끝난 게 아니다 — 다음 행동을 남겨둔다. */}
+                {d.status === "active" && !isSetupComplete(d) ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg px-2 pb-3">
+                    <span className="text-muted-foreground text-[13px]">
+                      {d.lastSeenAt
+                        ? "연결은 됐어요. 문자만 아직이에요."
+                        : "아직 연결 확인 전이에요."}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="tint"
+                      size="sm"
+                      onClick={() =>
+                        setWizard({
+                          deviceId: d.id,
+                          issued: null,
+                          initialStep: 2,
+                        })
+                      }
+                    >
+                      설정 계속하기
+                    </Button>
+                  </div>
+                ) : null}
                 </div>
               ))}
             </div>
@@ -414,114 +460,18 @@ export default function DevicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* secret 1회 노출 Dialog */}
-      <Dialog
-        open={secret !== null}
-        onOpenChange={(o) => !o && closeSecretDialog()}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>장치 secret이 발급됐어요</DialogTitle>
-            <DialogDescription>
-              <span className="text-destructive font-semibold">
-                지금만 볼 수 있어요.
-              </span>{" "}
-              창을 닫으면 다시 확인할 수 없으니 장치 앱에 안전하게 저장해
-              주세요.
-            </DialogDescription>
-          </DialogHeader>
-          {secret ? (
-            <div className="flex flex-col gap-4 text-sm">
-              <div className="bg-muted flex flex-col gap-3 rounded-lg p-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-muted-foreground text-xs">장치</span>
-                  <span className="font-medium">{secret.device.name}</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-muted-foreground text-xs">
-                    deviceId
-                  </span>
-                  <code className="font-mono text-xs break-all">
-                    {secret.deviceId}
-                  </code>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-muted-foreground text-xs">secret</span>
-                  <code className="font-mono text-xs break-all">
-                    {secret.secret}
-                  </code>
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="tint"
-                className="w-full"
-                onClick={copySecret}
-              >
-                {copied ? (
-                  <>
-                    <Check /> 복사했어요
-                  </>
-                ) : (
-                  <>
-                    <Copy /> secret 복사하기
-                  </>
-                )}
-              </Button>
-              <div className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs">서명 방식</span>
-                <span className="text-muted-foreground">
-                  {secret.algorithm}
-                </span>
-                <span className="text-muted-foreground text-xs whitespace-pre-wrap">
-                  {secret.signingRecipe}
-                </span>
-              </div>
-
-              <div className="border-border flex flex-col gap-3 border-t pt-4">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[13px] font-semibold">
-                    간편 수집 토큰(단축어·MacroDroid용)
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    서명 계산이 어려운 자동화 앱은 이 토큰을{" "}
-                    <code className="bg-muted rounded px-1 py-0.5">
-                      Authorization: Bearer
-                    </code>{" "}
-                    헤더로 보내면 돼요. secret과 별개로 동작해요.
-                  </span>
-                </div>
-                <div className="bg-muted flex flex-col gap-1 rounded-lg p-3">
-                  <code className="font-mono text-xs break-all">
-                    {secret.collectToken}
-                  </code>
-                </div>
-                <Button
-                  type="button"
-                  variant="tint"
-                  className="w-full"
-                  onClick={copyCollectToken}
-                >
-                  {tokenCopied ? (
-                    <>
-                      <Check /> 복사했어요
-                    </>
-                  ) : (
-                    <>
-                      <Copy /> 수집 토큰 복사하기
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter className="flex-col sm:flex-col">
-            <Button className="h-11 w-full" onClick={closeSecretDialog}>
-              안전하게 저장했어요
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 수집 설정 마법사 — 등록/재발급 직후, 그리고 '설정 계속하기'로 진입 */}
+      {wizard && wizardDevice ? (
+        <CollectSetupWizard
+          open
+          onOpenChange={(o) => !o && closeWizard()}
+          device={wizardDevice}
+          issued={wizard.issued}
+          initialStep={wizard.initialStep}
+          onReissue={() => rotateMutation.mutate(wizard.deviceId)}
+          reissuePending={rotateMutation.isPending}
+        />
+      ) : null}
 
       {/* 파괴적 동작 확인 */}
       <AlertDialog

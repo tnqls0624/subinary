@@ -69,6 +69,10 @@ function toDeviceSummary(device: schema.RegisteredDevice): DeviceSummary {
     platform: device.platform,
     status: device.status,
     lastSeenAt: device.lastSeenAt ? device.lastSeenAt.toISOString() : null,
+    // 인증 성공(lastSeenAt)과 문자 수신(first/lastEventAt)은 다른 신호다. 하나만
+    // 내보내면 화면이 "인증은 되는데 문자 트리거가 안 걸림"을 정상으로 표시한다.
+    firstEventAt: device.firstEventAt ? device.firstEventAt.toISOString() : null,
+    lastEventAt: device.lastEventAt ? device.lastEventAt.toISOString() : null,
     createdAt: device.createdAt.toISOString(),
   };
 }

@@ -277,11 +277,20 @@ export function useBudgets(month?: string): UseQueryResult<BudgetListResponse> {
 
 // --- Resource lists (필터/폼 채우기용) --------------------------------------
 
-export function useDevices(): UseQueryResult<DeviceSummary[]> {
+/**
+ * 장치 목록. `refetchInterval`은 수집 설정 마법사가 "첫 문자 대기"에서만 쓴다 —
+ * 첫 수신은 사용자가 카드를 긁어야 오므로 화면이 스스로 알아채야 하고, 그 화면을
+ * 벗어나면 폴링도 멈춰야 한다(같은 queryKey를 공유하는 다른 화면까지 폴링에
+ * 끌려 들어가지 않도록 대기 화면이 열려 있는 동안에만 값을 넘긴다).
+ */
+export function useDevices(
+  options?: Readonly<{ refetchInterval?: number | false }>,
+): UseQueryResult<DeviceSummary[]> {
   const { householdId, authedFetch, enabled } = useHouseholdScope();
   return useQuery({
     queryKey: queryKeys.devices(householdId),
     enabled,
+    refetchInterval: options?.refetchInterval ?? false,
     queryFn: () =>
       authedFetch((token) =>
         api.devices.list(token, householdId as string),
