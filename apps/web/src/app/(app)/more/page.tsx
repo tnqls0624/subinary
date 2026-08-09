@@ -17,6 +17,8 @@ import {
   CreditCard,
   Fingerprint,
   KeyRound,
+  Repeat,
+  ShieldCheck,
   Smartphone,
   Store,
   Tags,
@@ -82,10 +84,22 @@ const ITEMS: ReadonlyArray<MoreItem> = [
     description: "같은 가게가 여러 이름으로 나뉘어 있으면 하나로 묶어요",
   },
   {
+    href: "/more/recurring",
+    icon: Repeat,
+    title: "정기 지출",
+    description: "매달 빠져나가는 결제를 찾아 확인해요",
+  },
+  {
     href: "/more/notifications",
     icon: Bell,
     title: "알림 설정",
     description: "푸시 알림·최소 금액·무음 시간대를 조절해요",
+  },
+  {
+    href: "/more/privacy",
+    icon: ShieldCheck,
+    title: "개인정보",
+    description: "무엇에 동의했고 무엇이 수집·보관되는지 확인해요",
   },
   {
     href: "/more/password",

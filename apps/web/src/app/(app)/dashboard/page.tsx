@@ -4,8 +4,9 @@
  *
  * 활성 가족(household-context)의 이번 달 재무 현황을 단일 컬럼 카드 스택
  * (max-w-2xl)으로 보여준다.
+ *  - 할 일(최상단): 결제 실패 / 확인필요·중복의심 거래 / 읽지 못한 문자 — 처리할 게
+ *    없으면 카드 자체가 사라진다. 전체 백로그는 /todo가 갖는다(C-8)
  *  - 히어로: "이번 달 소비" 총액 큰 타이포 + 전월 대비 해요체 문장(analytics.monthly)
- *  - 확인 필요: 확인필요·중복의심 거래(→ /transactions) / 파싱 실패 문자 백로그
  *  - 예산: UsageBar 상위 5개(budgets.list), 초과 시 "예산을 넘었어요" 카피
  *  - "어디에 많이 썼나요?" 카테고리 BarList / 구성원·카드는 ListRow(analytics.*)
  *  - 최근 거래: ListRow 5건(transactions.list limit 10 중 상위 5) + 전체 보기 링크
@@ -22,6 +23,7 @@
  * 데이터는 React Query 훅(queries.ts) + authedFetch(401→refresh)로 가져온다.
  * ------------------------------------------------------------------------- */
 import {
+  AlertTriangle,
   Check,
   CircleAlert,
   CreditCard,
@@ -32,30 +34,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
-import { toast } from "sonner";
-
 import type {
   BudgetScopeType,
-  CardSmsEventDetail,
-  CardSmsEventSummary,
   MemberColor,
   TransactionSummary,
 } from "@family/contracts";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Card,
   CardAction,
@@ -65,26 +50,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   BarList,
-  DeclineBanner,
   ListRow,
   Money,
   MonthSwitcher,
+  ReviewInboxDialog,
   StatusBadge,
   UsageBar,
+  declineReasonHint,
+  pendingCountText,
+  useTodoCounts,
   type BarListItem,
+  type TodoCounts,
 } from "@/components/widgets";
 import { MonthlyInsightsCard } from "@/components/monthly-insights-card";
 import { AddTransactionDialog } from "../transactions/add-transaction-dialog";
-import { api, ApiError, apiFetch } from "@/lib/api-client";
-import { useAuth } from "@/lib/auth-context";
+import { ApiError } from "@/lib/api-client";
 import {
   currentMonth,
   formatDate,
@@ -112,12 +93,6 @@ import {
   useTransactions,
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-
-/** 처리 대기 건수 집계 시 한 번에 가져올 상한(초과 시 'N+' 표기). */
-const REVIEW_SCAN_LIMIT = 100;
-
-/** '확인이 필요한 문자'는 건별로 이 기간(3일)만 홈에 노출한다(지난 건은 자동 숨김). */
-const PARSE_FAILED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** BarList 상위 노출 개수(구성원/카드/카테고리 공통). */
 const BREAKDOWN_TOP_N = 6;
@@ -169,8 +144,7 @@ export default function DashboardPage() {
   const month = monthParam && isMonthKey(monthParam) ? monthParam : thisMonth;
   const isCurrentMonth = month === thisMonth;
 
-  const { householdId, activeMembership } = useHousehold();
-  const { authedFetch } = useAuth();
+  const { activeMembership } = useHousehold();
   const [parseFailedOpen, setParseFailedOpen] = useState(false);
 
   // 이번 달이면 쿼리스트링을 없애 링크를 짧게 유지한다(기본 상태 = 파라미터 없음).
@@ -229,31 +203,10 @@ export default function DashboardPage() {
   // 최근 거래 10건(기간 무관, 최신순).
   const recentQuery = useTransactions({ limit: 10 }, poll);
 
-  // 처리 대기 백로그(월 무관): 상태별로 스캔해 건수를 센다.
-  const pendingReviewQuery = useTransactions(
-    { status: "pending_review", limit: REVIEW_SCAN_LIMIT },
-    poll,
-  );
-  const duplicateQuery = useTransactions(
-    { status: "duplicate_suspected", limit: REVIEW_SCAN_LIMIT },
-    poll,
-  );
-
-  // 검토 대기 문자(파싱 실패 + LLM 격리). 전용 훅이 없어 apiFetch 직접 사용.
-  const parseFailedQuery = useQuery({
-    queryKey: ["card-sms-events", householdId, "review-inbox"],
-    enabled: householdId != null,
-    refetchInterval: REALTIME_POLL_MS,
-    queryFn: () =>
-      authedFetch((token) =>
-        apiFetch<CardSmsEventSummary[]>(
-          `/v1/card-sms-events?householdId=${encodeURIComponent(
-            householdId as string,
-          )}&status=parse_failed,quarantined&limit=${REVIEW_SCAN_LIMIT}`,
-          { accessToken: token },
-        ),
-      ),
-  });
+  // 할 일 백로그(월 무관) — 결제 실패 · 확인 필요 거래 · 읽지 못한 문자.
+  // 세는 규칙은 `useTodoCounts()`가 갖고 있고, `/todo`와 (다음 웨이브의) 탭 배지가
+  // 같은 훅을 쓴다. 홈이 자기 방식으로 또 세면 화면마다 숫자가 갈린다.
+  const todo = useTodoCounts(poll);
 
   // --- 파생 데이터 ----------------------------------------------------------
 
@@ -353,36 +306,23 @@ export default function DashboardPage() {
 
   const recentRows = recentQuery.data?.items ?? [];
 
-  // 처리 대기 건수(확인필요 = pending_review + duplicate_suspected).
-  // 이미 '중복이라 제외'(excludedAt)한 거래는 사용자가 처리한 것이므로 대기에서 뺀다.
-  const reviewLoading =
-    pendingReviewQuery.isLoading || duplicateQuery.isLoading;
-  const reviewError = pendingReviewQuery.isError || duplicateQuery.isError;
-  const countPending = (items?: TransactionSummary[]) =>
-    (items ?? []).filter((t) => t.excludedAt == null).length;
-  const reviewCount =
-    countPending(pendingReviewQuery.data?.items) +
-    countPending(duplicateQuery.data?.items);
-  const reviewMore =
-    Boolean(pendingReviewQuery.data?.nextCursor) ||
-    Boolean(duplicateQuery.data?.nextCursor);
-
-  // 확인 필요 문자: 건별로 최근 3일 이내 수신 건만 노출(3일 지난 건은 자동 숨김).
-  // 데이터/DB는 그대로 두고 표시만 필터한다(receivedAt 기준, 클라이언트 계산).
-  const parseFailedRecent = useMemo(() => {
-    const cutoff = Date.now() - PARSE_FAILED_WINDOW_MS;
-    return (parseFailedQuery.data ?? []).filter(
-      (e) => new Date(e.receivedAt).getTime() >= cutoff,
-    );
-  }, [parseFailedQuery.data]);
+  // 확인 필요 문자: 홈은 **최근 3일**만 줄로 노출한다. 3일이 지난 건은 사라지는 게
+  // 아니라 "지난 문자 N건 더 보기"(→ /todo)로 내려간다 — 예전에는 3일이 지나면 홈에서
+  // 조용히 사라졌고, 그 문자 한 통이 거래 한 건이라 지출 합계가 영구히 틀어졌다(D-7).
+  // 창 자체는 유지한다: 없애면 홈이 오래된 백로그로 덮여 원래 창을 넣은 이유가 사라진다.
+  // 창을 가르는 규칙과 그 이유는 components/widgets/todo-counts.ts에 있다.
+  const parseFailedRecent = todo.smsRecent;
   const parseFailedCount = parseFailedRecent.length;
-  const parseFailedMore = parseFailedCount >= REVIEW_SCAN_LIMIT;
+  const olderSmsCount = todo.smsOlder.length;
 
-  // 노출 규칙: 확인필요 거래는 1건이라도 있으면(해결하면 자동으로 사라짐), 읽지
-  // 못한 문자는 3일 이내 건이 있으면 표시. 둘 다 없으면 카드 자체를 감춘다.
-  const showReviewRow = reviewError || reviewCount > 0;
-  const showParseFailedRow = parseFailedQuery.isError || parseFailedCount > 0;
-  const showReviewCard = showReviewRow || showParseFailedRow;
+  // 노출 규칙: 결제 실패는 미해결이 1건이라도 있으면, 확인필요 거래도 1건이라도 있으면
+  // (해결하면 자동으로 사라진다), 읽지 못한 문자는 3일 이내 건 또는 지난 건이 있으면
+  // 표시. 셋 다 없으면 카드 자체를 감춘다(빈 상태로 자리 차지 금지).
+  const showDeclineRow = todo.declinesError || todo.declines.length > 0;
+  const showReviewRow = todo.reviewsError || todo.reviews.length > 0;
+  const showParseFailedRow =
+    todo.smsError || parseFailedCount > 0 || olderSmsCount > 0;
+  const showTodoCard = showDeclineRow || showReviewRow || showParseFailedRow;
 
   // --- 온보딩 체크리스트(C-1) ------------------------------------------------
   // 합류 직후 홈은 빈 카드 6장이라 다음 행동이 없었다. 거래가 아직 하나도 없고
@@ -459,6 +399,25 @@ export default function DashboardPage() {
           월 라벨이 있던 자리가 그대로 스위처가 된다 — 누적 지출의 대부분이 지난달에
           있는데도 이 화면이 이번 달만 보여주고 있었다(ADR-0026). */}
       <h1 className="sr-only">홈</h1>
+
+      {/* 할 일 — 화면 최상단. 처리할 게 하나도 없으면 카드 자체가 사라진다.
+          체크리스트(새 가족) 화면에서도 남긴다 — 문자가 왔는데 읽지 못한 상태는
+          설정을 끝내기 전에도 알려야 한다.
+          결제 실패 배너를 여기로 흡수했다(C-8): 같은 자리에 붉은 카드가 두 장 쌓이면
+          무엇이 급한지 오히려 묻힌다. 대신 실패 줄만 destructive 톤을 유지하고 맨 위에
+          둔다 — 셋 중 유일하게 **돈이 나가지 않은** 사고다. */}
+      {showTodoCard ? (
+        <TodoCard
+          todo={todo}
+          showDeclineRow={showDeclineRow}
+          showReviewRow={showReviewRow}
+          showParseFailedRow={showParseFailedRow}
+          recentSmsCount={parseFailedCount}
+          olderSmsCount={olderSmsCount}
+          onOpenSms={() => setParseFailedOpen(true)}
+        />
+      ) : null}
+
       {/* 거래가 한 건도 없으면 달을 옮길 이유가 없다 — 체크리스트 화면에서는 감춘다. */}
       {showChecklist ? null : (
         <div className="flex items-center justify-end">
@@ -470,10 +429,6 @@ export default function DashboardPage() {
           />
         </div>
       )}
-
-      {/* 결제 실패 배너 — 미해결 반복 거절이 있을 때만 나타난다(없으면 렌더 안 함).
-          declined는 거래로 승격되지 않아 아래 어떤 집계에도 안 잡히므로 여기서 알린다. */}
-      <DeclineBanner />
 
       {/* 온보딩 체크리스트 — 아직 거래가 없고 3단계를 다 못 끝낸 새 가족에게만.
           아래 집계 카드들은 전부 빈 상태가 되므로 그 자리를 이걸로 대신한다. */}
@@ -550,81 +505,6 @@ export default function DashboardPage() {
       <MonthlyInsightsCard month={month} />
       </>
       )}
-
-      {/* 확인 필요 — 처리 대기 백로그. 확인필요 거래·확인 필요 문자가 모두 없으면 숨김.
-          체크리스트 화면에서도 남긴다 — 문자가 왔는데 읽지 못한 상태는 알려야 한다. */}
-      {showReviewCard ? (
-        <Card className="gap-0 py-2">
-          <CardContent className="px-3">
-            {showReviewRow ? (
-            <ListRow
-              href="/transactions"
-              icon={<CircleAlert />}
-              iconClassName="bg-warning/15 text-warning"
-              title="확인이 필요한 거래"
-              subtitle={
-                reviewError
-                  ? "건수를 불러오지 못했어요"
-                  : "확인필요 · 중복의심 거래를 모아뒀어요"
-              }
-              value={
-                <span
-                  className={
-                    !reviewLoading && !reviewError && reviewCount > 0
-                      ? "text-warning"
-                      : "text-muted-foreground"
-                  }
-                >
-                  {pendingCountText(
-                    reviewLoading,
-                    reviewError,
-                    reviewCount,
-                    reviewMore,
-                  )}
-                </span>
-              }
-              chevron
-            />
-            ) : null}
-            {showParseFailedRow ? (
-          <ListRow
-            icon={<MailWarning />}
-            iconClassName="bg-warning/15 text-warning"
-            title="확인이 필요한 문자"
-            subtitle={
-              parseFailedQuery.isError
-                ? "건수를 불러오지 못했어요"
-                : parseFailedCount > 0
-                  ? "탭하면 원문을 보고 바로 확정할 수 있어요"
-                  : "자동으로 읽지 못했거나 확인이 필요한 문자예요"
-            }
-            value={
-              <span
-                className={
-                  !parseFailedQuery.isLoading &&
-                  !parseFailedQuery.isError &&
-                  parseFailedCount > 0
-                    ? "text-warning"
-                    : "text-muted-foreground"
-                }
-              >
-                {pendingCountText(
-                  parseFailedQuery.isLoading,
-                  parseFailedQuery.isError,
-                  parseFailedCount,
-                  parseFailedMore,
-                )}
-              </span>
-            }
-            chevron={parseFailedCount > 0}
-            onClick={
-              parseFailedCount > 0 ? () => setParseFailedOpen(true) : undefined
-            }
-          />
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
 
       {showChecklist ? null : (
       <>
@@ -933,7 +813,10 @@ export default function DashboardPage() {
       </>
       )}
 
-      {/* 확인 필요 문자 검토(원문+교정) 다이얼로그 — 네이티브/웹 공통. */}
+      {/* 확인 필요 문자 검토(원문+교정) 다이얼로그 — 네이티브/웹 공통.
+          홈은 **최근 3일 것만** 넘긴다: 이 다이얼로그는 넘긴 건마다 상세를 한 번씩
+          받으므로 전 기간 백로그를 통째로 넘기면 열자마자 요청이 수십 개 나간다.
+          지난 건은 /todo에서 한 건씩 연다. */}
       <ReviewInboxDialog
         open={parseFailedOpen}
         events={parseFailedRecent}
@@ -944,6 +827,178 @@ export default function DashboardPage() {
           그대로 재사용한다(장치 연결 전에도 첫 거래를 만들어 볼 수 있게). */}
       <AddTransactionDialog open={addTxnOpen} onOpenChange={setAddTxnOpen} />
     </div>
+  );
+}
+
+/**
+ * 홈 '할 일' 카드 (C-8 · 로드맵 366~379행 와이어프레임).
+ *
+ * 매일 생기는 처리 작업 3종을 홈 최상단 한 장으로 모은다. 예전에는 결제 실패가 별도
+ * 배너, 나머지 둘이 히어로 아래 카드로 흩어져 있었다 — 같은 성격의 일인데 자리가
+ * 셋이면 사용자는 매번 다른 곳을 봐야 한다.
+ *
+ * 여기는 **요약**이다. 전체(기간 제한 없는 백로그)는 `/todo`가 갖는다.
+ */
+function TodoCard({
+  todo,
+  showDeclineRow,
+  showReviewRow,
+  showParseFailedRow,
+  recentSmsCount,
+  olderSmsCount,
+  onOpenSms,
+}: Readonly<{
+  todo: TodoCounts;
+  showDeclineRow: boolean;
+  showReviewRow: boolean;
+  showParseFailedRow: boolean;
+  /** 홈 창(최근 3일) 안쪽 문자 수. */
+  recentSmsCount: number;
+  /** 창 밖(지난) 문자 수 — 0이면 '더 보기' 줄을 만들지 않는다. */
+  olderSmsCount: number;
+  onOpenSms: () => void;
+}>) {
+  const top = todo.declines[0];
+  const topHint = top ? declineReasonHint(top.reason) : undefined;
+
+  return (
+    <Card className="gap-0 py-2">
+      <CardHeader className="px-3 pt-1 pb-2">
+        <CardTitle className="text-[15px]">할 일</CardTitle>
+        <CardAction>
+          {/* 합계 배지 — 다음 웨이브의 탭 배지가 같은 `useTodoCounts().total`을 쓴다. */}
+          {todo.total > 0 ? (
+            <span className="bg-destructive text-destructive-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums">
+              {todo.total > 99 ? "99+" : todo.total}
+            </span>
+          ) : null}
+        </CardAction>
+      </CardHeader>
+      <CardContent className="px-3">
+        {showDeclineRow ? (
+          // 배너에 있던 정보(가맹점·금액·시도 횟수·조치 문구)를 한 줄로 옮겼다.
+          // ListRow는 자체가 flex 행이고 제목/부제가 `min-w-0 flex-1` 안에서 truncate
+          // 되므로, 배너에서 카드가 좌우로 넘치던 문제(a0f8fea)는 재발하지 않는다.
+          <ListRow
+            href="/declines"
+            icon={<AlertTriangle />}
+            iconClassName="bg-destructive/10 text-destructive"
+            title="결제가 계속 실패하고 있어요"
+            subtitle={
+              todo.declinesError
+                ? "실패한 결제를 불러오지 못했어요"
+                : top
+                  ? `${top.merchant ?? "어떤 가맹점"}${
+                      top.amount === null ? "" : ` ${formatWon(top.amount)}`
+                    } · ${top.attempts}번 거절${topHint ? ` · ${topHint}` : ""}`
+                  : ""
+            }
+            value={
+              <span className="text-destructive">
+                {pendingCountText(
+                  todo.declinesLoading,
+                  todo.declinesError,
+                  todo.declines.length,
+                  false,
+                )}
+              </span>
+            }
+            chevron
+          />
+        ) : null}
+
+        {showReviewRow ? (
+          <ListRow
+            href="/transactions"
+            icon={<CircleAlert />}
+            iconClassName="bg-warning/15 text-warning"
+            title="확인이 필요한 거래"
+            subtitle={
+              todo.reviewsError
+                ? "건수를 불러오지 못했어요"
+                : "확인필요 · 중복의심 거래를 모아뒀어요"
+            }
+            value={
+              <span
+                className={
+                  !todo.reviewsLoading &&
+                  !todo.reviewsError &&
+                  todo.reviews.length > 0
+                    ? "text-warning"
+                    : "text-muted-foreground"
+                }
+              >
+                {pendingCountText(
+                  todo.reviewsLoading,
+                  todo.reviewsError,
+                  todo.reviews.length,
+                  todo.reviewsTruncated,
+                )}
+              </span>
+            }
+            chevron
+          />
+        ) : null}
+
+        {showParseFailedRow ? (
+          <>
+            <ListRow
+              icon={<MailWarning />}
+              iconClassName="bg-warning/15 text-warning"
+              title="확인이 필요한 문자"
+              subtitle={
+                todo.smsError
+                  ? "건수를 불러오지 못했어요"
+                  : recentSmsCount > 0
+                    ? "탭하면 원문을 보고 바로 확정할 수 있어요"
+                    : "최근 3일 안에 온 건 없어요"
+              }
+              value={
+                <span
+                  className={
+                    !todo.smsLoading && !todo.smsError && recentSmsCount > 0
+                      ? "text-warning"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {/* '최근 3일' 창이 붙는 건 이 줄뿐이다 — 아래 '지난 문자'와 /todo는
+                      전 기간이다. 라벨로 창을 명시해야 0건일 때 "없다"로 읽히지 않는다. */}
+                  {todo.smsLoading || todo.smsError
+                    ? pendingCountText(
+                        todo.smsLoading,
+                        todo.smsError,
+                        recentSmsCount,
+                        false,
+                      )
+                    : `최근 3일 ${recentSmsCount.toLocaleString("ko-KR")}건`}
+                </span>
+              }
+              chevron={recentSmsCount > 0}
+              onClick={recentSmsCount > 0 ? onOpenSms : undefined}
+            />
+            {/* 3일이 지난 문자는 사라지지 않는다 — 여기서 /todo로 넘긴다(D-7). */}
+            {olderSmsCount > 0 ? (
+              <Link
+                href="/todo"
+                className="text-accent-foreground hover:bg-muted/70 -mt-1 mb-1 ml-13 block rounded-lg px-2 py-2 text-[13px] font-medium transition-colors"
+              >
+                지난 문자 {olderSmsCount.toLocaleString("ko-KR")}
+                {todo.smsTruncated ? "+" : ""}건 더 보기 ›
+              </Link>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* 카드 전체 → /todo. 세 줄은 각자의 처리 화면으로 가므로, 백로그 전체를 보는
+            입구는 따로 둔다(탭이 생기기 전까지 /todo의 유일한 상시 진입점이다). */}
+        <Link
+          href="/todo"
+          className="text-muted-foreground hover:bg-muted/70 mt-1 block rounded-lg px-2 py-2 text-center text-[13px] font-medium transition-colors"
+        >
+          할 일 전체 보기 ›
+        </Link>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1047,223 +1102,6 @@ function OnboardingChecklist({
   );
 }
 
-/**
- * 검토 대기 카드 문자 다이얼로그 (ADR-0023 S3).
- *
- * 두 종류를 한 목록으로 보여준다:
- *  - `parse_failed` — 규칙 파서가 못 읽은 문자(값이 비어 있다).
- *  - `quarantined`  — LLM이 원문에서 추출했지만 **사람 확인 전이라 거래로 승격되지
- *                     않은** 건. 값이 미리 채워져 있어 확인만 하면 된다.
- *
- * 요약 목록엔 원문이 없어 열릴 때 상세(GET /v1/card-sms-events/:id)를 받아 원문을
- * 보여주고, 그 자리에서 교정·확정할 수 있게 한다. 확정하면 거래가 만들어지고
- * 동시에 학습 라벨(`human_confirmed`)이 기록된다.
- */
-function ReviewInboxDialog({
-  open,
-  events,
-  onClose,
-}: {
-  open: boolean;
-  events: CardSmsEventSummary[];
-  onClose: () => void;
-}) {
-  const { authedFetch } = useAuth();
-  const ids = events.map((e) => e.id);
-  const detailsQuery = useQuery({
-    queryKey: ["card-sms-events-detail", ids],
-    enabled: open && ids.length > 0,
-    queryFn: () =>
-      authedFetch((token) =>
-        Promise.all(
-          ids.map((id) =>
-            apiFetch<CardSmsEventDetail>(`/v1/card-sms-events/${id}`, {
-              accessToken: token,
-            }),
-          ),
-        ),
-      ),
-  });
-  const details = detailsQuery.data ?? [];
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>확인이 필요한 문자</DialogTitle>
-          <DialogDescription>
-            자동으로 읽지 못했거나, 읽었지만 확인이 필요한 문자예요. 내용을
-            확인하고 맞으면 확정해 주세요.
-          </DialogDescription>
-        </DialogHeader>
-        {detailsQuery.isLoading ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            불러오는 중…
-          </p>
-        ) : detailsQuery.isError ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            불러오지 못했어요.
-          </p>
-        ) : (
-          <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
-            {details.map((d) => (
-              <ReviewEventCard key={d.id} detail={d} />
-            ))}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** `datetime-local` 입력용 로컬 시각 문자열(YYYY-MM-DDTHH:mm). */
-function toLocalInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(
-    at.getHours(),
-  )}:${pad(at.getMinutes())}`;
-}
-
-/**
- * 문자 한 건의 원문 + 교정 폼. 값은 파싱 결과로 미리 채워지며(quarantined는 LLM이
- * 뽑은 값), 사용자가 고친 뒤 확정하면 거래가 생성된다.
- */
-function ReviewEventCard({ detail }: { detail: CardSmsEventDetail }) {
-  const { authedFetch } = useAuth();
-  const queryClient = useQueryClient();
-  const [transactionType, setTransactionType] = useState<
-    "approval" | "cancellation" | "declined"
-  >(
-    detail.transactionType === "cancellation" ||
-      detail.transactionType === "declined"
-      ? detail.transactionType
-      : "approval",
-  );
-  const [amount, setAmount] = useState(
-    detail.amount != null ? String(detail.amount) : "",
-  );
-  const [merchant, setMerchant] = useState(detail.merchantRaw ?? "");
-  const [occurredAt, setOccurredAt] = useState(
-    toLocalInputValue(detail.occurredAt ?? detail.receivedAt),
-  );
-
-  const declined = transactionType === "declined";
-  const parsedAmount = Number(amount);
-  const canSubmit =
-    declined ||
-    (Number.isInteger(parsedAmount) &&
-      parsedAmount > 0 &&
-      merchant.trim().length > 0 &&
-      occurredAt !== "");
-
-  const reviewMutation = useMutation({
-    mutationFn: () =>
-      authedFetch((token) =>
-        api.cardSms.review(token, detail.id, {
-          transactionType,
-          currency: detail.currency ?? "KRW",
-          ...(declined
-            ? {}
-            : {
-                amount: parsedAmount,
-                merchantRaw: merchant.trim(),
-                occurredAt: new Date(occurredAt).toISOString(),
-              }),
-        }),
-      ),
-    onSuccess: () => {
-      toast.success(declined ? "거절 건으로 정리했어요" : "거래로 등록했어요");
-      // 검토 목록·거래·집계가 함께 바뀐다.
-      void queryClient.invalidateQueries({ queryKey: ["card-sms-events"] });
-      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      void queryClient.invalidateQueries({ queryKey: ["budgets"] });
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? error.message : "확정하지 못했어요",
-      );
-    },
-  });
-
-  return (
-    <div className="bg-muted rounded-lg p-3">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[13px] font-medium">{detail.sender}</span>
-        <span className="text-muted-foreground text-xs">
-          {formatDate(detail.receivedAt)}
-        </span>
-      </div>
-      <p className="text-foreground/90 text-[13px] break-words whitespace-pre-wrap">
-        {detail.rawContent}
-      </p>
-      {detail.parseError ? (
-        <p className="text-muted-foreground mt-1 text-xs">
-          {detail.parseStatus === "quarantined" ? "참고" : "실패 사유"}:{" "}
-          {detail.parseError}
-        </p>
-      ) : null}
-
-      <div className="mt-3 flex flex-col gap-2">
-        <Select
-          value={transactionType}
-          onValueChange={(v) =>
-            setTransactionType(v as "approval" | "cancellation" | "declined")
-          }
-        >
-          <SelectTrigger className="h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="approval">결제(승인)</SelectItem>
-            <SelectItem value="cancellation">취소</SelectItem>
-            <SelectItem value="declined">거절 — 거래 아님</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {declined ? (
-          <p className="text-muted-foreground text-xs">
-            승인되지 않은 문자예요. 확정하면 거래를 만들지 않고 정리만 해요.
-          </p>
-        ) : (
-          <>
-            <Input
-              className="h-9"
-              inputMode="numeric"
-              placeholder="금액"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))}
-            />
-            <Input
-              className="h-9"
-              placeholder="가맹점"
-              value={merchant}
-              onChange={(e) => setMerchant(e.target.value)}
-            />
-            <Input
-              className="h-9"
-              type="datetime-local"
-              value={occurredAt}
-              onChange={(e) => setOccurredAt(e.target.value)}
-            />
-          </>
-        )}
-
-        <Button
-          size="sm"
-          disabled={!canSubmit || reviewMutation.isPending}
-          onClick={() => reviewMutation.mutate()}
-        >
-          {reviewMutation.isPending ? "확정하는 중…" : "확정하기"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // --- 로컬 헬퍼 --------------------------------------------------------------
 
 /**
@@ -1307,18 +1145,6 @@ function deltaSentence(
     text: `${prevLabel}보다 ${formatWon(Math.abs(deltaNet))} 덜 썼어요${rate}`,
     className: "text-accent-foreground",
   };
-}
-
-/** 처리 대기 건수 표기(로딩 … / 에러 — / 'N건' 또는 'N+건'). */
-function pendingCountText(
-  loading: boolean,
-  error: boolean,
-  count: number,
-  plus: boolean,
-): string {
-  if (loading) return "…";
-  if (error) return "—";
-  return `${count.toLocaleString("ko-KR")}${plus ? "+" : ""}건`;
 }
 
 /** 마스킹/미확인을 고려한 가맹점 표시명. */

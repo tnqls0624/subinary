@@ -168,11 +168,20 @@ export type FinanceQueryData = z.infer<typeof financeQueryDataSchema>;
  * `POST /v1/ai/finance-query` result. `answer` is 해요체 prose grounded in
  * `data` (the SQL aggregates); `method` reports whether the LLM or the
  * deterministic template produced it.
+ *
+ * 정직한 거부(로드맵 C-6 / PO B8): 지원하는 집계 축(전체·카테고리별·가맹점별)을
+ * 하나도 알아보지 못한 질문에는 `refused: true`가 실리고, `data`는 **없다** —
+ * 예전처럼 월 총지출로 때우지 않는다. 이때 `answer`는 오류 문구가 아니라 "무엇을
+ * 물어볼 수 있는지" 안내이고, `suggestions`가 그 예시다(답변된 질의에서는 빈 배열).
+ * 거부는 HTTP 200이다: 실패가 아니라 정직한 답이므로 클라이언트도 오류로 그리면
+ * 안 된다.
  */
 export const financeQueryResponseSchema = z.object({
   answer: z.string(),
   data: financeQueryDataSchema.optional(),
   method: aiAnswerMethodSchema,
+  refused: z.boolean(),
+  suggestions: z.array(z.string()),
 });
 export type FinanceQueryResponse = z.infer<typeof financeQueryResponseSchema>;
 

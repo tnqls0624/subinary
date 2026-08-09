@@ -75,7 +75,11 @@ export type NotificationDispatchJob =
        */
       kind: 'decline';
       householdId: string;
-      /** 표시용 가맹점명(원문). 없으면 null. */
+      /**
+       * 표시용 가맹점명 — **canonical 신원**(정규화 + 사용자 별칭). 없으면 null.
+       * 원문이 아닌 이유: 사용자가 `GS25`/`지에스25`를 같은 가게로 확정했으면 알림도
+       * 화면(`listDeclines`)과 같은 이름·같은 묶음이어야 한다(P1-16).
+       */
       merchant: string | null;
       /** 거절 금액(minor units). 없으면 null. */
       amount: number | null;

@@ -54,9 +54,11 @@ import { alias } from 'drizzle-orm/pg-core';
 
 import type {
   EntityDetail,
+  EntityListResponse,
   EntitySummary,
   EntityType,
   GraphExtractResponse,
+  RelationshipListResponse,
   RelationshipSummary,
   RelationshipType,
 } from '@family/contracts';
@@ -64,13 +66,70 @@ import { schema, type Db } from '@family/database';
 import { QUEUE_NAMES } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+// 커서 유틸은 memory·graph 공용이다. Nest DI에 걸리지 않는 순수 함수 모듈이라
+// 새 공통 디렉터리를 만들지 않고 한쪽에 두어 단일 구현을 유지한다.
+import {
+  DEFAULT_PAGE_SIZE,
+  decodeKeysetCursor,
+  keysetAfter,
+  keysetOrderBy,
+  parseCursorTimestamp,
+  takePage,
+  type KeysetKey,
+} from '../memory/pagination';
+
+/* -------------------------------------------------------------------------- */
+/* 정렬 키(커서 페이지네이션)                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 엔티티 목록 정렬 키 — 기존 표시 순서(`type`, `name`)를 그대로 두고 끝에 유일한
+ * `id`만 덧붙인다. `name`은 유일하지 않고(동명이인·같은 표시형 기술) `type`은
+ * 더더욱 아니라, 이 tie-breaker가 없으면 같은 (type,name) 묶음이 페이지 경계에서
+ * 통째로 사라지거나 반복된다. enum(`type`) 비교는 Postgres의 선언 순서를 따르며,
+ * `ORDER BY`와 커서 조건이 같은 선언에서 파생되므로 둘이 어긋날 수 없다.
+ */
+const ENTITY_KEYS: readonly KeysetKey[] = [
+  { name: 'type', column: schema.entities.type, direction: 'asc' },
+  { name: 'name', column: schema.entities.name, direction: 'asc' },
+  { name: 'id', column: schema.entities.id, direction: 'asc' },
+];
+
+/**
+ * 관계 목록 정렬 키 — `validFrom asc` + tie-breaker `id`.
+ *
+ * `validFrom`은 **nullable**이다(명시적 supersede로 만든 관계 등). Postgres의
+ * ASC 기본은 NULLS LAST이므로 NULL 묶음이 맨 뒤에 온다. `nullable: true`가
+ * 커서 조건을 그 규약에 맞춰 만든다 — 표시하지 않으면 NULL 행이 페이지네이션에서
+ * 영영 안 보이거나(`validFrom > $1`이 NULL을 버린다) 무한 반복된다.
+ */
+const RELATIONSHIP_KEYS: readonly KeysetKey[] = [
+  {
+    name: 'validFrom',
+    column: schema.relationships.validFrom,
+    direction: 'asc',
+    nullable: true,
+    parse: parseCursorTimestamp,
+  },
+  { name: 'id', column: schema.relationships.id, direction: 'asc' },
+];
 
 /* -------------------------------------------------------------------------- */
 /* Option shapes                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 커서 페이지네이션 입력(memory 쪽과 같은 규약). 컨트롤러 zod 스키마가 기본값·
+ * 최대값을 강제하지만, 서비스 직접 호출에서도 상한이 사라지지 않게 기본값을
+ * 한 번 더 둔다.
+ */
+export interface PageOptions {
+  limit?: number;
+  cursor?: string;
+}
+
 /** Filters for {@link GraphService.listEntities}. */
-export interface ListEntitiesOptions {
+export interface ListEntitiesOptions extends PageOptions {
   workspaceId: string;
   type?: EntityType;
   q?: string;
@@ -83,7 +142,7 @@ export interface GetEntityOptions {
 }
 
 /** Filters for {@link GraphService.listRelationships} (spec §1.3/§6.2). */
-export interface ListRelationshipsOptions {
+export interface ListRelationshipsOptions extends PageOptions {
   workspaceId: string;
   entityId?: string;
   type?: RelationshipType;
@@ -266,15 +325,17 @@ export class GraphService {
 
   /**
    * Lists a workspace's entities with an optional `type` filter and a `q`
-   * name substring match (ILIKE), with `isCurrent` derived (spec §6.2).
+   * name substring match (ILIKE), with `isCurrent` derived (spec §6.2) —
+   * one keyset page at a time (기본 {@link DEFAULT_PAGE_SIZE}건).
    */
   async listEntities(
     userId: string,
     options: ListEntitiesOptions,
-  ): Promise<EntitySummary[]> {
+  ): Promise<EntityListResponse> {
     const { workspaceId, type, q } = options;
     await this.assertOwnedWorkspace(userId, workspaceId);
 
+    const limit = options.limit ?? DEFAULT_PAGE_SIZE;
     const filters: SQL[] = [eq(schema.entities.workspaceId, workspaceId)];
     if (type) {
       filters.push(eq(schema.entities.type, type));
@@ -282,20 +343,35 @@ export class GraphService {
     if (q) {
       filters.push(ilike(schema.entities.name, `%${escapeLike(q)}%`));
     }
+    if (options.cursor) {
+      const after = keysetAfter(
+        ENTITY_KEYS,
+        decodeKeysetCursor(ENTITY_KEYS, options.cursor),
+      );
+      if (after) filters.push(after);
+    }
 
+    // limit+1: 여분 1행의 유무가 곧 '다음 페이지 있음'(별도 COUNT 없음).
     const rows = await this.db
       .select()
       .from(schema.entities)
       .where(and(...filters))
-      .orderBy(asc(schema.entities.type), asc(schema.entities.name));
+      .orderBy(...keysetOrderBy(ENTITY_KEYS))
+      .limit(limit + 1);
 
+    const page = takePage(rows, limit, ENTITY_KEYS);
     const now = new Date();
     this.logger.log(
       `graph entities listed workspace=${workspaceId} type=${type ?? 'all'} ` +
-        `q=${q ? 'yes' : 'no'} count=${rows.length}`,
+        `q=${q ? 'yes' : 'no'} limit=${limit} ` +
+        `paged=${options.cursor ? 'cursor' : 'first'} ` +
+        `count=${page.rows.length} more=${page.nextCursor !== null}`,
     );
 
-    return rows.map((row) => toEntitySummary(row, now));
+    return {
+      items: page.rows.map((row) => toEntitySummary(row, now)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**
@@ -384,14 +460,16 @@ export class GraphService {
    * Lists a workspace's relationships joined with source/target names, with
    * optional `entityId` (participates as source or target), `type`, and
    * `current`/`asOf` temporal filters (spec §1.3/§6.2). `isCurrent` is derived.
+   * 한 번에 한 keyset 페이지만 반환한다(기본 {@link DEFAULT_PAGE_SIZE}건).
    */
   async listRelationships(
     userId: string,
     options: ListRelationshipsOptions,
-  ): Promise<RelationshipSummary[]> {
+  ): Promise<RelationshipListResponse> {
     const { workspaceId, entityId, type, current, asOf } = options;
     await this.assertOwnedWorkspace(userId, workspaceId);
 
+    const limit = options.limit ?? DEFAULT_PAGE_SIZE;
     const now = new Date();
     const filters: SQL[] = [eq(schema.relationships.workspaceId, workspaceId)];
     if (type) {
@@ -407,6 +485,13 @@ export class GraphService {
       }
     }
     filters.push(...this.validityFilters(now, current, asOf));
+    if (options.cursor) {
+      const after = keysetAfter(
+        RELATIONSHIP_KEYS,
+        decodeKeysetCursor(RELATIONSHIP_KEYS, options.cursor),
+      );
+      if (after) filters.push(after);
+    }
 
     const rows = await this.db
       .select(relationshipWithNamesColumns)
@@ -420,15 +505,23 @@ export class GraphService {
         eq(targetEntityAlias.id, schema.relationships.targetEntityId),
       )
       .where(and(...filters))
-      .orderBy(asc(schema.relationships.validFrom));
+      .orderBy(...keysetOrderBy(RELATIONSHIP_KEYS))
+      .limit(limit + 1);
+
+    const page = takePage(rows, limit, RELATIONSHIP_KEYS);
 
     this.logger.log(
       `graph relationships listed workspace=${workspaceId} ` +
         `entityId=${entityId ?? 'none'} type=${type ?? 'all'} ` +
-        `current=${current ?? false} asOf=${asOf ?? 'none'} count=${rows.length}`,
+        `current=${current ?? false} asOf=${asOf ?? 'none'} limit=${limit} ` +
+        `paged=${options.cursor ? 'cursor' : 'first'} ` +
+        `count=${page.rows.length} more=${page.nextCursor !== null}`,
     );
 
-    return rows.map((row) => toRelationshipSummary(row, now));
+    return {
+      items: page.rows.map((row) => toRelationshipSummary(row, now)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**

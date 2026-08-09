@@ -23,6 +23,7 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
+import { CURRENT_HOUSEHOLD_CONSENT_VERSION } from '@family/contracts';
 import type {
   AcceptInvitationRequest,
   HouseholdCreateRequest,
@@ -41,6 +42,7 @@ import { schema, type Db, type DbExecutor } from '@family/database';
 
 import { TokenService } from '../auth/token.service';
 import { DB } from '../database/database.constants';
+import { HOUSEHOLD_JOIN_CONSENT } from './household-consent';
 
 /** Projection used for member listings (user profile joined onto membership). */
 const MEMBER_COLUMNS = {
@@ -140,8 +142,11 @@ export class HouseholdService {
    * Enforces that `userId` is an active member of `householdId` and (optionally)
    * holds one of `roles`. Returns the membership record for callers that need
    * the actor's role. Non-members get a 403 that does not disclose existence.
+   *
+   * `public`인 이유: 같은 모듈의 {@link HouseholdPrivacyService}가 이 판정을 **재사용**
+   * 한다. 개인정보 화면이 자기만의 멤버십 조회를 새로 짜면 403 의미론이 두 벌이 된다.
    */
-  private async requireMembership(
+  async requireMembership(
     householdId: string,
     userId: string,
     roles?: readonly HouseholdRole[],
@@ -195,7 +200,12 @@ export class HouseholdService {
       await tx.insert(schema.householdConsents).values({
         householdId: created.id,
         userId,
-        consentType: 'household_join',
+        consentType: HOUSEHOLD_JOIN_CONSENT,
+        // DB 기본값('v1')에 기대지 않고 **코드의 현재 버전**을 명시적으로 박는다.
+        // 기본값에 기대면 문구를 개정해도 새 동의가 옛 버전으로 기록되어, 개정 자체가
+        // 무의미해진다(누가 어느 문구에 동의했는지 알 수 없게 된다).
+        consentVersion: CURRENT_HOUSEHOLD_CONSENT_VERSION,
+        status: 'granted',
       });
 
       return created;
@@ -393,6 +403,25 @@ export class HouseholdService {
             ),
           );
       }
+
+      // 멤버십이 끝나면 그 가구에 대한 동의도 끝난다 — 같은 트랜잭션에서 전이시킨다.
+      // 남겨 두면 이력이 "가구를 떠난 뒤에도 동의가 살아 있었다"고 말하게 되고,
+      // 나중에 재합류하면 옛 granted 행과 새 granted 행이 겹친다.
+      // 삭제가 아니라 상태 전이라 "언제 동의했다가 언제 끝났는가"는 그대로 남는다.
+      await tx
+        .update(schema.householdConsents)
+        .set({
+          status: 'revoked',
+          revokedAt: now,
+          revokedReason: 'member_removed',
+        })
+        .where(
+          and(
+            eq(schema.householdConsents.householdId, householdId),
+            eq(schema.householdConsents.userId, target.userId),
+            eq(schema.householdConsents.status, 'granted'),
+          ),
+        );
     });
 
     return { removed: true };
@@ -703,7 +732,10 @@ export class HouseholdService {
       await tx.insert(schema.householdConsents).values({
         householdId: invitation.householdId,
         userId,
-        consentType: 'household_join',
+        consentType: HOUSEHOLD_JOIN_CONSENT,
+        // 위 create()와 같은 이유 — 버전은 코드가 정한다(DB 기본값 'v1' 사용 금지).
+        consentVersion: CURRENT_HOUSEHOLD_CONSENT_VERSION,
+        status: 'granted',
       });
 
       await this.markInvitationAccepted(tx, invitation.id, userId);

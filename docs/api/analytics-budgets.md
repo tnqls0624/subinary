@@ -5,6 +5,7 @@
 > **금액은 KRW 정수(원)**, 기간 경계는 `Asia/Seoul`다.
 >
 > 관련 설계: [ADR-0010 SQL 집계·예산](../adr/0010-analytics-sql-and-budgets.md) ·
+> [ADR-0030 예산 월 원장](../adr/0030-budget-month-ledger.md) ·
 > [ADR-0009 거래 모델·승격](../adr/0009-transaction-model-and-promotion.md) ·
 > [Phase 5 빌드 스펙](../phase5-build-spec.md) · [거래 API](./transactions.md)
 
@@ -17,7 +18,7 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 | 도메인 | 컨트롤러 | 인증 | 쓰임 |
 |---|---|---|---|
 | 통계 | `Controller('analytics')` | JWT Access Token | 월/카테고리/구성원/카드/가맹점 순지출 |
-| 예산 | `Controller('budgets')` | JWT Access Token | 예산 CRUD + 현재월 사용률 |
+| 예산 | `Controller('budgets')` | JWT Access Token | 월별 예산 CRUD + 선택월 사용률 + 명시적 다음 달 복사 |
 
 핵심 규약(자세한 근거는 ADR-0010):
 
@@ -26,7 +27,9 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 - **공개범위(actor 기준)**: 집계 대상 = 본인 ∪ `household` ∪ `summary_only`(타인 금액도 포함),
   타인 `private`는 제외. `merchants`만 타인 `summary_only` 가맹점명을 `'(비공개)'`로 묶는다.
 - **기간**: `month=YYYY-MM`(기본 이번달, Asia/Seoul) 또는 `from`/`to`(ISO). 집계는 `approvedAt` 기준.
-- **예산 사용률**: 현재월 스코프 순지출 / `amount`. CRUD는 owner/admin, 조회는 멤버(PRD §7.2).
+- **예산 사용률**: 선택월 스코프 순지출 / `amount`. 계획 금액만 월별로
+  저장하고 `spent`/`remaining`/`usageRate`/최근 3개월 평균은 거래에서 매번 계산한다.
+  CRUD는 owner/admin, 조회는 멤버(PRD §7.2).
 - 비멤버는 존재 여부를 노출하지 않는 **403**. 응답/로그에 카드번호·PII·secret을 남기지 않는다.
 
 ---
@@ -152,14 +155,16 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 
 | 메서드 · 경로 | 성공 | 권한 | 설명 |
 |---|---|---|---|
-| `GET /v1/budgets?householdId=&month=` | `200` | 활성 멤버 | 예산 목록 + 현재월 사용률 |
+| `GET /v1/budgets?householdId=&month=` | `200` | 활성 멤버 | 해당 월 계획 + 선택월 사용률 |
 | `POST /v1/budgets` | `201` | owner/admin | 예산 생성 |
+| `POST /v1/budgets/copy` | `200` | owner/admin | 선택월 계획을 바로 다음 달로 원자적 복사 |
 | `PATCH /v1/budgets/:id` | `200` | owner/admin | name/amount 수정 |
 | `DELETE /v1/budgets/:id` | `204` | owner/admin | 예산 삭제 |
 
 - 스코프: `scopeType ∈ {household, member, category, card}`, `period='monthly'`.
 - `household`는 `scopeRefId` 없음(전체), 그 외는 해당 member/category/card id가 가족 소속이어야 함.
-- `(householdId, scopeType, scopeRefId)`는 유일 — 중복 시 **409**.
+- `(householdId, effectiveMonth, scopeType, scopeRefId)`는 유일 — 중복 시 **409**.
+- 과거월은 읽기 전용이다. 현재월·미래월만 생성/수정/삭제할 수 있다.
 
 ### `POST /v1/budgets` (`budgetCreateRequestSchema`)
 
@@ -168,7 +173,8 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
   "householdId": "3c2d…",
   "name": "가족 월 예산",
   "scopeType": "household",
-  "amount": 3000000
+  "amount": 3000000,
+  "effectiveMonth": "2026-08"
 }
 ```
 
@@ -181,6 +187,7 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 | `scopeType` | `household`/`member`/`category`/`card`. |
 | `scopeRefId` | `household`는 생략. 그 외 필수(uuid, 가족 소속 검증). |
 | `amount` | **양의 KRW 정수**. |
+| `effectiveMonth` | 선택(`YYYY-MM`). 생략하면 서울 기준 현재월. 과거월은 `400`. |
 
 ### 응답 (`budgetSummarySchema`)
 
@@ -192,8 +199,10 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
   "scopeType": "household",
   "scopeRefId": null,
   "scopeLabel": "가족 전체",
+  "effectiveMonth": "2026-08",
   "amount": 3000000,
   "spent": 148000,
+  "threeMonthAverageSpent": 132000,
   "remaining": 2852000,
   "usageRate": 0.04933333333333333,
   "period": "monthly",
@@ -203,7 +212,9 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 
 | 필드 | 규칙 |
 |---|---|
-| `spent` | **현재월** 스코프 순지출(`sum(netAmount)` 승인, 공개범위 반영, actor 기준). |
+| `effectiveMonth` | 이 계획이 속한 서울 회계월(`YYYY-MM`). |
+| `spent` | **선택월** 스코프 순지출(`sum(netAmount)` 승인, 공개범위 반영, actor 기준). |
+| `threeMonthAverageSpent` | 선택월을 포함한 최근 3개 회계월 실지출 평균. 저장하지 않는 파생값. |
 | `remaining` | `amount - spent`. |
 | `usageRate` | `spent / amount`(amount=0이면 0). |
 | `scopeLabel` | '가족 전체' / 구성원명 / 카테고리명 / 카드별칭. |
@@ -220,7 +231,27 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 }
 ```
 
-- `month`(선택, `YYYY-MM`)로 회계월을 이동. 생략 시 이번달(Asia/Seoul). 사용률은 그 달 기준 재계산.
+- `month`(선택, `YYYY-MM`)로 회계월을 이동. 생략 시 이번달(Asia/Seoul).
+  요청 월의 `effective_month` 행만 돌려주며 과거 행 fallback이나 자동 이월은 없다.
+
+### `POST /v1/budgets/copy` (`budgetCopyRequestSchema`)
+
+`Idempotency-Key: <UUID>` 헤더가 필수다.
+
+```json
+{
+  "householdId": "3c2d…",
+  "sourceMonth": "2026-08",
+  "targetMonth": "2026-09"
+}
+```
+
+- `targetMonth`는 반드시 `sourceMonth`의 바로 다음 달이며 과거월이 아니어야 한다.
+- target에 예산이 하나라도 있으면 충돌 scope와 함께 `409`를 돌려주고 일부
+  복사를 남기지 않는다.
+- 같은 `Idempotency-Key`의 재시도는 최초 성공의 `copiedBudgetIds`를 그대로 돌려준다.
+  다른 키나 수동 생성으로 발생한 실제 target 충돌만 `409`다.
+- 복사본은 새 budget ID를 갖으며 source 행과 예산 알림 이력을 바꾸지 않는다.
 
 ### `PATCH /v1/budgets/:id` (`budgetUpdateRequestSchema`)
 
@@ -230,10 +261,12 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 
 - `name`/`amount`만 수정 가능(스코프는 불변 — 변경하려면 삭제 후 재생성). owner/admin만. 응답은
   갱신된 `budgetSummary`.
+- 과거월 행은 `400`(읽기 전용).
 
 ### `DELETE /v1/budgets/:id`
 
 - 성공 시 `204 No Content`. owner/admin만.
+- 과거월 행은 `400`(읽기 전용).
 
 ---
 
@@ -244,11 +277,11 @@ Phase 5는 정규화 거래(`card_transactions`)를 **읽기 전용 집계**(통
 | 정상 조회/수정 | `200` |
 | 예산 생성 | `201` |
 | 예산 삭제 | `204` |
-| `householdId` 누락/`month` 형식 오류/`amount` 비정수·비양수/`scopeRefId` 불일치 | `400` |
+| `householdId` 누락/`month` 형식 오류/`amount` 비정수·비양수/`scopeRefId` 불일치/과거월 쓰기/복사 월 순서 오류/`Idempotency-Key` 누락·형식 오류 | `400` |
 | 미인증(access token 없음/만료) | `401` |
 | 비멤버 조회 / member 의 예산 CRUD | `403` |
 | 예산 미존재(PATCH/DELETE) | `404` |
-| `(householdId, scopeType, scopeRefId)` 중복 | `409` |
+| 같은 월의 `(householdId, scopeType, scopeRefId)` 중복 / 다른 키의 복사 target 충돌 | `409` |
 
 ## 4. 웹 연동(CORS/인증)
 

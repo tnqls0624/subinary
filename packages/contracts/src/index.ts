@@ -184,6 +184,40 @@ export type {
   InvitationSummary,
 } from './household.js';
 
+// C-3 개인정보 Control Center. 배럴은 코디네이터만 편집한다 — 워커 둘이 같은
+// 앵커(파일 끝)에 동시에 붙이다 충돌한 전례가 있어 병렬 작업에서 제외했다.
+export {
+  householdConsentTypeSchema,
+  householdConsentStatusSchema,
+  householdConsentRevokeReasonSchema,
+  householdConsentClauseSchema,
+  householdConsentDocumentSchema,
+  householdConsentRecordSchema,
+  householdConsentDocuments,
+  currentHouseholdConsentDocument,
+  CURRENT_HOUSEHOLD_CONSENT_VERSION,
+  retentionPolicySchema,
+  privacyRetentionSchema,
+  privacyOverviewSchema,
+  privacyConsentGrantRequestSchema,
+  privacyConsentRevokeRequestSchema,
+  privacyConsentRevokeResponseSchema,
+} from './household.js';
+export type {
+  HouseholdConsentType,
+  HouseholdConsentStatus,
+  HouseholdConsentRevokeReason,
+  HouseholdConsentClause,
+  HouseholdConsentDocument,
+  HouseholdConsentRecord,
+  RetentionPolicy,
+  PrivacyRetention,
+  PrivacyOverview,
+  PrivacyConsentGrantRequest,
+  PrivacyConsentRevokeRequest,
+  PrivacyConsentRevokeResponse,
+} from './household.js';
+
 export {
   pushPlatformSchema,
   pushSubscriptionRegisterRequestSchema,
@@ -360,15 +394,21 @@ export type {
 
 export {
   budgetScopeTypeSchema,
+  budgetMonthSchema,
   budgetCreateRequestSchema,
+  budgetCopyRequestSchema,
   budgetUpdateRequestSchema,
+  budgetCopyResponseSchema,
   budgetSummarySchema,
   budgetListResponseSchema,
 } from './budget.js';
 export type {
   BudgetScopeType,
+  BudgetMonth,
   BudgetCreateRequest,
+  BudgetCopyRequest,
   BudgetUpdateRequest,
+  BudgetCopyResponse,
   BudgetSummary,
   BudgetListResponse,
 } from './budget.js';
@@ -490,3 +530,26 @@ export type {
   RelationshipListResponse,
   TimelineResponse,
 } from './graph.js';
+
+export {
+  recurringSeriesStatusSchema,
+  recurringCadenceSchema,
+  recurringNeedsReviewReasonSchema,
+  recurringSeriesItemSchema,
+  recurringSeriesListResponseSchema,
+  recurringDecisionRequestSchema,
+  recurringDecisionResponseSchema,
+  recurringRecomputeRequestSchema,
+  recurringRecomputeResponseSchema,
+} from './recurring.js';
+export type {
+  RecurringSeriesStatus,
+  RecurringCadenceValue,
+  RecurringNeedsReviewReason,
+  RecurringSeriesItem,
+  RecurringSeriesListResponse,
+  RecurringDecisionRequest,
+  RecurringDecisionResponse,
+  RecurringRecomputeRequest,
+  RecurringRecomputeResponse,
+} from './recurring.js';

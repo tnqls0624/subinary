@@ -332,6 +332,153 @@ export function normalizeMerchant(raw: string): string {
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* canonical 가맹점 신원 — 정규화 + 사용자 별칭(1단계)                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `merchant_aliases` 한 행. `alias`·`canonical`은 등록 서비스가 이미
+ * {@link normalizeMerchant}를 통과시킨 값이다.
+ */
+export interface MerchantAliasRow {
+  householdId: string;
+  alias: string;
+  canonical: string;
+}
+
+/**
+ * `(householdId, alias) -> canonical` 조회 인덱스.
+ *
+ * **가구 격리를 key에 넣는 이유**: 별칭은 가구별 확정이라 `alias` 문자열만 key로 쓰면
+ * 다른 가구가 등록한 `GS25 -> 지에스25`가 우리 가구에도 적용된다. 실제로 알림
+ * 스케줄러가 전 가구 별칭을 문자열 key 하나로 로드하고 있었다(P1-16).
+ */
+export type MerchantAliasIndex = ReadonlyMap<string, string>;
+
+/** 인덱스 key. 가맹점명에 나올 수 없는 NUL로 구분해 경계 모호성을 없앤다. */
+function aliasIndexKey(householdId: string, alias: string): string {
+  return `${householdId}\u0000${alias}`;
+}
+
+/**
+ * 별칭 행들을 {@link MerchantAliasIndex}로 만든다.
+ *
+ * 자기참조(`alias === canonical`)는 DB CHECK가 막지만 여기서도 건너뛴다 — 인덱스가
+ * 방어적이면 조회부가 무한 해석을 걱정하지 않아도 된다. 해석은 **1단계**뿐이므로
+ * 체인(`A->B`, `B->C`)은 만들지 않는다(등록 시 평탄화가 이미 막는다).
+ */
+export function buildMerchantAliasIndex(
+  rows: Iterable<MerchantAliasRow>,
+): MerchantAliasIndex {
+  const index = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.householdId || !row.alias || !row.canonical) continue;
+    if (row.alias === row.canonical) continue;
+    index.set(aliasIndexKey(row.householdId, row.alias), row.canonical);
+  }
+  return index;
+}
+
+/**
+ * 원문 가맹점명 → **canonical 신원**. `normalizeMerchant` 후 별칭을 1단계 적용한다.
+ * 원문이 비었거나 정규화 결과가 비면 `null`.
+ *
+ * ⛔ **이 해석을 경로마다 다시 구현하지 마라.** 이 저장소는 같은 사고를 반복했다:
+ * 자동 경로만 계약을 구현하고 나중에 붙은 경로가 재사용 대신 각자 구현해, 금액 4건·
+ * visibility 5곳이 갈라졌다. P1-16도 같은 종류다 — API 거절 목록은 별칭을 **묶기 전에**
+ * 적용하는데 알림 스케줄러는 `merchant_raw`로 먼저 묶고 나중에 적용해서, 사용자가
+ * `GS25`와 `지에스25`를 같은 가게로 확정해 두어도 알림만 그걸 무시했다.
+ */
+export function resolveCanonicalMerchant(
+  raw: string | null | undefined,
+  householdId: string,
+  aliases: MerchantAliasIndex,
+): string | null {
+  if (typeof raw !== 'string') return null;
+  const normalized = normalizeMerchant(raw);
+  if (normalized.length === 0) return null;
+  return aliases.get(aliasIndexKey(householdId, normalized)) ?? normalized;
+}
+
+/** {@link regroupByCanonicalMerchant} 결과 한 묶음. */
+export interface CanonicalMerchantGroup<T> {
+  householdId: string;
+  /** 정규화 + 별칭까지 적용한 대표 이름. 원문이 없으면 null. */
+  canonical: string | null;
+  /** 가맹점 외 묶음 축(금액 등). */
+  subKey: string;
+  /** 묶인 행들의 `weight` 합 — **임계 판정은 반드시 이 값으로** 한다. */
+  total: number;
+  /** `orderAt` 최댓값 행. "가장 최근 시도"의 부가 정보(사유 등)를 여기서 읽는다. */
+  latest: T;
+  rows: T[];
+}
+
+/**
+ * 원문 기준으로 이미 묶인 행들을 **canonical 신원으로 다시 묶는다**.
+ *
+ * 왜 필요한가: `GROUP BY merchant_raw` → `HAVING count(*) >= N` 순서는 별칭을 임계
+ * **뒤에** 적용하므로, 표기가 갈린 같은 가게가 임계 앞에서 각각 탈락한다
+ * (`GS25` 1회 + `지에스25` 1회 = 2회여야 하는데 1회 + 1회로 둘 다 탈락). 순서를
+ * 뒤집는 유일한 방법은 "묶고 나서 세는" 이 함수를 임계 판정 앞에 두는 것이다.
+ *
+ * `canonical`이 null인 행(가맹점명 없음)끼리는 서로 합치지 않는다 — 이름을 모르는
+ * 서로 다른 실패를 한 사건으로 합치면 사용자에게 없는 사실을 만든다. 대신 각 행이
+ * 자기 원문 키로 남는다.
+ */
+export function regroupByCanonicalMerchant<T>(
+  rows: Iterable<T>,
+  spec: {
+    aliases: MerchantAliasIndex;
+    householdId: (row: T) => string;
+    merchantRaw: (row: T) => string | null;
+    /** 가맹점 외 묶음 축. 금액처럼 사건을 가르는 값. */
+    subKey: (row: T) => string;
+    /** 이 행이 기여하는 횟수(SQL에서 미리 집계했다면 그 count). */
+    weight: (row: T) => number;
+    /** 최신 판정 기준 시각. */
+    orderAt: (row: T) => Date;
+  },
+): CanonicalMerchantGroup<T>[] {
+  const groups = new Map<string, CanonicalMerchantGroup<T>>();
+  let unnamed = 0;
+
+  for (const row of rows) {
+    const householdId = spec.householdId(row);
+    const canonical = resolveCanonicalMerchant(
+      spec.merchantRaw(row),
+      householdId,
+      spec.aliases,
+    );
+    const subKey = spec.subKey(row);
+    // 이름 없는 행은 고유 키를 받아 절대 서로 합쳐지지 않는다.
+    const key =
+      canonical === null
+        ? `${householdId}\u0000\u0000${subKey}\u0000${unnamed++}`
+        : `${householdId}\u0000${canonical}\u0000${subKey}`;
+
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        householdId,
+        canonical,
+        subKey,
+        total: spec.weight(row),
+        latest: row,
+        rows: [row],
+      });
+      continue;
+    }
+    existing.total += spec.weight(row);
+    existing.rows.push(row);
+    if (spec.orderAt(row) > spec.orderAt(existing.latest)) {
+      existing.latest = row;
+    }
+  }
+
+  return [...groups.values()];
+}
+
 /**
  * Resolve a merchant string to a system category slug via keyword matching, or
  * `null` when nothing matches. Matching is substring-based and ASCII

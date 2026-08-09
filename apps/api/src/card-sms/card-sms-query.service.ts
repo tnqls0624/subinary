@@ -42,7 +42,10 @@ import type {
   CardSmsEventSummary,
 } from '@family/contracts';
 import { schema, type Db } from '@family/database';
-import { normalizeMerchant } from '@family/shared';
+import {
+  buildMerchantAliasIndex,
+  resolveCanonicalMerchant,
+} from '@family/shared';
 
 import { DB } from '../database/database.constants';
 
@@ -193,22 +196,22 @@ export class CardSmsQueryService {
 
     if (events.length === 0) return { items: [], unresolvedCount: 0 };
 
-    // 사용자가 확정한 별칭까지 반영해 묶는다 — 정규화만 하면 표기가 다른 같은 가게가
-    // 갈라져 "3번 실패"가 "1번 + 2번"으로 쪼개진다.
+    // 사용자가 확정한 별칭까지 반영해 **묶기 전에** 신원을 확정한다 — 정규화만 하면
+    // 표기가 다른 같은 가게가 갈라져 "3번 실패"가 "1번 + 2번"으로 쪼개진다.
+    //
+    // 해석은 `@family/shared`의 공유 resolver를 쓴다. 여기서 다시 구현하면 알림
+    // 스케줄러와 순서가 갈리고, 그게 정확히 P1-16이었다(화면 2회 / 알림 0회).
     const aliases = await this.db
       .select({
+        householdId: schema.merchantAliases.householdId,
         alias: schema.merchantAliases.alias,
         canonical: schema.merchantAliases.canonical,
       })
       .from(schema.merchantAliases)
       .where(eq(schema.merchantAliases.householdId, householdId));
-    const aliasMap = new Map(aliases.map((a) => [a.alias, a.canonical]));
-    const resolveMerchant = (raw: string | null): string | null => {
-      if (!raw) return null;
-      const normalized = normalizeMerchant(raw);
-      if (!normalized) return null;
-      return aliasMap.get(normalized) ?? normalized;
-    };
+    const aliasIndex = buildMerchantAliasIndex(aliases);
+    const resolveMerchant = (raw: string | null): string | null =>
+      resolveCanonicalMerchant(raw, householdId, aliasIndex);
 
     interface Bucket {
       merchant: string | null;

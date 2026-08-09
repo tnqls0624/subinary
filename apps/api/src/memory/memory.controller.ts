@@ -45,6 +45,7 @@ import {
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
 import { MemoryService, type MemoryDeleteResult } from './memory.service';
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './pagination';
 
 /* -------------------------------------------------------------------------- */
 /* DTOs                                                                       */
@@ -56,16 +57,43 @@ class MemoryCreateDto extends createZodDto(memoryCreateRequestSchema) {}
 class MemoryUpdateDto extends createZodDto(memoryUpdateRequestSchema) {}
 class MemorySupersedeDto extends createZodDto(memorySupersedeRequestSchema) {}
 
-/** `GET /v1/memory/candidates?workspaceId=&status=` — workspace required. */
+/**
+ * 목록 공통 페이지 파라미터. 쿼리스트링은 항상 문자열이라 `z.coerce`로 받고,
+ * **미지정 시 기본 상한이 걸린다**(무제한 아님). 상한을 넘는 요청은 400 —
+ * 조용히 잘라 주면 클라이언트는 자기가 전부 받았다고 착각한다.
+ *
+ * 빈 문자열(`?limit=&cursor=`)은 "잘못된 값"이 아니라 "미지정"으로 본다. 쿼리를
+ * 조립하는 클라이언트가 흔히 만드는 모양이고, 여기서 400을 주면 상한을 지키려다
+ * 정상 요청을 막는다.
+ */
+const emptyAsUndefined = (value: unknown): unknown =>
+  value === '' ? undefined : value;
+
+const paginationQueryShape = {
+  limit: z.preprocess(
+    emptyAsUndefined,
+    z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_PAGE_SIZE)
+      .default(DEFAULT_PAGE_SIZE),
+  ),
+  cursor: z.preprocess(emptyAsUndefined, z.string().min(1).optional()),
+};
+
+/** `GET /v1/memory/candidates?workspaceId=&status=&limit=&cursor=` — workspace required. */
 const candidateListQuerySchema = z.object({
   workspaceId: z.string().uuid(),
   status: candidateStatusSchema.optional(),
+  ...paginationQueryShape,
 });
 class CandidateListQueryDto extends createZodDto(candidateListQuerySchema) {}
 
 /**
- * `GET /v1/memory/memories?workspaceId=&type=&status=&current=&asOf=` — workspace
- * required. `current` is a string flag (`'true'`); `asOf` is an ISO datetime.
+ * `GET /v1/memory/memories?workspaceId=&type=&status=&current=&asOf=&limit=&cursor=`
+ * — workspace required. `current` is a string flag (`'true'`); `asOf` is an ISO
+ * datetime.
  */
 const memoryListQuerySchema = z.object({
   workspaceId: z.string().uuid(),
@@ -73,6 +101,7 @@ const memoryListQuerySchema = z.object({
   status: memoryStatusSchema.optional(),
   current: z.enum(['true', 'false']).optional(),
   asOf: z.string().datetime().optional(),
+  ...paginationQueryShape,
 });
 class MemoryListQueryDto extends createZodDto(memoryListQuerySchema) {}
 
@@ -96,17 +125,18 @@ export class MemoryController {
     });
   }
 
-  /** GET /v1/memory/candidates?workspaceId=&status= — list candidates (owner-only). */
+  /** GET /v1/memory/candidates?workspaceId=&status=&limit=&cursor= — list candidates (owner-only). */
   @Get('candidates')
-  async listCandidates(
+  listCandidates(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CandidateListQueryDto,
   ): Promise<CandidateListResponse> {
-    const items = await this.memoryService.listCandidates(user.userId, {
+    return this.memoryService.listCandidates(user.userId, {
       workspaceId: query.workspaceId,
       status: query.status,
+      limit: query.limit,
+      cursor: query.cursor,
     });
-    return { items };
   }
 
   /** POST /v1/memory/candidates/:id/approve — promote a candidate (owner-only). */
@@ -134,20 +164,21 @@ export class MemoryController {
   /* Memories                                                                */
   /* ---------------------------------------------------------------------- */
 
-  /** GET /v1/memory/memories?workspaceId=&type=&status=&current=&asOf= — list (owner-only). */
+  /** GET /v1/memory/memories?workspaceId=&type=&status=&current=&asOf=&limit=&cursor= — list (owner-only). */
   @Get('memories')
-  async listMemories(
+  listMemories(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: MemoryListQueryDto,
   ): Promise<MemoryListResponse> {
-    const items = await this.memoryService.listMemories(user.userId, {
+    return this.memoryService.listMemories(user.userId, {
       workspaceId: query.workspaceId,
       type: query.type,
       status: query.status,
       current: query.current === 'true',
       asOf: query.asOf,
+      limit: query.limit,
+      cursor: query.cursor,
     });
-    return { items };
   }
 
   /** POST /v1/memory/memories — directly create an approved memory (owner-only). */

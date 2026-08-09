@@ -76,6 +76,9 @@ import type {
   NotificationPreferencesUpdateRequest,
   NotificationListResponse,
   NotificationUnreadCount,
+  SlackWorkspaceSummary,
+  WorkQueryRequest,
+  WorkQueryResponse,
 } from "@family/contracts";
 
 import { isNative } from "./native";
@@ -856,6 +859,32 @@ export const api = {
         `/v1/ai/monthly-insights${buildQuery({ ...params })}`,
         { accessToken },
       ),
+    /**
+     * 업무 기억 질의 — 가져온 Slack 기록에 근거한 답변 + 출처(채널·시각·스니펫).
+     * 근거가 없으면 서버가 `refused: true`를 돌려준다(오류가 아니다). 이 경우
+     * **가계부 집계로 갈아타지 않는다** — 못 찾았다고 그대로 말한다.
+     */
+    workQuery: (
+      accessToken: AccessToken,
+      body: WorkQueryRequest,
+    ) =>
+      apiFetch<WorkQueryResponse>("/v1/ai/work-query", {
+        method: "POST",
+        body,
+        accessToken,
+      }),
+  },
+
+  slack: {
+    /**
+     * 내가 **소유한** Slack 워크스페이스 목록. 서버가
+     * `workspaces.ownerUserId = 나`로 필터하므로(PRD §26) 가족 구성원은 이름도
+     * message count도 볼 수 없고 빈 배열을 받는다.
+     */
+    listWorkspaces: (accessToken: AccessToken) =>
+      apiFetch<SlackWorkspaceSummary[]>("/v1/slack/workspaces", {
+        accessToken,
+      }),
   },
 
   learning: {

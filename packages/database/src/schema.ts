@@ -230,24 +230,67 @@ export const householdInvitations = pgTable(
 /* householdConsents                                                          */
 /* -------------------------------------------------------------------------- */
 
-/** 가족 합류 동의 기록 (PRD §7.3). consentType 예: 'household_join'. */
-export const householdConsents = pgTable('household_consents', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  householdId: uuid('household_id')
-    .notNull()
-    .references(() => households.id),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id),
-  consentType: text('consent_type').notNull(),
-  consentVersion: text('consent_version').notNull().default('v1'),
-  consentedAt: timestamp('consented_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+/**
+ * 가족 합류 동의 기록 (PRD §7.3). consentType 예: 'household_join'.
+ *
+ * **append-only 이력이다.** 철회는 행을 지우지 않고 `status`를 'revoked'로 전이시키고
+ * (`revokedAt`·`revokedReason` 기록), 재동의는 **새 행을 추가**한다. 그래서 "언제
+ * 동의했다가 언제 철회했고 언제 다시 동의했는가"가 그대로 남는다 — 0047이 장치·
+ * 자격증명에서 삭제 대신 상태 전이를 택한 것과 같은 이유이고, 개인정보 동의는 그
+ * 이력 자체가 증빙이라 더더욱 덮어쓰면 안 된다.
+ *
+ * `consentVersion`의 원문은 **코드가 단일 출처**다(`@family/contracts`의
+ * `householdConsentDocuments`). DB에는 버전 문자열만 남기고 사용자가 실제로 읽은
+ * 문구는 그 레지스트리에서 되짚는다 — 그래서 알 수 없는 버전 문자열이 DB에 있으면
+ * 추적이 끊긴다(0051이 그 상태를 RAISE EXCEPTION으로 막는다).
+ *
+ * 부분 유니크(가구·사용자·타입당 granted 1행)를 걸지 **않는다**: 가족을 나갔다가
+ * 다시 합류하면 서로 다른 시점의 정당한 동의 행이 여러 개 생기고, 이 이력을 사람이
+ * 손으로 지워야만 인덱스가 붙는 상황은 "동의 이력 보존"과 정면으로 충돌한다.
+ * 대신 현재 상태는 "가장 최근 consentedAt 행"으로 읽고, 철회는 살아있는 granted 행을
+ * **전부** 전이시켜 잔여 granted가 남지 않게 한다.
+ */
+export const householdConsents = pgTable(
+  'household_consents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    consentType: text('consent_type').notNull(),
+    consentVersion: text('consent_version').notNull().default('v1'),
+    /** 'granted' | 'revoked'. CHECK로 DB가 강제한다. */
+    status: text('status').notNull().default('granted'),
+    consentedAt: timestamp('consented_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /** 'user_request' | 'member_removed' 등. 사후에 "왜 끊겼는지"를 설명한다. */
+    revokedReason: text('revoked_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('household_consents_scope_idx').on(
+      table.householdId,
+      table.userId,
+      table.consentType,
+    ),
+    check(
+      'household_consents_status_check',
+      sql`${table.status} in ('granted', 'revoked')`,
+    ),
+    // status와 revoked_at이 어긋난 행("철회했다는데 언제인지 모름")을 원천 차단한다.
+    check(
+      'household_consents_revoked_at_check',
+      sql`(${table.status} = 'revoked') = (${table.revokedAt} is not null)`,
+    ),
+  ],
+);
 
 /* -------------------------------------------------------------------------- */
 /* pushSubscriptions                                                          */
@@ -1541,11 +1584,11 @@ export const budgetPeriod = pgEnum('budget_period', ['monthly']);
 /* -------------------------------------------------------------------------- */
 
 /**
- * 가족 예산. `amount`는 KRW 정수(원)인 월 예산이며, 사용률은 스코프별 현재월
+ * 가족 예산. `amount`는 KRW 정수(원)인 월 예산이며, 사용률은 스코프별 선택월
  * 순지출(`sum(netAmount) WHERE transactionType='approval'`, 공개범위 반영) /
  * `amount`로 계산한다(스펙 §1.4). `scopeRefId`는 scopeType이 household면 null,
  * 그 외에는 member/category/card의 id다. `createdBy`는 예산을 생성한 사용자다.
- * (householdId, scopeType, scopeRefId)는 유일하다(중복 예산 방지).
+ * 계획만 월별로 고정하며 실지출·달성률은 거래에서 다시 계산한다.
  */
 export const budgets = pgTable(
   'budgets',
@@ -1558,6 +1601,8 @@ export const budgets = pgTable(
     scopeType: budgetScopeType('scope_type').notNull(),
     scopeRefId: uuid('scope_ref_id'),
     amount: integer('amount').notNull(),
+    /** Asia/Seoul 회계월의 첫날(`YYYY-MM-01`). 순간이 아니므로 date로 저장한다. */
+    effectiveMonth: date('effective_month', { mode: 'string' }).notNull(),
     period: budgetPeriod('period').notNull().default('monthly'),
     currency: text('currency').notNull().default('KRW'),
     createdBy: uuid('created_by')
@@ -1571,17 +1616,21 @@ export const budgets = pgTable(
       .notNull(),
   },
   (table) => [
-    unique('budgets_household_scope_type_scope_ref_id_unique').on(
+    unique('budgets_household_month_scope_ref_unique').on(
       table.householdId,
+      table.effectiveMonth,
       table.scopeType,
       table.scopeRefId,
     ),
     // household 스코프는 scopeRefId가 NULL이라 위 UNIQUE가 서로 다른 값으로 취급한다
-    // (NULL != NULL). 동시 생성 시 가구 전체 예산이 둘 생기므로 부분 유니크로 막는다.
-    uniqueIndex('budgets_household_scope_unique')
-      .on(table.householdId)
+    // (NULL != NULL). 같은 회계월의 가구 전체 예산이 둘 생기지 않게 월 부분 유니크로 막는다.
+    uniqueIndex('budgets_household_month_scope_unique')
+      .on(table.householdId, table.effectiveMonth)
       .where(sql`${table.scopeType} = 'household'`),
-    index('budgets_household_id_idx').on(table.householdId),
+    index('budgets_household_effective_month_idx').on(
+      table.householdId,
+      table.effectiveMonth,
+    ),
   ],
 );
 
@@ -1591,6 +1640,47 @@ export const budgets = pgTable(
 
 export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
+
+/**
+ * 예산 월 복사 멱등 원장. 한 사용자 동작의 재시도는 최초에 생성한 budget ID 집합을
+ * 그대로 돌려준다. 계획 행이 나중에 수정·삭제돼도 같은 키로 복사를 다시 만들지 않는다.
+ */
+export const budgetCopyOperations = pgTable(
+  'budget_copy_operations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    idempotencyKey: uuid('idempotency_key').notNull(),
+    sourceMonth: date('source_month', { mode: 'string' }).notNull(),
+    targetMonth: date('target_month', { mode: 'string' }).notNull(),
+    copiedBudgetIds: jsonb('copied_budget_ids').$type<string[]>().notNull(),
+    copiedCount: integer('copied_count').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('budget_copy_ops_household_idempotency_unique').on(
+      table.householdId,
+      table.idempotencyKey,
+    ),
+    index('budget_copy_ops_household_target_month_idx').on(
+      table.householdId,
+      table.targetMonth,
+    ),
+    check(
+      'budget_copy_operations_copied_count_check',
+      sql`${table.copiedCount} >= 0`,
+    ),
+  ],
+);
+
+export type BudgetCopyOperation = typeof budgetCopyOperations.$inferSelect;
 
 /**
  * 예산 사용률 임계(80%/100%) 알림 dedupe 상태.
@@ -4014,3 +4104,186 @@ export type ModelCanaryRun = typeof modelCanaryRuns.$inferSelect;
 export type NewModelCanaryRun = typeof modelCanaryRuns.$inferInsert;
 export type ModelTrafficPolicy = typeof modelTrafficPolicies.$inferSelect;
 export type NewModelTrafficPolicy = typeof modelTrafficPolicies.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/* recurringSeries · recurringSeriesEvidence (C-5 정기 지출 Radar)             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 정기 지출 series의 사용자 상태.
+ *
+ * - `candidate`: 엔진이 만든 **미확정 후보**. 폐기·재생성 가능한 projection이다.
+ * - `confirmed` / `rejected`: 사용자의 판단. **조용히 지우지 않는다.**
+ * - `needs_review`: 재계산 결과 근거가 사라졌거나 series가 합쳐/갈라져 기존 판단을
+ *   그대로 이어 붙일 수 없는 상태. 시스템이 사용자의 결정을 임의로 폐기하는 대신
+ *   "다시 봐 달라"고 남긴다.
+ */
+export const recurringSeriesStatus = pgEnum('recurring_series_status', [
+  'candidate',
+  'confirmed',
+  'rejected',
+  'needs_review',
+]);
+
+/**
+ * 관측된 주기. 6개월 창에서 표본이 확보되는 것만 둔다 —
+ * 연 단위 구독은 표본이 1~2회라 결정적으로 판별할 수 없어 후보로 만들지 않는다.
+ */
+export const recurringCadence = pgEnum('recurring_cadence', [
+  'weekly',
+  'monthly',
+]);
+
+/**
+ * 정기 지출 후보/확정 series (C-5).
+ *
+ * **신원은 이 행의 UUID다.** `(가맹점 문자열, 금액)` 복합키를 쓰지 않는 이유: 별칭
+ * merge/unmerge가 과거 거래의 `merchant_normalized`를 바꾸고(P1-16 · merchant.service
+ * 백필), P0-10 수리가 금액을 바꾼다. 문자열이나 금액을 신원으로 삼으면 그때마다
+ * 사용자의 "정기 결제 맞음" 판단이 통째로 끊긴다. 재계산 시 기존 series와 새 후보는
+ * {@link recurringSeriesEvidence}의 **교집합**으로 이어 붙인다.
+ *
+ * `merchantCanonical`·금액·주기는 전부 **계산 시점의 표시값**이지 신원이 아니다.
+ *
+ * ⚠️ 이 테이블의 값은 ADR-0027 enforce 전까지 `provisional`이다. `moneyContractVersion`
+ * 이 1인 근거 위에서 계산된 금액으로 "다음 달 12,900원이 나갑니다" 같은 예고를 하면
+ * 틀린 사실을 확정처럼 말하게 된다. 노출 범위는 코드의 feature flag가 막는다.
+ */
+export const recurringSeries = pgTable(
+  'recurring_series',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /**
+     * series를 소유한 구성원. 정기 결제는 사람·카드 단위 사건이고, 무엇보다
+     * **공개범위가 구성원 기준**이라 여기서 갈라 두어야 타인의 private 거래가 가족
+     * 후보로 새지 않는다(P0-6 재발 방지).
+     */
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => householdMembers.id),
+    /** 계산 시점의 canonical 가맹점명(정규화 + 별칭). 표시용이며 신원이 아니다. */
+    merchantCanonical: text('merchant_canonical').notNull(),
+    /** 관측된 금액 범위(minor units). 금액 변동형 구독을 한 series로 묶기 위해 범위로 둔다. */
+    amountMin: integer('amount_min').notNull(),
+    amountMax: integer('amount_max').notNull(),
+    /** 대표 금액(중앙값). 평균이 아닌 이유: 1회의 이상값이 대표값을 끌고 가면 안 된다. */
+    amountMedian: integer('amount_median').notNull(),
+    currency: text('currency').notNull().default('KRW'),
+    /** 관측된 주기의 중앙값(일). */
+    intervalDays: integer('interval_days').notNull(),
+    cadence: recurringCadence('cadence').notNull(),
+    /** 근거 거래 수. {@link recurringSeriesEvidence} 행 수와 같다(계산 시점 기준). */
+    occurrenceCount: integer('occurrence_count').notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    status: recurringSeriesStatus('status').notNull().default('candidate'),
+    statusChangedAt: timestamp('status_changed_at', { withTimezone: true }),
+    statusChangedBy: uuid('status_changed_by').references(() => users.id),
+    /**
+     * `needs_review`로 넘어간 이유. 어휘: `evidence_lost`(근거가 전부 사라짐) ·
+     * `merged`(둘 이상의 확정 series가 한 후보로 합쳐짐) · `split`(하나가 여럿으로 갈라짐).
+     * 이유 없이 상태만 바꾸면 사용자에게 무엇을 다시 보라는 것인지 말할 수 없다.
+     */
+    needsReviewReason: text('needs_review_reason'),
+    /** 판별 알고리즘 버전. 규칙이 바뀌면 올려서 과거 결과와 구분한다. */
+    algorithmVersion: integer('algorithm_version').notNull(),
+    /**
+     * 이 series가 기대는 금액 계약 버전 — 근거 거래들의 **최솟값**이다.
+     * 하나라도 v1 근거가 섞이면 series 전체가 v1 신뢰도라는 뜻이다(ADR-0027).
+     */
+    moneyContractVersion: integer('money_contract_version').notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('recurring_series_household_id_idx').on(table.householdId),
+    index('recurring_series_household_member_idx').on(
+      table.householdId,
+      table.memberId,
+    ),
+    index('recurring_series_household_status_idx').on(
+      table.householdId,
+      table.status,
+    ),
+    check(
+      'recurring_series_amount_band_check',
+      sql`${table.amountMin} > 0 and ${table.amountMin} <= ${table.amountMedian} and ${table.amountMedian} <= ${table.amountMax}`,
+    ),
+    check(
+      'recurring_series_interval_days_check',
+      sql`${table.intervalDays} > 0`,
+    ),
+    // 2회는 "반복"의 하한이다. 엔진은 더 보수적으로(서로 다른 달 3회) 요구하지만,
+    // DB는 규칙 조정에 따라 흔들리지 않는 최소 정합만 강제한다.
+    check(
+      'recurring_series_occurrence_count_check',
+      sql`${table.occurrenceCount} >= 2`,
+    ),
+    check(
+      'recurring_series_seen_window_check',
+      sql`${table.firstSeenAt} <= ${table.lastSeenAt}`,
+    ),
+    // 상태 이유는 needs_review일 때만 의미가 있다.
+    check(
+      'recurring_series_needs_review_reason_check',
+      sql`${table.needsReviewReason} is null or ${table.status} = 'needs_review'`,
+    ),
+  ],
+);
+
+/**
+ * series를 만든 근거 거래 집합.
+ *
+ * 재계산이 기존 series와 새 후보를 잇는 **유일한 연결선**이다. 문자열·금액이 아니라
+ * 거래 ID로 이어야 별칭 merge/unmerge와 P0-10 수리를 견딘다.
+ *
+ * `transaction_id`에 전역 UNIQUE를 걸지 않는다: `needs_review`가 된 옛 series가
+ * 과거 근거를 그대로 들고 있는 동안 새 후보가 같은 거래를 근거로 잡을 수 있는데,
+ * UNIQUE를 걸면 그 순간 재계산이 죽는다. 사용자의 판단을 지켜야 하는 쪽이 우선이라
+ * "한 거래는 한 series" 는 조회 시점 규약으로 둔다.
+ */
+export const recurringSeriesEvidence = pgTable(
+  'recurring_series_evidence',
+  {
+    // 복합 PK 대신 대리키 + UNIQUE인 이유: 이 표는 파일 맨 끝에만 덧붙이는 규칙 아래
+    // 추가됐고, 복합 PK는 상단 import 블록(`primaryKey`)을 건드려야 한다. 정합성은
+    // 아래 UNIQUE가 동일하게 보장한다.
+    id: uuid('id').primaryKey().defaultRandom(),
+    seriesId: uuid('series_id')
+      .notNull()
+      .references(() => recurringSeries.id, { onDelete: 'cascade' }),
+    transactionId: uuid('transaction_id')
+      .notNull()
+      .references(() => cardTransactions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('recurring_series_evidence_series_transaction_unique').on(
+      table.seriesId,
+      table.transactionId,
+    ),
+    // 교집합 계산은 거래 ID로 역방향 조회한다.
+    index('recurring_series_evidence_transaction_id_idx').on(
+      table.transactionId,
+    ),
+  ],
+);
+
+export type RecurringSeries = typeof recurringSeries.$inferSelect;
+export type NewRecurringSeries = typeof recurringSeries.$inferInsert;
+export type RecurringSeriesEvidence =
+  typeof recurringSeriesEvidence.$inferSelect;
+export type NewRecurringSeriesEvidence =
+  typeof recurringSeriesEvidence.$inferInsert;

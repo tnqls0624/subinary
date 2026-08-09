@@ -15,6 +15,16 @@
  *
  * 로그 정책: 질문 원문/가맹점명/금액/프롬프트를 로그에 남기지 않는다 —
  * 식별자·경로(method)·건수만 남긴다.
+ *
+ * 정직한 거부(로드맵 C-6 / PO B8): 지원하는 집계 축(총지출·카테고리·가맹점)을
+ * 하나도 알아보지 못한 질문에는 **월 총지출로 때우지 않고 명시적으로 거부**한다
+ * (`refused: true` + 물어볼 수 있는 예시). 경계 판정은 순수 모듈
+ * {@link ./finance-intent}에 있고, 거부 기준은 "분류 경로"가 아니라 "분류 결과"다
+ * — LLM이 한 번 흔들렸다고 답할 수 있는 질문까지 거부하지 않는다.
+ *
+ * 관측(로드맵 C-6): 질의 1건 = `pipeline_runs`/`pipeline_step_runs` 1건으로 남겨
+ * 거부율·폴백율을 SQL로 셀 수 있게 한다. 원문은 담지 않고 집계 축·거부 여부·거부
+ * 갈래만 `metrics`에 남긴다.
  */
 import {
   BadRequestException,
@@ -28,7 +38,6 @@ import { z } from 'zod';
 
 import type { ProviderSet } from '@family/ai-providers';
 import type {
-  FinanceAggregateKind,
   FinanceQueryData,
   FinanceQueryItem,
   FinanceQueryResponse,
@@ -37,6 +46,7 @@ import type {
 } from '@family/contracts';
 import {
   schema,
+  trackPipelineExecution,
   type Db,
   notTransferCategory,
   redactedMerchantLabel,
@@ -48,16 +58,24 @@ import { DEFAULT_CATEGORIES } from '@family/shared';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { DB } from '../database/database.constants';
 import { AI_PROVIDERS } from './ai.constants';
+import {
+  MONTH_PATTERN,
+  REFUSAL_ANSWER,
+  REFUSAL_SUGGESTIONS,
+  classifyUnsupportedKind,
+  currentSeoulMonth,
+  extractIntentHeuristically,
+  previousMonth,
+  seoulMonthRange,
+  type FinanceIntent,
+  type ResolvedAggregate,
+  type SupportedFinanceIntent,
+  type UnsupportedKind,
+} from './finance-intent';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
-
-/** Fixed Asia/Seoul (KST) offset in milliseconds — UTC+9, no DST. */
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-/** `YYYY-MM` (01–12). */
-const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** UUID v4-ish shape guard (query-string 파라미터 방어 — 잘못된 값은 400). */
 const UUID_PATTERN =
@@ -99,11 +117,17 @@ const BUDGET_SCOPE_LABEL: Record<string, string> = {
 /** 시스템 카테고리 slug 집합(휴리스틱/LLM 의도 검증 공용). */
 const KNOWN_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
 
-/** ① 의도 추출 LLM 출력 스키마. 벗어나면 휴리스틱 폴백. */
+/**
+ * ① 의도 추출 LLM 출력 스키마. 벗어나면 휴리스틱 폴백.
+ *
+ * `'unsupported'`가 열거형에 있는 것이 핵심이다 — 없으면 LLM은 답할 수 없는
+ * 질문에도 억지로 셋 중 하나를 고르고, 그 결과가 사용자에게는 "자신 있는 오답"이
+ * 된다. 이 값은 내부 전용이라 응답 계약(`FinanceAggregateKind`)에는 나가지 않는다.
+ */
 const intentOutputSchema = z.object({
   month: z.string().regex(MONTH_PATTERN).optional().nullable(),
   categorySlug: z.string().optional().nullable(),
-  aggregate: z.enum(['total', 'byCategory', 'byMerchant']),
+  aggregate: z.enum(['total', 'byCategory', 'byMerchant', 'unsupported']),
 });
 
 /** ③ 답변 생성 LLM 출력 스키마. 벗어나면 템플릿 폴백. */
@@ -116,13 +140,6 @@ const polishedInsightsSchema = z.array(
     message: z.string().min(1),
   }),
 );
-
-/** 해석된 질의 의도(월/카테고리/집계 형태). */
-interface FinanceIntent {
-  month: string;
-  categorySlug: string | null;
-  aggregate: FinanceAggregateKind;
-}
 
 /** {@link FinanceAiService.financeQuery} 옵션. */
 export interface FinanceQueryOptions {
@@ -151,9 +168,11 @@ export class FinanceAiService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * 자연어 가계부 질의: ① 의도 추출(LLM→휴리스틱) → ② SQL 집계(권한 검증 포함
-   * analytics 재사용) → ③ 해요체 답변(LLM→템플릿). `method`는 최종 답변을
-   * 만든 경로를 노출한다(mock에서는 항상 'fallback').
+   * 자연어 가계부 질의: ① 의도 추출(LLM→휴리스틱) → ①' 미지원이면 **정직한 거부**
+   * → ② SQL 집계(권한 검증 포함 analytics 재사용) → ③ 해요체 답변(LLM→템플릿).
+   * `method`는 최종 답변을 만든 경로를 노출한다.
+   *
+   * 거부는 ② 앞에서 끝난다 — 답하지 않을 질문에 집계 쿼리를 돌릴 이유가 없다.
    */
   async financeQuery(
     userId: string,
@@ -161,40 +180,126 @@ export class FinanceAiService {
   ): Promise<FinanceQueryResponse> {
     const { householdId, question } = options;
 
-    // ① 의도 추출 — LLM(JSON 강제), 실패/무효 시 결정적 휴리스틱.
-    let intent: FinanceIntent;
-    let intentMethod: 'llm' | 'fallback';
-    try {
-      intent = await this.extractIntentViaLlm(question);
-      intentMethod = 'llm';
-    } catch {
-      intent = this.extractIntentHeuristically(question);
-      intentMethod = 'fallback';
-    }
+    // 권한(403)은 관측 블록 **밖에서** 먼저 확인한다. 안에서 던지면
+    // trackPipelineExecution이 이를 `pipeline_failed` critical 운영 알림으로
+    // 승격시켜, 사용자의 잘못된 householdId 하나가 당직을 깨운다.
+    await this.requireMembership(householdId, userId);
 
-    // ② 집계 — analytics의 SQL 집계 재사용(멤버십 403/공개범위 스코프 포함).
-    //    권한 오류(403)는 그대로 전파한다(폴백 대상이 아님 — LLM 실패만 폴백).
-    const data = await this.aggregate(userId, householdId, intent);
+    // summarize는 execute가 끝난 뒤 같은 클로저에서 실행되므로, 응답에 실리지 않는
+    // 관측 축(분류 경로·거부 갈래)을 여기에 담아 넘긴다.
+    let telemetry: {
+      intentMethod: 'llm' | 'fallback';
+      answerMethod: 'llm' | 'fallback' | 'refusal';
+      aggregate: ResolvedAggregate;
+      refused: boolean;
+      unsupportedKind: UnsupportedKind | null;
+      categoryResolved: boolean;
+    } | null = null;
 
-    // ③ 답변 생성 — LLM(JSON 강제), 실패/무효 시 집계값 직접 포맷 템플릿.
-    let answer: string;
-    let method: 'llm' | 'fallback';
-    try {
-      answer = await this.generateAnswerViaLlm(question, data);
-      method = 'llm';
-    } catch {
-      answer = this.templateAnswer(data);
-      method = 'fallback';
-    }
+    return trackPipelineExecution<FinanceQueryResponse>(
+      this.db,
+      {
+        pipelineName: 'finance-query',
+        pipelineVersion: 'v1',
+        stepName: 'answer',
+        stepVersion: 'finance-query-v1',
+        trigger: 'api',
+        scopeType: 'household',
+        scopeId: householdId,
+        summarize: (result) => ({
+          inputCount: 1,
+          outputCount: result.refused ? 0 : 1,
+          // 거부를 rejected로 세면 "거부율 = rejected/input"이 SQL 한 줄이 된다.
+          rejectedCount: result.refused ? 1 : 0,
+          // 질문 원문은 절대 담지 않는다 — 지원 우선순위를 정하는 데 필요한
+          // 구조(집계 축·거부 갈래)만 남긴다.
+          metrics: telemetry ?? {},
+        }),
+      },
+      async (context) => {
+        // ① 의도 추출 — LLM(JSON 강제), 실패/무효 시 결정적 휴리스틱.
+        let intent: FinanceIntent;
+        let intentMethod: 'llm' | 'fallback';
+        try {
+          intent = await this.extractIntentViaLlm(question, context.pipelineRunId);
+          intentMethod = 'llm';
+        } catch {
+          intent = extractIntentHeuristically(question);
+          intentMethod = 'fallback';
+        }
 
-    // 로그는 식별자/경로/집계형태만(질문 원문·금액 미포함).
-    this.logger.log(
-      `finance-query answered household=${householdId} ` +
-        `aggregate=${data.aggregate} month=${data.month} ` +
-        `intent=${intentMethod} answer=${method}`,
+        // ①' 미지원 의도 → 거부. 총지출로 때우지 않는다(로드맵 C-6 / PO B8).
+        const resolved = intent.aggregate;
+        if (resolved === 'unsupported') {
+          const unsupportedKind = classifyUnsupportedKind(question);
+          telemetry = {
+            intentMethod,
+            answerMethod: 'refusal',
+            aggregate: 'unsupported',
+            refused: true,
+            unsupportedKind,
+            categoryResolved: false,
+          };
+          this.logger.log(
+            `finance-query refused household=${householdId} ` +
+              `intent=${intentMethod} kind=${unsupportedKind}`,
+          );
+          return {
+            answer: REFUSAL_ANSWER,
+            refused: true,
+            suggestions: [...REFUSAL_SUGGESTIONS],
+            method: intentMethod,
+          };
+        }
+
+        // ② 집계 — analytics의 SQL 집계 재사용(공개범위 스코프 포함).
+        //    권한 오류(403)는 그대로 전파한다(폴백 대상이 아님 — LLM 실패만 폴백).
+        const data = await this.aggregate(userId, householdId, {
+          month: intent.month,
+          categorySlug: intent.categorySlug,
+          aggregate: resolved,
+        });
+
+        // ③ 답변 생성 — LLM(JSON 강제), 실패/무효 시 집계값 직접 포맷 템플릿.
+        let answer: string;
+        let method: 'llm' | 'fallback';
+        try {
+          answer = await this.generateAnswerViaLlm(
+            question,
+            data,
+            context.pipelineRunId,
+          );
+          method = 'llm';
+        } catch {
+          answer = this.templateAnswer(data);
+          method = 'fallback';
+        }
+
+        telemetry = {
+          intentMethod,
+          answerMethod: method,
+          aggregate: data.aggregate,
+          refused: false,
+          unsupportedKind: null,
+          categoryResolved: data.categorySlug !== null,
+        };
+
+        // 로그는 식별자/경로/집계형태만(질문 원문·금액 미포함).
+        this.logger.log(
+          `finance-query answered household=${householdId} ` +
+            `aggregate=${data.aggregate} month=${data.month} ` +
+            `intent=${intentMethod} answer=${method}`,
+        );
+
+        return {
+          answer,
+          data,
+          method,
+          refused: false,
+          suggestions: [],
+        };
+      },
     );
-
-    return { answer, data, method };
   }
 
   /* ---------------------------------------------------------------------- */
@@ -278,8 +383,18 @@ export class FinanceAiService {
   /* ① 의도 추출                                                              */
   /* ---------------------------------------------------------------------- */
 
-  /** LLM에 JSON만 출력하도록 요구해 의도를 추출한다. 무효면 throw(→휴리스틱). */
-  private async extractIntentViaLlm(question: string): Promise<FinanceIntent> {
+  /**
+   * LLM에 JSON만 출력하도록 요구해 의도를 추출한다. 무효면 throw(→휴리스틱).
+   *
+   * 프롬프트가 `unsupported`를 **명시적으로 허용**하는 것이 핵심이다. 선택지가
+   * 셋뿐이면 LLM은 "주말에 뭐 할까?"에도 셋 중 하나를 고르고, 그 결과는 사용자에게
+   * 자신 있는 오답이 된다. `pipelineRunId`를 넘겨 `ai_invocations`가 이 질의의
+   * pipeline run에 붙게 한다(거부율과 LLM 호출을 같은 축으로 조인).
+   */
+  private async extractIntentViaLlm(
+    question: string,
+    pipelineRunId: string,
+  ): Promise<FinanceIntent> {
     const slugGuide = DEFAULT_CATEGORIES.map(
       (c) => `${c.slug}(${c.name})`,
     ).join(', ');
@@ -288,19 +403,33 @@ export class FinanceAiService {
         '당신은 가계부 질의 분석기입니다. 사용자 질문에서 조회 의도를 추출해 ' +
         'JSON 객체 하나만 출력하세요. 설명·코드펜스·다른 텍스트를 절대 붙이지 마세요.\n' +
         '스키마: {"month"?: "YYYY-MM", "categorySlug"?: string, ' +
-        '"aggregate": "total"|"byCategory"|"byMerchant"}\n' +
+        '"aggregate": "total"|"byCategory"|"byMerchant"|"unsupported"}\n' +
         `categorySlug는 다음 중 하나만 사용: ${slugGuide}. ` +
-        '해당 없으면 생략하세요. month가 특정되지 않으면 생략하세요.',
+        '해당 없으면 생략하세요. month가 특정되지 않으면 생략하세요.\n' +
+        '이 시스템이 답할 수 있는 것은 특정 기간의 지출 금액·건수를 전체(total)/' +
+        '카테고리별(byCategory)/가맹점별(byMerchant)로 집계하는 것뿐입니다. ' +
+        '기간 비교, 미래 예측, 지출과 무관한 질문처럼 이 셋으로 답할 수 없는 ' +
+        '질문이면 반드시 aggregate를 "unsupported"로 하세요. 억지로 고르지 마세요.',
       prompt: question,
       temperature: 0,
       maxTokens: 256,
       metadata: {
         task: 'finance-intent',
-        promptVersion: 'finance-intent-v1',
+        promptVersion: 'finance-intent-v2',
+        pipelineRunId,
       },
     });
 
     const parsed = intentOutputSchema.parse(extractJson(generated.text));
+    if (parsed.aggregate === 'unsupported') {
+      // LLM이 스스로 못 답한다고 했으면 그대로 존중한다(카테고리를 같이 뱉었더라도
+      // 그건 모순이지 근거가 아니다).
+      return {
+        month: parsed.month ?? currentSeoulMonth(),
+        categorySlug: null,
+        aggregate: 'unsupported',
+      };
+    }
     const categorySlug =
       parsed.categorySlug != null && KNOWN_SLUGS.has(parsed.categorySlug)
         ? parsed.categorySlug
@@ -315,63 +444,6 @@ export class FinanceAiService {
     };
   }
 
-  /**
-   * 결정적 휴리스틱 의도 추출(LLM 폴백 경로 — mock의 기본 경로).
-   *  - 월: '지난달/저번달' → 전월, '이번달/이달' → 당월, 'YYYY-MM'/'YYYY년 M월'
-   *    /'N월'(당해 연도) 순으로 해석, 없으면 당월.
-   *  - 카테고리: DEFAULT_CATEGORIES name/slug 부분일치(첫 일치 승).
-   *  - 집계: 카테고리 일치 → byCategory, '어디/가맹점/매장' → byMerchant,
-   *    '카테고리/항목별/분류별' → byCategory, 그 외 → total.
-   */
-  private extractIntentHeuristically(question: string): FinanceIntent {
-    const compact = question.replace(/\s+/g, '');
-
-    // 월 해석.
-    let month: string | null = null;
-    const explicit = /(\d{4})-(0[1-9]|1[0-2])/.exec(compact);
-    const koreanYm = /(\d{4})년(\d{1,2})월/.exec(compact);
-    const monthOnly = /(?:^|[^\d-])(\d{1,2})월/.exec(compact);
-    if (/지난달|저번달|전달/.test(compact)) {
-      month = previousMonth(currentSeoulMonth());
-    } else if (/이번달|이달|금월/.test(compact)) {
-      month = currentSeoulMonth();
-    } else if (explicit) {
-      month = `${explicit[1]}-${explicit[2]}`;
-    } else if (koreanYm) {
-      month = toMonthString(Number(koreanYm[1]), Number(koreanYm[2]));
-    } else if (monthOnly) {
-      const current = currentSeoulMonth();
-      month = toMonthString(
-        Number(current.slice(0, 4)),
-        Number(monthOnly[1]),
-      );
-    }
-
-    // 카테고리 부분일치(DEFAULT_CATEGORIES name/slug).
-    let categorySlug: string | null = null;
-    const lower = question.toLowerCase();
-    for (const category of DEFAULT_CATEGORIES) {
-      if (question.includes(category.name) || lower.includes(category.slug)) {
-        categorySlug = category.slug;
-        break;
-      }
-    }
-
-    // 집계 형태.
-    let aggregate: FinanceAggregateKind = 'total';
-    if (categorySlug !== null || /카테고리|항목별|분류별/.test(compact)) {
-      aggregate = 'byCategory';
-    } else if (/가맹점|매장|상호|어디서|어디에/.test(compact)) {
-      aggregate = 'byMerchant';
-    }
-
-    return {
-      month: month ?? currentSeoulMonth(),
-      categorySlug,
-      aggregate,
-    };
-  }
-
   /* ---------------------------------------------------------------------- */
   /* ② 집계(analytics 재사용 — 권한/공개범위는 그 안에서 강제)                  */
   /* ---------------------------------------------------------------------- */
@@ -380,7 +452,8 @@ export class FinanceAiService {
   private async aggregate(
     userId: string,
     householdId: string,
-    intent: FinanceIntent,
+    // 'unsupported'가 여기까지 흘러올 수 없게 타입으로 막는다(거부는 이 앞에서 끝난다).
+    intent: SupportedFinanceIntent,
   ): Promise<FinanceQueryData> {
     const query = { month: intent.month };
     const monthly = await this.analytics.monthly(userId, householdId, query);
@@ -476,6 +549,7 @@ export class FinanceAiService {
   private async generateAnswerViaLlm(
     question: string,
     data: FinanceQueryData,
+    pipelineRunId: string,
   ): Promise<string> {
     const generated = await this.providers.llm.generate({
       system:
@@ -490,6 +564,7 @@ export class FinanceAiService {
       metadata: {
         task: 'finance-answer',
         promptVersion: 'finance-answer-v1',
+        pipelineRunId,
       },
     });
 
@@ -834,37 +909,8 @@ function monthLabel(month: string): string {
   return `${matched[1]}년 ${Number(matched[2])}월`;
 }
 
-/** (year, monthNumber 1~12 범위 밖 롤오버 허용) → 'YYYY-MM'. */
-function toMonthString(year: number, monthNumber: number): string {
-  // Date.UTC의 월 인덱스 정규화로 0/13 등의 롤오버를 흡수한다.
-  const rolled = new Date(Date.UTC(year, monthNumber - 1, 1));
-  const y = rolled.getUTCFullYear();
-  const m = rolled.getUTCMonth() + 1;
-  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`;
-}
-
-/** 현재 Asia/Seoul 월 'YYYY-MM'(고정 UTC+9 — analytics와 동일 규약). */
-function currentSeoulMonth(): string {
-  const seoulNow = new Date(Date.now() + KST_OFFSET_MS);
-  return toMonthString(seoulNow.getUTCFullYear(), seoulNow.getUTCMonth() + 1);
-}
-
-/** 'YYYY-MM' → 전월 'YYYY-MM'. */
-function previousMonth(month: string): string {
-  const year = Number(month.slice(0, 4));
-  const monthNumber = Number(month.slice(5, 7));
-  return toMonthString(year, monthNumber - 1);
-}
-
-/** 'YYYY-MM'의 [월초, 익월초) UTC 경계(Asia/Seoul 벽시계, 고정 UTC+9). */
-function seoulMonthRange(month: string): { from: Date; to: Date } {
-  const year = Number(month.slice(0, 4));
-  const monthNumber = Number(month.slice(5, 7));
-  return {
-    from: new Date(Date.UTC(year, monthNumber - 1, 1) - KST_OFFSET_MS),
-    to: new Date(Date.UTC(year, monthNumber, 1) - KST_OFFSET_MS),
-  };
-}
+// 월 계산 헬퍼(toMonthString/currentSeoulMonth/previousMonth/seoulMonthRange)는
+// 의도 해석과 같은 순수 로직이라 ./finance-intent 로 옮겨 한 곳에서 테스트한다.
 
 /**
  * 해당 월의 경과율(0~1). 과거 월 = 1, 미래 월 = 0, 당월은

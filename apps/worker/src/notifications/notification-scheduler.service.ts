@@ -21,8 +21,9 @@ import {
   spendPeriodWindow,
 } from '@family/database';
 import {
+  buildMerchantAliasIndex,
   createLogger,
-  normalizeMerchant,
+  regroupByCanonicalMerchant,
   QUEUE_NAMES,
   type NotificationDispatchJob,
 } from '@family/shared';
@@ -473,9 +474,16 @@ export class NotificationSchedulerService
    * 경로가 무거워지고, "그 뒤 승인됐는지"를 알 수 없다(승인은 나중에 온다). 최대 1분
    * 지연은 이 사건의 성격상 무해하다.
    *
-   * 묶음 키에 `merchant_raw`를 쓰는 이유: 거절 문자는 같은 정기결제가 같은 문구로
-   * 반복되므로 원문이 동일하다(실측 확인). 정규화·별칭까지 끌어오면 worker가 api의
-   * 조회 로직을 복제해야 하고 이득이 없다.
+   * 묶음 키는 **canonical 가맹점 신원**(정규화 + 사용자 별칭)이다. 예전에는
+   * `merchant_raw`로 `GROUP BY` 한 뒤 `HAVING count(*) >= N`을 통과시키고 **그 다음에**
+   * 별칭을 적용했는데, 그러면 사용자가 `GS25`와 `지에스25`를 같은 가게로 확정해 두어도
+   * 각각 1회로 세어 둘 다 임계 앞에서 탈락한다(P1-16). API 거절 목록은 처음부터 별칭을
+   * 묶기 전에 적용하고 있었으므로, 화면에는 "2회 실패"가 보이는데 알림만 오지 않는
+   * 상태였다 — ADR-0024 §3이 이미 결정한 것을 한쪽만 구현한 것이다.
+   *
+   * 그래서 SQL은 원문으로 **사전 집계만** 하고(행 수를 줄이는 용도), 임계 판정은
+   * {@link regroupByCanonicalMerchant}로 다시 묶은 **뒤에** 한다. SQL에 `HAVING`을
+   * 남기면 임계가 다시 별칭 앞으로 올라가므로 넣지 않는다.
    *
    * dedupe는 주 단위다 — 카드사가 **매일** 재시도하므로 일 단위면 7일 연속 거절에 알림이
    * 7번 간다. 지속 노출은 앱 내 실패 화면이 담당하고, 푸시는 주 1회로 족하다.
@@ -514,17 +522,21 @@ export class NotificationSchedulerService
         schema.cardSmsEvents.householdId,
         schema.cardSmsEvents.merchantRaw,
         schema.cardSmsEvents.amount,
-      )
-      .having(sql`count(*) >= ${DECLINE_ALERT_MIN_ATTEMPTS}`);
+      );
+    // ⛔ 여기에 `.having(count(*) >= N)`을 되살리지 마라 — 임계가 별칭 적용보다 앞서면
+    //    P1-16이 그대로 재발한다. 창이 7일이라 1회짜리까지 읽어도 행 수는 미미하다.
 
     // 별칭 맵을 한 번만 로드한다(가구 수가 적고 그룹마다 조회하면 N+1이 된다).
+    // `householdId`를 **반드시 함께** 읽는다: 별칭은 가구별 확정이므로 alias 문자열
+    // 하나를 key로 쓰면 다른 가구가 등록한 별칭이 우리 가구에 적용된다(예전 버그).
     const aliasRows = await this.db
       .select({
+        householdId: schema.merchantAliases.householdId,
         alias: schema.merchantAliases.alias,
         canonical: schema.merchantAliases.canonical,
       })
       .from(schema.merchantAliases);
-    const aliasMap = new Map(aliasRows.map((a) => [a.alias, a.canonical]));
+    const aliasIndex = buildMerchantAliasIndex(aliasRows);
 
     // 사용자가 "확인했어요"로 닫은 묶음은 알림도 보내지 않는다. api `listDeclines`와
     // **같은 규칙을 양쪽에 두어야** 한다 — 화면에서는 사라졌는데 주 단위 알림은 계속
@@ -544,28 +556,53 @@ export class NotificationSchedulerService
       ]),
     );
 
-    let enqueued = 0;
-    for (const g of groups) {
-      const attempts = Number(g.attempts) || 0;
-      if (attempts < DECLINE_ALERT_MIN_ATTEMPTS) continue;
-      const lastAt = g.lastAt ? new Date(g.lastAt) : null;
-      if (!lastAt) continue;
+    // 원문 사전집계 → **canonical 신원으로 재묶기**. 임계 판정은 반드시 이 뒤다.
+    //
+    // 거래에 저장된 `merchantNormalized`도 정규화 + 사용자 별칭까지 적용된 값이므로,
+    // 거절 원문이 같은 변환을 거쳐야 아래 "그 뒤 승인됐는지" 비교가 성립한다.
+    const attemptRows = groups
+      .map((g) => ({
+        householdId: g.householdId,
+        merchantRaw: g.merchantRaw,
+        amount: g.amount,
+        attempts: Number(g.attempts) || 0,
+        lastAt: g.lastAt ? new Date(g.lastAt) : null,
+        lastSeenAt: g.lastSeenAt ? new Date(g.lastSeenAt) : null,
+        reason: g.reason ?? null,
+      }))
+      .filter((r): r is typeof r & { lastAt: Date } => r.lastAt !== null);
 
-      // 마지막 거절 이후 **같은 가맹점** 승인이 있으면 스스로 해결된 것이다(재승인 케이스).
-      // 가맹점 조건을 빼면 다른 데서 커피 한 잔 사도 해결로 오판한다.
-      //
-      // 거래에 저장된 `merchantNormalized`는 정규화 + 사용자 별칭까지 적용된 값이므로,
-      // 거절 원문도 같은 변환을 거쳐야 비교가 성립한다.
-      const declinedMerchant = g.merchantRaw
-        ? (aliasMap.get(normalizeMerchant(g.merchantRaw)) ??
-          normalizeMerchant(g.merchantRaw))
-        : null;
+    const merged = regroupByCanonicalMerchant(attemptRows, {
+      aliases: aliasIndex,
+      householdId: (r) => r.householdId,
+      merchantRaw: (r) => r.merchantRaw,
+      // 금액도 사건을 가르는 축이다(같은 가맹점의 다른 요금제는 다른 사건).
+      subKey: (r) => String(r.amount ?? ''),
+      weight: (r) => r.attempts,
+      orderAt: (r) => r.lastAt,
+    });
+
+    let enqueued = 0;
+    for (const g of merged) {
+      const attempts = g.total;
+      if (attempts < DECLINE_ALERT_MIN_ATTEMPTS) continue;
+
+      // 표시·비교에 쓰는 이름은 전부 canonical이다 — api `listDeclines`가 화면에
+      // 보여주는 값과 같아야 "화면엔 있는데 알림은 안 온다"가 재발하지 않는다.
+      const declinedMerchant = g.canonical;
+      const amount = g.latest.amount;
+      const lastAt = g.latest.lastAt;
 
       // 확인 표시는 그때까지 수집된 시도에만 적용된다(이후 새 거절이면 다시 알린다).
+      // 묶음 전체의 **최신 수집 시각**으로 비교한다 — 별칭으로 합쳐진 다른 표기 쪽에
+      // 더 최근 시도가 있을 수 있고, 그걸 놓치면 확인 표시가 영구 무시가 된다.
       const dismissedAt = dismissedAtByKey.get(
-        `${g.householdId}|${declinedMerchant ?? ''}|${g.amount ?? ''}`,
+        `${g.householdId}|${declinedMerchant ?? ''}|${amount ?? ''}`,
       );
-      const lastSeenAt = g.lastSeenAt ? new Date(g.lastSeenAt) : lastAt;
+      const lastSeenAt = g.rows.reduce<Date>(
+        (max, r) => (r.lastSeenAt && r.lastSeenAt > max ? r.lastSeenAt : max),
+        lastAt,
+      );
       if (dismissedAt && lastSeenAt <= dismissedAt) continue;
 
       if (declinedMerchant) {
@@ -603,19 +640,29 @@ export class NotificationSchedulerService
       const weekBucket = Math.floor(
         lastAt.getTime() / (7 * 24 * 60 * 60 * 1000),
       );
-      const key = `decline:${g.householdId}:${g.merchantRaw ?? ''}:${g.amount ?? ''}:${weekBucket}`;
+      // dedupe 키도 canonical이다. 원문 키를 유지하면 별칭으로 합쳐진 한 사건에
+      // 표기 수만큼 알림이 간다(합치는 목적 자체가 무너진다). 키 형식이 바뀌었으므로
+      // 배포 주에 한해 이미 원문 키로 dedupe된 묶음이 1회 더 알릴 수 있다 —
+      // 반대 방향(알림 누락)이 이 기능에서 훨씬 나쁜 실패라 이쪽을 택한다.
+      const key = `decline:${g.householdId}:${declinedMerchant ?? ''}:${amount ?? ''}:${weekBucket}`;
       if (!(await this.claimDedupe(key))) continue;
-      await this.enqueue(
-        {
-          kind: 'decline',
-          householdId: g.householdId,
-          merchant: g.merchantRaw,
-          amount: g.amount,
-          attempts,
-          reason: g.reason ?? null,
-        },
-        key,
-      );
+      try {
+        await this.enqueue(
+          {
+            kind: 'decline',
+            householdId: g.householdId,
+            merchant: declinedMerchant,
+            amount,
+            attempts,
+            reason: g.latest.reason,
+          },
+          key,
+        );
+      } catch (error) {
+        // 발송에 실패했으면 "보냈다"는 기억을 지운다 — 안 그러면 그 주 내내 조용하다.
+        await this.releaseDedupe(key);
+        throw error;
+      }
       enqueued += 1;
     }
     if (enqueued > 0) {
@@ -633,12 +680,39 @@ export class NotificationSchedulerService
     return Boolean(inserted);
   }
 
+  /**
+   * 클레임을 되돌린다 — **발송에 실패했으면 "보냈다"고 기억하면 안 된다.**
+   *
+   * `claimDedupe`가 먼저 성공하고 `enqueue`가 실패하면 그 키는 영원히 클레임된 채로
+   * 남아, 다음 tick부터 조용히 건너뛴다. 알림이 안 온 이유를 아무도 모르는 상태가
+   * 되므로(실제로 그렇게 됐다 — 아래 `enqueue` 주석), 실패하면 반드시 풀어 준다.
+   */
+  private async releaseDedupe(dedupeKey: string): Promise<void> {
+    await this.db
+      .delete(schema.notificationDedupe)
+      .where(eq(schema.notificationDedupe.dedupeKey, dedupeKey));
+  }
+
+  /**
+   * dispatch 큐에 넣는다.
+   *
+   * ⚠️ `jobId`에 `dedupeKey`를 **그대로 쓰지 않는다**: BullMQ는 커스텀 jobId에 `:`가
+   * 있으면 `split(':').length === 3`(반복 잡 호환)일 때만 허용하고, 그 외에는
+   * `Custom Id cannot contain :`로 던진다. `reminder`/`summary` 키는 우연히 콜론이
+   * 2개라 통과했지만 `decline:<가구>:<가맹점>:<금액>:<주>`는 4개라 **매번 실패**했다.
+   * 게다가 클레임이 먼저라 그 주의 알림은 조용히 사라졌다 — 반복 거절 알림
+   * (ADR-0024)이 실제로는 한 번도 발행되지 않고 있었다.
+   *
+   * `encodeURIComponent`는 `:`를 `%3A`로 바꾸고 단사(injective)라 서로 다른 키가
+   * 같은 jobId로 합쳐지지 않는다. jobId는 불투명 값이므로 읽기 좋을 필요가 없고,
+   * 진짜 중복 방지는 `notification_dedupe`의 UNIQUE가 한다.
+   */
   private async enqueue(
     job: NotificationDispatchJob,
     dedupeKey: string,
   ): Promise<void> {
     await this.notificationQueue.add('dispatch', job, {
-      jobId: `notif_${dedupeKey}`,
+      jobId: `notif_${encodeURIComponent(dedupeKey)}`,
       removeOnComplete: true,
     });
   }

@@ -19,6 +19,7 @@ import {
 import type {
   CardSmsDeclineDismissResponse,
   CardSmsDeclineListResponse,
+  CardSmsEventSummary,
   CardBreakdown,
   CardSummary,
   CategoryBreakdown,
@@ -41,10 +42,17 @@ import type {
 
 import {
   api,
+  apiFetch,
   type TransactionListParams,
 } from "./api-client";
 import { useAuth } from "./auth-context";
 import { useHousehold } from "./household-context";
+
+/**
+ * 처리 대기 백로그를 한 번에 스캔할 상한 — 거래·카드문자 목록 API의 최대 limit과 같다.
+ * 상한을 넘으면 화면이 'N+'로 표기한다(더 있다는 사실을 숨기지 않는다).
+ */
+export const REVIEW_SCAN_LIMIT = 100;
 
 /** queryKey 팩토리(hook + 뮤테이션 invalidate 공용). */
 export const queryKeys = {
@@ -334,6 +342,38 @@ export function useDeclineList(): UseQueryResult<CardSmsDeclineListResponse> {
     queryFn: () =>
       authedFetch((token) =>
         api.cardSms.declines(token, householdId as string),
+      ),
+  });
+}
+
+/**
+ * 검토가 필요한 카드문자(파싱 실패 + LLM 격리) 목록.
+ *
+ * 홈('할 일' 카드)과 `/todo`가 **같은 캐시**를 쓴다 — 두 화면이 각자 요청하면 같은
+ * 백로그를 놓고 건수가 갈리고, 확정한 문자가 한쪽에만 사라진다. 기간 필터가 없는
+ * 것이 이 훅의 계약이다(전 기간). 홈이 최근 3일만 보여주는 것은 **홈의 표시 결정**
+ * 이므로 호출부에서 자른다(components/widgets/todo-counts.ts).
+ *
+ * 상한은 서버 목록 API의 최대 limit(100)과 같다. 상한에 걸리면 화면이 'N+'로 표기해
+ * 더 있을 수 있음을 숨기지 않는다.
+ */
+export function useCardSmsReviewInbox(
+  opts?: QueryOpts,
+): UseQueryResult<CardSmsEventSummary[]> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    // 접두가 ["card-sms-events", …]라 invalidateTransactionScope가 함께 무효화한다.
+    queryKey: ["card-sms-events", householdId, "review-inbox"],
+    enabled,
+    refetchInterval: opts?.refetchInterval,
+    queryFn: () =>
+      authedFetch((token) =>
+        apiFetch<CardSmsEventSummary[]>(
+          `/v1/card-sms-events?householdId=${encodeURIComponent(
+            householdId as string,
+          )}&status=parse_failed,quarantined&limit=${REVIEW_SCAN_LIMIT}`,
+          { accessToken: token },
+        ),
       ),
   });
 }

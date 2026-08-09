@@ -110,6 +110,7 @@ curl -s -X POST http://localhost:3001/v1/graph/extract \
 | `workspaceId` | ✅ | `workspaces.id`(uuid). 요청자 소유. |
 | `type` | 선택 | `entityType` 필터(예: `technology`, `person`). |
 | `q` | 선택 | `name` 부분 일치(ILIKE). |
+| `limit` · `cursor` | 선택 | 커서 페이지네이션. 기본 50건 · 최대 200건. [규약](memory.md#커서-페이지네이션-목록-공통) |
 
 ```bash
 curl -s 'http://localhost:3001/v1/graph/entities?workspaceId=0a1b2c3d-…&type=technology' \
@@ -141,7 +142,8 @@ curl -s 'http://localhost:3001/v1/graph/entities?workspaceId=0a1b2c3d-…&type=t
       "isCurrent": true,
       "createdAt": "2026-07-16T02:00:00.000Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
 
@@ -232,6 +234,7 @@ relationship 을 조회한다. 양끝 entity 의 `name` 을 조인하고 `isCurr
 | `type` | 선택 | `relationshipType` 필터(예: `resolves`, `relates_to`). |
 | `current` | 선택 | `'true'` → `validUntil` null 또는 미래인 관계만. |
 | `asOf` | 선택 | ISO datetime. 그 시점 유효(`validFrom<=asOf` AND (`validUntil` null 또는 `>asOf`))한 관계만. |
+| `limit` · `cursor` | 선택 | 커서 페이지네이션. 기본 50건 · 최대 200건. [규약](memory.md#커서-페이지네이션-목록-공통) |
 
 ```bash
 # 장애-해결책 관계 검색
@@ -250,7 +253,7 @@ curl -s 'http://localhost:3001/v1/graph/relationships?workspaceId=0a1b2c3d-…&a
 ### 응답 `200 OK` (`relationshipListResponseSchema`)
 
 ```json
-{ "items": [ /* relationshipSummary … */ ] }
+{ "items": [ /* relationshipSummary … */ ], "nextCursor": null }
 ```
 
 > `current` 와 `asOf` 는 애플리케이션 로직(SQL WHERE)으로 판정한다(PRD §3.3). `asOf` 는 그 시점에

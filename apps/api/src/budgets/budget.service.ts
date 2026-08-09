@@ -8,7 +8,7 @@
  * budget exists. Budget CRUD (create/update/delete) additionally requires an
  * `owner`/`admin` role; listing is open to any active member.
  *
- * Usage rate (spec §1.4): a budget's `spent` is the **current-month** net spend
+ * Usage rate (spec §1.4): a budget's `spent` is the **selected-month** net spend
  * of its scope — `sum(netAmount) WHERE transactionType='approval'` over the
  * `[monthStart, nextMonthStart)` window (Asia/Seoul, on `approvedAt`) — computed
  * entirely in SQL (never summed in JS). The visibility scope (spec §1.2) is
@@ -18,6 +18,8 @@
  *
  * Amounts are KRW integers. Logs never carry amounts or PII.
  */
+import { randomUUID } from 'node:crypto';
+
 import {
   BadRequestException,
   ConflictException,
@@ -30,6 +32,8 @@ import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type {
   BudgetCreateRequest,
+  BudgetCopyRequest,
+  BudgetCopyResponse,
   BudgetListResponse,
   BudgetSummary,
   BudgetUpdateRequest,
@@ -46,19 +50,23 @@ import {
 import { assertKrwInteger } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import {
+  addBudgetMonths,
+  fromEffectiveMonth,
+  isPastBudgetMonth,
+  resolveBudgetPeriod,
+  threeMonthAverage,
+  threeMonthPeriod,
+  toEffectiveMonth,
+  type BudgetPeriod,
+} from './budget-month';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** Korea Standard Time is a fixed UTC+9 offset with no DST. */
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
 /** Roles permitted to mutate budgets (spec §1.4 / PRD §7.2). */
 const PRIVILEGED_ROLES: readonly HouseholdRole[] = ['owner', 'admin'];
-
-/** `month=YYYY-MM` (01–12). */
-const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** Coerces a driver-returned numeric aggregate (string | number) to an int. */
 function toInt(value: string | number | null | undefined): number {
@@ -79,11 +87,9 @@ export interface BudgetListQuery {
   month?: string;
 }
 
-/** Resolved month window (Asia/Seoul) plus the normalized `YYYY-MM` label. */
-interface Period {
-  from: Date;
-  to: Date;
-  month: string;
+/** HTTP 헤더에서 검증한 멱등 키를 본문 계약에 결합한 서비스 명령. */
+interface BudgetCopyCommand extends BudgetCopyRequest {
+  idempotencyKey: string;
 }
 
 @Injectable()
@@ -95,11 +101,14 @@ export class BudgetService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * Lists a household's budgets with each scope's current-month usage. Open to
+   * Lists a household's budgets with each scope's selected-month usage. Open to
    * any active member. `month` (optional) selects the accounting month
    * (defaults to the current Asia/Seoul month).
    */
-  async list(userId: string, query: BudgetListQuery): Promise<BudgetListResponse> {
+  async list(
+    userId: string,
+    query: BudgetListQuery,
+  ): Promise<BudgetListResponse> {
     const householdId = this.requireHouseholdId(query.householdId);
     const actor = await this.requireMembership(householdId, userId);
     const period = this.resolvePeriod(query.month);
@@ -107,15 +116,28 @@ export class BudgetService {
     const budgets = await this.db
       .select()
       .from(schema.budgets)
-      .where(eq(schema.budgets.householdId, householdId))
+      .where(
+        and(
+          eq(schema.budgets.householdId, householdId),
+          eq(schema.budgets.effectiveMonth, period.effectiveMonth),
+        ),
+      )
       .orderBy(asc(schema.budgets.createdAt), asc(schema.budgets.id));
 
     const labels = await this.buildScopeLabels(budgets);
 
     const items = await Promise.all(
       budgets.map(async (budget) => {
-        const spent = await this.computeSpent(budget, actor.id, period);
-        return this.toSummary(budget, spent, labels.get(budget.id) ?? '가족 전체');
+        const [spent, threeMonthTotal] = await Promise.all([
+          this.computeSpent(budget, actor.id, period),
+          this.computeSpent(budget, actor.id, threeMonthPeriod(period)),
+        ]);
+        return this.toSummary(
+          budget,
+          spent,
+          threeMonthAverage(threeMonthTotal),
+          labels.get(budget.id) ?? '가족 전체',
+        );
       }),
     );
 
@@ -129,9 +151,12 @@ export class BudgetService {
   /**
    * Creates a budget (owner/admin only). Validates the scope reference belongs
    * to the household (`household` scope carries no ref). A duplicate scope
-   * `(householdId, scopeType, scopeRefId)` yields a 409.
+   * `(householdId, effectiveMonth, scopeType, scopeRefId)` yields a 409.
    */
-  async create(userId: string, input: BudgetCreateRequest): Promise<BudgetSummary> {
+  async create(
+    userId: string,
+    input: BudgetCreateRequest,
+  ): Promise<BudgetSummary> {
     const actor = await this.requireMembership(
       input.householdId,
       userId,
@@ -139,12 +164,19 @@ export class BudgetService {
     );
 
     assertKrwInteger(input.amount);
+    const period = this.resolvePeriod(input.effectiveMonth);
+    this.assertEditableMonth(period.month);
     const scopeRefId = await this.resolveScopeRef(
       input.householdId,
       input.scopeType,
       input.scopeRefId,
     );
-    await this.assertNoDuplicate(input.householdId, input.scopeType, scopeRefId);
+    await this.assertNoDuplicate(
+      input.householdId,
+      period.effectiveMonth,
+      input.scopeType,
+      scopeRefId,
+    );
 
     let created: schema.Budget | undefined;
     try {
@@ -156,6 +188,7 @@ export class BudgetService {
           scopeType: input.scopeType,
           scopeRefId,
           amount: input.amount,
+          effectiveMonth: period.effectiveMonth,
           createdBy: userId,
         })
         .returning();
@@ -187,6 +220,7 @@ export class BudgetService {
       userId,
       PRIVILEGED_ROLES,
     );
+    this.assertEditableMonth(fromEffectiveMonth(budget.effectiveMonth));
 
     const updates: Partial<schema.NewBudget> = { updatedAt: new Date() };
     if (input.name !== undefined) {
@@ -213,7 +247,128 @@ export class BudgetService {
   async delete(userId: string, id: string): Promise<void> {
     const budget = await this.loadBudget(id);
     await this.requireMembership(budget.householdId, userId, PRIVILEGED_ROLES);
+    this.assertEditableMonth(fromEffectiveMonth(budget.effectiveMonth));
     await this.db.delete(schema.budgets).where(eq(schema.budgets.id, id));
+  }
+
+  /**
+   * source month의 계획을 바로 다음 달로 한 트랜잭션에 복사한다.
+   * 같은 idempotencyKey 재시도는 최초 ID 집합을 돌려주고, 다른 요청이 target을 먼저
+   * 만들었으면 일부 행도 남기지 않은 채 409로 끝낸다.
+   */
+  async copy(
+    userId: string,
+    input: BudgetCopyCommand,
+  ): Promise<BudgetCopyResponse> {
+    await this.requireMembership(input.householdId, userId, PRIVILEGED_ROLES);
+    const source = this.resolvePeriod(input.sourceMonth);
+    const target = this.resolvePeriod(input.targetMonth);
+    if (addBudgetMonths(source.month, 1) !== target.month) {
+      throw new BadRequestException(
+        'targetMonth must be the month after sourceMonth',
+      );
+    }
+    this.assertEditableMonth(target.month);
+
+    const replay = await this.findCopyOperation(
+      input.householdId,
+      input.idempotencyKey,
+    );
+    if (replay) return this.copyResponse(replay, source.month, target.month);
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        const targetRows = await tx
+          .select({
+            scopeType: schema.budgets.scopeType,
+            scopeRefId: schema.budgets.scopeRefId,
+          })
+          .from(schema.budgets)
+          .where(
+            and(
+              eq(schema.budgets.householdId, input.householdId),
+              eq(schema.budgets.effectiveMonth, target.effectiveMonth),
+            ),
+          );
+        if (targetRows.length > 0) {
+          throw new ConflictException({
+            message: 'target month already has budgets',
+            conflicts: targetRows,
+          });
+        }
+
+        const sourceRows = await tx
+          .select()
+          .from(schema.budgets)
+          .where(
+            and(
+              eq(schema.budgets.householdId, input.householdId),
+              eq(schema.budgets.effectiveMonth, source.effectiveMonth),
+            ),
+          )
+          .orderBy(asc(schema.budgets.createdAt), asc(schema.budgets.id));
+        if (sourceRows.length === 0) {
+          throw new NotFoundException('source month has no budgets');
+        }
+
+        const copiedBudgetIds = sourceRows.map(() => randomUUID());
+        await tx.insert(schema.budgetCopyOperations).values({
+          householdId: input.householdId,
+          idempotencyKey: input.idempotencyKey,
+          sourceMonth: source.effectiveMonth,
+          targetMonth: target.effectiveMonth,
+          copiedBudgetIds,
+          copiedCount: copiedBudgetIds.length,
+          createdBy: userId,
+        });
+        await tx.insert(schema.budgets).values(
+          sourceRows.map((budget, index) => ({
+            id: copiedBudgetIds[index],
+            householdId: budget.householdId,
+            name: budget.name,
+            scopeType: budget.scopeType,
+            scopeRefId: budget.scopeRefId,
+            amount: budget.amount,
+            effectiveMonth: target.effectiveMonth,
+            period: budget.period,
+            currency: budget.currency,
+            createdBy: userId,
+          })),
+        );
+
+        return {
+          sourceMonth: source.month,
+          targetMonth: target.month,
+          copiedCount: copiedBudgetIds.length,
+          copiedBudgetIds,
+        };
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const concurrentReplay = await this.findCopyOperation(
+        input.householdId,
+        input.idempotencyKey,
+      );
+      if (concurrentReplay) {
+        return this.copyResponse(concurrentReplay, source.month, target.month);
+      }
+      const conflicts = await this.db
+        .select({
+          scopeType: schema.budgets.scopeType,
+          scopeRefId: schema.budgets.scopeRefId,
+        })
+        .from(schema.budgets)
+        .where(
+          and(
+            eq(schema.budgets.householdId, input.householdId),
+            eq(schema.budgets.effectiveMonth, target.effectiveMonth),
+          ),
+        );
+      throw new ConflictException({
+        message: 'target month already has budgets',
+        conflicts,
+      });
+    }
   }
 
   /* ---------------------------------------------------------------------- */
@@ -221,7 +376,7 @@ export class BudgetService {
   /* ---------------------------------------------------------------------- */
 
   /**
-   * Current-month net spend of a budget's scope, computed in SQL. Sums
+   * Selected-month net spend of a budget's scope, computed in SQL. Sums
    * `netAmount` over `approval` rows whose `approvedAt` lies in `[from, to)`,
    * honouring the visibility scope (§1.2). Scope filters: `member` →
    * `memberId`, `category` → `categoryId`, `card` → `cardId`; `household` adds
@@ -230,7 +385,7 @@ export class BudgetService {
   private async computeSpent(
     budget: schema.Budget,
     actorMemberId: string,
-    period: Period,
+    period: BudgetPeriod,
   ): Promise<number> {
     const conditions: SQL[] = [
       eq(schema.cardTransactions.householdId, budget.householdId),
@@ -251,7 +406,9 @@ export class BudgetService {
     switch (budget.scopeType) {
       case 'member':
         if (budget.scopeRefId) {
-          conditions.push(eq(schema.cardTransactions.memberId, budget.scopeRefId));
+          conditions.push(
+            eq(schema.cardTransactions.memberId, budget.scopeRefId),
+          );
         }
         break;
       case 'category':
@@ -263,7 +420,9 @@ export class BudgetService {
         break;
       case 'card':
         if (budget.scopeRefId) {
-          conditions.push(eq(schema.cardTransactions.cardId, budget.scopeRefId));
+          conditions.push(
+            eq(schema.cardTransactions.cardId, budget.scopeRefId),
+          );
         }
         break;
       case 'household':
@@ -444,7 +603,9 @@ export class BudgetService {
       return null;
     }
     if (!scopeRefId) {
-      throw new BadRequestException(`scopeRefId is required for ${scopeType} budgets`);
+      throw new BadRequestException(
+        `scopeRefId is required for ${scopeType} budgets`,
+      );
     }
     switch (scopeType) {
       case 'member':
@@ -463,14 +624,17 @@ export class BudgetService {
   }
 
   /**
-   * `(householdId, scopeType, scopeRefId)` 중복을 미리 잡아 **친절한 409 메시지**를
+   * `(householdId, effectiveMonth, scopeType, scopeRefId)` 중복을 미리 잡아 **친절한
+   * 409 메시지**를
    * 준다. 최종 권위는 DB다 — 이 조회와 insert 사이에는 직렬화 지점이 없어 동시 요청
    * 두 건은 둘 다 여기를 통과한다. household 스코프는 `scopeRefId`가 NULL이라 3열
-   * UNIQUE로는 막히지 않으므로 부분 유니크 인덱스(`budgets_household_scope_unique`,
-   * 0048)가 그 자리를 대신하고, 위반은 create()가 23505로 받아 같은 409로 변환한다.
+   * UNIQUE로는 막히지 않으므로 월 부분 유니크 인덱스
+   * (`budgets_household_month_scope_unique`, 0052)가 그 자리를 대신하고, 위반은
+   * create()가 23505로 받아 같은 409로 변환한다.
    */
   private async assertNoDuplicate(
     householdId: string,
+    effectiveMonth: string,
     scopeType: schema.Budget['scopeType'],
     scopeRefId: string | null,
   ): Promise<void> {
@@ -480,6 +644,7 @@ export class BudgetService {
       .where(
         and(
           eq(schema.budgets.householdId, householdId),
+          eq(schema.budgets.effectiveMonth, effectiveMonth),
           eq(schema.budgets.scopeType, scopeType),
           scopeRefId === null
             ? isNull(schema.budgets.scopeRefId)
@@ -569,20 +734,31 @@ export class BudgetService {
     return budget;
   }
 
-  /** Projects a single budget with its current-month spend/label. */
+  /** 한 달의 계획과 같은 달의 파생 실지출·참고 평균을 투영한다. */
   private async summarize(
     budget: schema.Budget,
     actorMemberId: string,
   ): Promise<BudgetSummary> {
-    const period = this.resolvePeriod(undefined);
-    const spent = await this.computeSpent(budget, actorMemberId, period);
+    const period = this.resolvePeriod(
+      fromEffectiveMonth(budget.effectiveMonth),
+    );
+    const [spent, threeMonthTotal] = await Promise.all([
+      this.computeSpent(budget, actorMemberId, period),
+      this.computeSpent(budget, actorMemberId, threeMonthPeriod(period)),
+    ]);
     const labels = await this.buildScopeLabels([budget]);
-    return this.toSummary(budget, spent, labels.get(budget.id) ?? '가족 전체');
+    return this.toSummary(
+      budget,
+      spent,
+      threeMonthAverage(threeMonthTotal),
+      labels.get(budget.id) ?? '가족 전체',
+    );
   }
 
   private toSummary(
     budget: schema.Budget,
     spent: number,
+    threeMonthAverageSpent: number,
     scopeLabel: string,
   ): BudgetSummary {
     const remaining = budget.amount - spent;
@@ -594,8 +770,10 @@ export class BudgetService {
       scopeType: budget.scopeType,
       scopeRefId: budget.scopeRefId,
       scopeLabel,
+      effectiveMonth: fromEffectiveMonth(budget.effectiveMonth),
       amount: budget.amount,
       spent,
+      threeMonthAverageSpent,
       remaining,
       usageRate,
       period: budget.period,
@@ -620,27 +798,56 @@ export class BudgetService {
    * used. Returns `[from, to)` UTC instants for the `[monthStart, nextMonth)`
    * range plus the normalized `YYYY-MM` label.
    */
-  private resolvePeriod(month: string | undefined): Period {
-    let year: number;
-    let monthIndex: number; // 0-based
-    if (month === undefined || month === '') {
-      const seoulNow = new Date(Date.now() + KST_OFFSET_MS);
-      year = seoulNow.getUTCFullYear();
-      monthIndex = seoulNow.getUTCMonth();
-    } else {
-      if (!MONTH_PATTERN.test(month)) {
-        throw new BadRequestException('month must be in YYYY-MM format');
-      }
-      year = Number(month.slice(0, 4));
-      monthIndex = Number(month.slice(5, 7)) - 1;
+  private resolvePeriod(month: string | undefined): BudgetPeriod {
+    try {
+      return resolveBudgetPeriod(month);
+    } catch {
+      throw new BadRequestException('month must be in YYYY-MM format');
     }
-    // Seoul wall-clock month start converted back to a UTC instant.
-    const from = new Date(Date.UTC(year, monthIndex, 1) - KST_OFFSET_MS);
-    // `Date.UTC` normalizes December (monthIndex+1 === 12) into the next year.
-    const to = new Date(Date.UTC(year, monthIndex + 1, 1) - KST_OFFSET_MS);
-    const normalized = `${year.toString().padStart(4, '0')}-${(monthIndex + 1)
-      .toString()
-      .padStart(2, '0')}`;
-    return { from, to, month: normalized };
+  }
+
+  /** 과거월 계획은 월 원장의 감사 기록이므로 어떤 mutation도 허용하지 않는다. */
+  private assertEditableMonth(month: string): void {
+    if (isPastBudgetMonth(month)) {
+      throw new BadRequestException('past month budgets are read-only');
+    }
+  }
+
+  /** 같은 가구 안의 복사 멱등 키를 찾는다. */
+  private async findCopyOperation(
+    householdId: string,
+    idempotencyKey: string,
+  ): Promise<schema.BudgetCopyOperation | undefined> {
+    const [operation] = await this.db
+      .select()
+      .from(schema.budgetCopyOperations)
+      .where(
+        and(
+          eq(schema.budgetCopyOperations.householdId, householdId),
+          eq(schema.budgetCopyOperations.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    return operation;
+  }
+
+  /** idempotencyKey를 다른 source/target에 재사용하면 기존 결과를 오인하지 않게 막는다. */
+  private copyResponse(
+    operation: schema.BudgetCopyOperation,
+    sourceMonth: string,
+    targetMonth: string,
+  ): BudgetCopyResponse {
+    if (
+      operation.sourceMonth !== toEffectiveMonth(sourceMonth) ||
+      operation.targetMonth !== toEffectiveMonth(targetMonth)
+    ) {
+      throw new ConflictException('idempotency key was used for another copy');
+    }
+    return {
+      sourceMonth,
+      targetMonth,
+      copiedCount: operation.copiedCount,
+      copiedBudgetIds: operation.copiedBudgetIds,
+    };
   }
 }

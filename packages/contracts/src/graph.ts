@@ -147,11 +147,19 @@ export const entityDetailSchema = z.object({
 export type EntityDetail = z.infer<typeof entityDetailSchema>;
 
 /**
+ * 커서 페이지네이션 응답 필드 — memory 목록과 같은 규약이다. 기존 `{ items }`
+ * 형태를 유지하고 `nextCursor`만 추가한다(null이면 마지막 페이지). 값은 불투명
+ * 문자열이므로 해석하지 말고 다음 요청의 `cursor=`에 그대로 돌려준다.
+ */
+const nextCursorSchema = z.string().nullable();
+
+/**
  * `GET /v1/graph/entities` — entities for a workspace. Optional `type` and `q`
  * (name ILIKE) filters are applied server-side (spec §6.2).
  */
 export const entityListResponseSchema = z.object({
   items: z.array(entitySummarySchema),
+  nextCursor: nextCursorSchema,
 });
 export type EntityListResponse = z.infer<typeof entityListResponseSchema>;
 
@@ -162,6 +170,7 @@ export type EntityListResponse = z.infer<typeof entityListResponseSchema>;
  */
 export const relationshipListResponseSchema = z.object({
   items: z.array(relationshipSummarySchema),
+  nextCursor: nextCursorSchema,
 });
 export type RelationshipListResponse = z.infer<typeof relationshipListResponseSchema>;
 

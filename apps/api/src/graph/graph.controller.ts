@@ -40,6 +40,7 @@ import {
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
 import { GraphService } from './graph.service';
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../memory/pagination';
 
 /* -------------------------------------------------------------------------- */
 /* DTOs                                                                       */
@@ -50,11 +51,33 @@ class RelationshipSupersedeDto extends createZodDto(
   relationshipSupersedeRequestSchema,
 ) {}
 
-/** `GET /v1/graph/entities?workspaceId=&type=&q=` — workspace required. */
+/**
+ * 목록 공통 페이지 파라미터(memory 컨트롤러와 같은 규약). 미지정 시 기본 상한이
+ * 걸리고, 상한 초과 요청은 조용히 자르지 않고 400으로 거절한다. 빈 문자열은
+ * "잘못된 값"이 아니라 "미지정"으로 본다.
+ */
+const emptyAsUndefined = (value: unknown): unknown =>
+  value === '' ? undefined : value;
+
+const paginationQueryShape = {
+  limit: z.preprocess(
+    emptyAsUndefined,
+    z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_PAGE_SIZE)
+      .default(DEFAULT_PAGE_SIZE),
+  ),
+  cursor: z.preprocess(emptyAsUndefined, z.string().min(1).optional()),
+};
+
+/** `GET /v1/graph/entities?workspaceId=&type=&q=&limit=&cursor=` — workspace required. */
 const entityListQuerySchema = z.object({
   workspaceId: z.string().uuid(),
   type: entityTypeSchema.optional(),
   q: z.string().optional(),
+  ...paginationQueryShape,
 });
 class EntityListQueryDto extends createZodDto(entityListQuerySchema) {}
 
@@ -69,8 +92,8 @@ const entityDetailQuerySchema = z.object({
 class EntityDetailQueryDto extends createZodDto(entityDetailQuerySchema) {}
 
 /**
- * `GET /v1/graph/relationships?workspaceId=&entityId=&type=&current=&asOf=` —
- * workspace required. `current` is a string flag; `asOf` is an ISO datetime.
+ * `GET /v1/graph/relationships?workspaceId=&entityId=&type=&current=&asOf=&limit=&cursor=`
+ * — workspace required. `current` is a string flag; `asOf` is an ISO datetime.
  */
 const relationshipListQuerySchema = z.object({
   workspaceId: z.string().uuid(),
@@ -78,6 +101,7 @@ const relationshipListQuerySchema = z.object({
   type: relationshipTypeSchema.optional(),
   current: z.enum(['true', 'false']).optional(),
   asOf: z.string().datetime().optional(),
+  ...paginationQueryShape,
 });
 class RelationshipListQueryDto extends createZodDto(
   relationshipListQuerySchema,
@@ -114,18 +138,19 @@ export class GraphController {
   /* Entities                                                                */
   /* ---------------------------------------------------------------------- */
 
-  /** GET /v1/graph/entities?workspaceId=&type=&q= — list entities (owner-only). */
+  /** GET /v1/graph/entities?workspaceId=&type=&q=&limit=&cursor= — list entities (owner-only). */
   @Get('entities')
-  async listEntities(
+  listEntities(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: EntityListQueryDto,
   ): Promise<EntityListResponse> {
-    const items = await this.graphService.listEntities(user.userId, {
+    return this.graphService.listEntities(user.userId, {
       workspaceId: query.workspaceId,
       type: query.type,
       q: query.q,
+      limit: query.limit,
+      cursor: query.cursor,
     });
-    return { items };
   }
 
   /** GET /v1/graph/entities/:id?current=&asOf= — entity + 1-hop local graph (owner-only). */
@@ -145,20 +170,21 @@ export class GraphController {
   /* Relationships                                                           */
   /* ---------------------------------------------------------------------- */
 
-  /** GET /v1/graph/relationships?workspaceId=&entityId=&type=&current=&asOf= — list (owner-only). */
+  /** GET /v1/graph/relationships?workspaceId=&entityId=&type=&current=&asOf=&limit=&cursor= — list (owner-only). */
   @Get('relationships')
-  async listRelationships(
+  listRelationships(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: RelationshipListQueryDto,
   ): Promise<RelationshipListResponse> {
-    const items = await this.graphService.listRelationships(user.userId, {
+    return this.graphService.listRelationships(user.userId, {
       workspaceId: query.workspaceId,
       entityId: query.entityId,
       type: query.type,
       current: query.current === 'true',
       asOf: query.asOf,
+      limit: query.limit,
+      cursor: query.cursor,
     });
-    return { items };
   }
 
   /** POST /v1/graph/relationships/:id/supersede — explicitly replace a relationship (owner-only). */

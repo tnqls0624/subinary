@@ -49,6 +49,42 @@ Procedure/Fact)으로 추출하고, 사용자가 **검토 → 승인/거부**해
   있으면 `slack_message`(sourceRefId=threadTs)를 넣어 원문까지 역추적한다. 직접 생성은 `manual`.
 - **로그 비노출(PRD §11)**: `subject`/`content`/PII/secret 을 운영 로그에 남기지 않는다(개수/식별자만).
 
+### 커서 페이지네이션 (목록 공통)
+
+`GET /v1/memory/candidates` · `GET /v1/memory/memories` 는 **한 번에 한 페이지만** 돌려준다.
+`GET /v1/graph/entities` · `GET /v1/graph/relationships` 도 같은 규약이다.
+
+| 필드 | 필수 | 규칙 |
+|---|---|---|
+| `limit` | 선택 | 1~200 정수. **미지정 시 50**(무제한 아님). 200 초과는 조용히 자르지 않고 `400`. |
+| `cursor` | 선택 | 직전 응답의 `nextCursor` 를 그대로 전달. 불투명 문자열이라 해석하지 않는다. |
+
+응답에는 `nextCursor` 가 함께 온다. `null` 이면 마지막 페이지다.
+
+```bash
+curl -s 'http://localhost:3001/v1/memory/memories?workspaceId=0a1b2c3d-…&limit=50' \
+  -H 'Authorization: Bearer <accessToken>'
+# → { "items": [ … ], "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2…" }
+
+curl -s 'http://localhost:3001/v1/memory/memories?workspaceId=0a1b2c3d-…&limit=50&cursor=eyJjcmVhdGVkQXQiOiIyMDI2…' \
+  -H 'Authorization: Bearer <accessToken>'
+```
+
+- **offset 이 아니라 keyset**이다. offset 은 깊은 페이지에서 앞의 N행을 매번 버려 느려지고, 목록이
+  시간순이라 페이지를 넘기는 중 행이 삽입되면 같은 행을 두 번 주거나 건너뛴다.
+- **정렬 키 끝에는 항상 `id` 가 붙는다.** `extractedAt`/`createdAt`/`validFrom` 은 유일하지 않아
+  (한 추출 잡이 여러 후보를 같은 시각으로 기록한다) tie-breaker 없이는 동일 timestamp 묶음이 페이지
+  경계에서 통째로 누락되거나 중복된다.
+- **`current`/`asOf` 같은 시간 필터와 독립**이다. 커서 조건은 정렬 키에만 걸리므로 같은 필터를
+  유지하는 한 페이지를 넘겨도 모집단이 바뀌지 않는다. 페이지를 넘기는 도중 필터를 바꾸면 커서를
+  버리고 처음부터 다시 시작해야 한다.
+- 위조·손상된 커서, 다른 목록의 커서는 `400` 이다(조용히 첫 페이지로 되돌리면 클라이언트가 무한
+  루프에 빠진다).
+- **정렬 키**: 후보 `extractedAt desc, id desc` · 기억 `createdAt desc, id desc` ·
+  엔티티 `type asc, name asc, id asc` · 관계 `validFrom asc(NULLS LAST), id asc`.
+- `GET /v1/graph/timeline` 과 `GET /v1/graph/entities/:id`(1-hop 이웃)는 **단일 엔티티 범위**라
+  페이지네이션이 없다. 허브 엔티티의 차수가 커지면 그때 같은 규약으로 확장한다.
+
 ### 열거형(enum)
 
 | 스키마 | 값 |
@@ -100,6 +136,7 @@ curl -s -X POST http://localhost:3001/v1/memory/extract \
 |---|---|---|
 | `workspaceId` | ✅ | `workspaces.id`(uuid). 요청자 소유. |
 | `status` | 선택 | `pending` · `approved` · `rejected` 필터. |
+| `limit` · `cursor` | 선택 | [커서 페이지네이션](#커서-페이지네이션-목록-공통) 참조. 기본 50건. |
 
 ```bash
 curl -s 'http://localhost:3001/v1/memory/candidates?workspaceId=0a1b2c3d-…&status=pending' \
@@ -124,7 +161,8 @@ curl -s 'http://localhost:3001/v1/memory/candidates?workspaceId=0a1b2c3d-…&sta
       "sourceRefId": "1721400000.000100",
       "extractedAt": "2026-07-16T02:00:00.000Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
 
@@ -222,6 +260,7 @@ soft delete 되지 않은 기억을 최신순(`createdAt` 내림차순)으로 �
 | `status` | 선택 | `memoryStatus` 필터. |
 | `current` | 선택 | `'true'`/`'false'`. `true` → `approved` AND (`validUntil` null 또는 미래)만. |
 | `asOf` | 선택 | ISO datetime. 그 시점 유효(`validFrom<=asOf` AND (`validUntil` null 또는 `>asOf`))만. |
+| `limit` · `cursor` | 선택 | [커서 페이지네이션](#커서-페이지네이션-목록-공통) 참조. 기본 50건. |
 
 ```bash
 # 현재 유효한 기억만
@@ -236,7 +275,7 @@ curl -s 'http://localhost:3001/v1/memory/memories?workspaceId=0a1b2c3d-…&asOf=
 ### 응답 `200 OK` (`memoryListResponseSchema`)
 
 ```json
-{ "items": [ /* memorySummary … */ ] }
+{ "items": [ /* memorySummary … */ ], "nextCursor": null }
 ```
 
 > `current` 와 `asOf` 는 애플리케이션 로직(SQL WHERE)으로 판정한다(PRD §3.3). `asOf` 는 status 를

@@ -20,10 +20,13 @@ import { Loader2, MoreHorizontal, Plus, Wallet } from "lucide-react";
 
 import type {
   BudgetCreateRequest,
+  BudgetCopyRequest,
+  BudgetCopyResponse,
   BudgetScopeType,
   BudgetSummary,
   BudgetUpdateRequest,
 } from "@family/contracts";
+import { budgetCopyResponseSchema } from "@family/contracts";
 
 import {
   AlertDialog,
@@ -62,7 +65,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MonthSwitcher, UsageBar } from "@/components/widgets";
-import { ApiError, api } from "@/lib/api-client";
+import { API_BASE_URL, ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { budgetTransactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
@@ -86,6 +89,40 @@ const SCOPE_TYPE_LABEL: Record<BudgetScopeType, string> = {
   category: "카테고리",
   card: "카드",
 };
+
+/**
+ * 월 계획 복사는 일반 JSON 요청과 달리 `Idempotency-Key` 헤더가 계약의
+ * 일부다. 성공 응답도 계약 스키마로 다시 검증해 잘못된 복사 결과를 화면에
+ * 확정처럼 보이지 않는다.
+ */
+async function copyBudgetPlan(
+  accessToken: string | null,
+  body: BudgetCopyRequest,
+  idempotencyKey: string
+): Promise<BudgetCopyResponse> {
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+    "idempotency-key": idempotencyKey,
+  };
+  if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+  const response = await fetch(`${API_BASE_URL}/v1/budgets/copy`, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const responseBody: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      "다음 달 계획을 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+      responseBody
+    );
+  }
+  return budgetCopyResponseSchema.parse(responseBody);
+}
 
 const SCOPE_OPTIONS: ReadonlyArray<Option> = (
   ["household", "member", "category", "card"] as const
@@ -125,7 +162,8 @@ function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
   }
   return (
     <p className="text-muted-foreground text-[13px]">
-      {formatMoney(budget.amount - budget.spent, budget.currency)} 더 쓸 수 있어요
+      {formatMoney(budget.amount - budget.spent, budget.currency)} 더 쓸 수
+      있어요
     </p>
   );
 }
@@ -143,17 +181,26 @@ export default function BudgetsPage() {
   // 하단 탭으로 오갈 때 이전 선택이 남아 있으면 "왜 지난달이 보이지" 가 된다.
   const [month, setMonth] = useState(thisMonth);
   const isCurrentMonth = month === thisMonth;
+  const isPastMonth = month < thisMonth;
+  const isFutureMonth = month > thisMonth;
   // 과거월 예산은 **읽기 전용**이다. 예산액을 지금 바꾸면 그 달 달성률이 소급해서
   // 달라지는데, 그건 기록이 아니라 조작이다(ADR-0026).
-  const canEdit = canManage && isCurrentMonth;
+  const canEdit = canManage && !isPastMonth;
 
   const budgetsQuery = useBudgets(month);
-  // 이전 달 실지출 — 현재월 수정 다이얼로그의 보조 문구에만 쓴다(자동 입력은 하지 않음).
-  const prevBudgetsQuery = useBudgets(addMonths(month, -1));
   const monthsQuery = useAnalyticsMonths();
   const availableMonths = useMemo(
-    () => monthsQuery.data?.items.map((i) => i.month),
-    [monthsQuery.data],
+    () =>
+      monthsQuery.data
+        ? [
+            ...new Set([
+              ...monthsQuery.data.items.map((i) => i.month),
+              thisMonth,
+              addMonths(thisMonth, 1),
+            ]),
+          ].sort()
+        : undefined,
+    [monthsQuery.data, thisMonth]
   );
   const membersQuery = useHouseholdMembers();
   const categoriesQuery = useCategoryList();
@@ -176,6 +223,12 @@ export default function BudgetsPage() {
   // --- 삭제 확인 상태 -------------------------------------------------------
   const [deleteTarget, setDeleteTarget] = useState<BudgetSummary | null>(null);
 
+  // --- 다음 달 명시적 복사 -------------------------------------------------
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyIdempotencyKey, setCopyIdempotencyKey] = useState<string | null>(
+    null
+  );
+
   const invalidateBudgets = () =>
     queryClient.invalidateQueries({ queryKey: ["budgets", householdId] });
 
@@ -194,9 +247,7 @@ export default function BudgetsPage() {
 
   const updateMutation = useMutation({
     mutationFn: (input: { id: string; body: BudgetUpdateRequest }) =>
-      authedFetch((token) =>
-        api.budgets.update(token, input.id, input.body),
-      ),
+      authedFetch((token) => api.budgets.update(token, input.id, input.body)),
     onSuccess: () => {
       void invalidateBudgets();
       setEditing(null);
@@ -207,6 +258,19 @@ export default function BudgetsPage() {
     mutationFn: (id: string) =>
       authedFetch((token) => api.budgets.delete(token, id)),
     onSuccess: () => void invalidateBudgets(),
+  });
+
+  const copyMutation = useMutation({
+    mutationFn: (input: { body: BudgetCopyRequest; idempotencyKey: string }) =>
+      authedFetch((token) =>
+        copyBudgetPlan(token, input.body, input.idempotencyKey)
+      ),
+    onSuccess: (result) => {
+      void invalidateBudgets();
+      setCopyOpen(false);
+      setCopyIdempotencyKey(null);
+      setMonth(result.targetMonth);
+    },
   });
 
   // 대상(scopeRef) 옵션은 scopeType에 따라 달라진다.
@@ -255,6 +319,7 @@ export default function BudgetsPage() {
       householdId,
       scopeType,
       amount: parsedAmount,
+      effectiveMonth: month,
       ...(name.trim() !== "" ? { name: name.trim() } : {}),
       ...(scopeType !== "household" ? { scopeRefId } : {}),
     };
@@ -291,15 +356,25 @@ export default function BudgetsPage() {
     setDeleteTarget(null);
   }
 
-  const items = budgetsQuery.data?.items ?? [];
+  function openCopy() {
+    setCopyIdempotencyKey(crypto.randomUUID());
+    copyMutation.reset();
+    setCopyOpen(true);
+  }
 
-  // 수정 중인 예산의 **직전 달** 실지출. 같은 예산 id가 그 달에도 있었을 때만 나온다
-  // (그 달에 없던 예산이면 비교 대상이 없으므로 문구를 숨긴다).
-  const prevMonthSpent =
-    editing != null
-      ? (prevBudgetsQuery.data?.items.find((b) => b.id === editing.id)?.spent ??
-        null)
-      : null;
+  function confirmCopy() {
+    if (!householdId || !copyIdempotencyKey) return;
+    copyMutation.mutate({
+      body: {
+        householdId,
+        sourceMonth: month,
+        targetMonth: addMonths(month, 1),
+      },
+      idempotencyKey: copyIdempotencyKey,
+    });
+  }
+
+  const items = budgetsQuery.data?.items ?? [];
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -314,7 +389,9 @@ export default function BudgetsPage() {
           <p className="text-muted-foreground text-sm">
             {isCurrentMonth
               ? "이번 달 얼마나 썼는지 한눈에 확인해요"
-              : "지난 달 기록이에요"}
+              : isFutureMonth
+              ? "앞으로 쓸 계획을 미리 세워요"
+              : "그 달에 세운 계획을 그대로 확인해요"}
           </p>
         </div>
         <div className="flex items-center justify-between gap-1 sm:shrink-0">
@@ -354,7 +431,7 @@ export default function BudgetsPage() {
               <p className="text-destructive text-sm" role="alert">
                 {errorMessage(
                   budgetsQuery.error,
-                  "예산을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+                  "예산을 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
                 )}
               </p>
             </CardContent>
@@ -366,12 +443,14 @@ export default function BudgetsPage() {
                 <Wallet className="size-6" aria-hidden="true" />
               </span>
               <p className="mt-1 text-[15px] font-semibold">
-                아직 예산이 없어요
+                {isPastMonth ? "예산 기록이 없어요" : "아직 예산이 없어요"}
               </p>
               <p className="text-muted-foreground text-sm">
-                {isCurrentMonth
+                {isPastMonth
+                  ? "월 원장을 도입하기 전이거나 그 달에 만든 계획이 없어요"
+                  : isCurrentMonth
                   ? "예산을 만들어 두면 넘치기 전에 미리 알 수 있어요"
-                  : "그 달에는 예산이 없었어요"}
+                  : "다음 달 계획을 미리 만들어 둘 수 있어요"}
               </p>
               {/* 과거월에서는 CTA도 권한 안내도 띄우지 않는다 — 그 달에 예산이
                   없었다는 사실만 남기면 되고, 지금 만들 수 있는 것은 이번 달 예산이다. */}
@@ -396,72 +475,76 @@ export default function BudgetsPage() {
             const spentHref = budgetTransactionsHref(
               budget.scopeType,
               budget.scopeRefId,
-              month,
+              month
             );
             return (
-            <Card key={budget.id}>
-              <CardContent className="flex flex-col gap-3">
-                <UsageBar
-                  label={budget.name ?? budget.scopeLabel}
-                  spent={budget.spent}
-                  amount={budget.amount}
-                  currency={budget.currency}
-                  usageRate={budget.usageRate}
-                  meta={
-                    budget.name
-                      ? `${SCOPE_TYPE_LABEL[budget.scopeType]} · ${budget.scopeLabel}`
-                      : SCOPE_TYPE_LABEL[budget.scopeType]
-                  }
-                />
-                <BudgetStatusLine budget={budget} />
-                {/* 주 액션은 '어디서 썼는지 보기'다. 예산을 넘었다고 알린 뒤
+              <Card key={budget.id}>
+                <CardContent className="flex flex-col gap-3">
+                  <UsageBar
+                    label={budget.name ?? budget.scopeLabel}
+                    spent={budget.spent}
+                    amount={budget.amount}
+                    currency={budget.currency}
+                    usageRate={budget.usageRate}
+                    meta={
+                      budget.name
+                        ? `${SCOPE_TYPE_LABEL[budget.scopeType]} · ${
+                            budget.scopeLabel
+                          }`
+                        : SCOPE_TYPE_LABEL[budget.scopeType]
+                    }
+                  />
+                  <BudgetStatusLine budget={budget} />
+                  {/* 주 액션은 '어디서 썼는지 보기'다. 예산을 넘었다고 알린 뒤
                     줄 수 있는 게 '예산 늘리기'와 '예산 삭제'뿐이면 가계부가
                     최악의 조언을 하는 셈이다 — 수정·삭제는 ⋯로 내린다.
                     딥링크에는 지금 보고 있는 달을 함께 싣는다(이 화면의 월은
                     URL이 아니라 로컬 state라 그냥 두면 거래 화면이 이번 달을 연다). */}
-                <div className="flex items-center gap-2">
-                  {spentHref ? (
-                    <Button
-                      asChild
-                      variant="tint"
-                      size="sm"
-                      className="h-11 flex-1"
-                    >
-                      <Link href={spentHref}>어디서 썼는지 보기</Link>
-                    </Button>
-                  ) : (
-                    <span className="flex-1" />
-                  )}
-                  {canEdit ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 shrink-0"
-                          aria-label={`${budget.name ?? budget.scopeLabel} 예산 관리 메뉴`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => openEdit(budget)}>
-                          예산 수정
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          disabled={deleteMutation.isPending}
-                          onSelect={() => setDeleteTarget(budget)}
-                        >
-                          예산 삭제
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
+                  <div className="flex items-center gap-2">
+                    {spentHref ? (
+                      <Button
+                        asChild
+                        variant="tint"
+                        size="sm"
+                        className="h-11 flex-1"
+                      >
+                        <Link href={spentHref}>어디서 썼는지 보기</Link>
+                      </Button>
+                    ) : (
+                      <span className="flex-1" />
+                    )}
+                    {canEdit ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-11 shrink-0"
+                            aria-label={`${
+                              budget.name ?? budget.scopeLabel
+                            } 예산 관리 메뉴`}
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => openEdit(budget)}>
+                            예산 수정
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={deleteMutation.isPending}
+                            onSelect={() => setDeleteTarget(budget)}
+                          >
+                            예산 삭제
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
             );
           })
         )}
@@ -470,7 +553,7 @@ export default function BudgetsPage() {
           <p className="text-destructive text-sm" role="alert">
             {errorMessage(
               deleteMutation.error,
-              "예산을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.",
+              "예산을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요."
             )}
           </p>
         ) : null}
@@ -480,7 +563,101 @@ export default function BudgetsPage() {
             예산 만들기와 수정은 가족의 소유자나 관리자가 할 수 있어요
           </p>
         ) : null}
+
+        {canManage && !isPastMonth && items.length > 0 ? (
+          <Card>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-semibold">
+                  {formatMonth(addMonths(month, 1))} 계획을 만들까요?
+                </p>
+                <p className="text-muted-foreground text-[13px]">
+                  지금 계획을 복사한 뒤 다음 달 금액을 따로 조정할 수 있어요
+                </p>
+              </div>
+              <Button type="button" variant="tint" onClick={openCopy}>
+                다음 달 계획 만들기
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
       </section>
+
+      {/* 다음 달 복사 확인 -------------------------------------------------- */}
+      <Dialog
+        open={copyOpen}
+        onOpenChange={(open) => {
+          if (!open && !copyMutation.isPending) {
+            setCopyOpen(false);
+            setCopyIdempotencyKey(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>다음 달 계획을 만들까요?</DialogTitle>
+            <DialogDescription>
+              {formatMonth(month)} 계획 {items.length}개를{" "}
+              {formatMonth(addMonths(month, 1))}로 복사해요. 자동 이월되지는
+              않아요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {items.map((budget) => (
+              <div
+                key={budget.id}
+                className="border-border flex items-start justify-between gap-4 rounded-xl border p-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {budget.name ?? budget.scopeLabel}
+                  </p>
+                  <p className="text-muted-foreground text-[12px]">
+                    {formatMonth(month)} 실지출{" "}
+                    {formatMoney(budget.spent, budget.currency)} · 최근 3개월
+                    평균{" "}
+                    {formatMoney(
+                      budget.threeMonthAverageSpent,
+                      budget.currency
+                    )}
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold tabular-nums">
+                  {formatMoney(budget.amount, budget.currency)}
+                </p>
+              </div>
+            ))}
+          </div>
+          {copyMutation.isError ? (
+            <p className="text-destructive text-sm" role="alert">
+              {errorMessage(
+                copyMutation.error,
+                "다음 달 계획을 만들지 못했어요. 잠시 후 다시 시도해 주세요."
+              )}
+            </p>
+          ) : null}
+          <DialogFooter className="flex-col sm:flex-col">
+            <Button
+              type="button"
+              size="lg"
+              className="w-full"
+              disabled={copyMutation.isPending}
+              onClick={confirmCopy}
+            >
+              {copyMutation.isPending ? "복사하는 중…" : "계획 복사하기"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              disabled={copyMutation.isPending}
+              onClick={() => setCopyOpen(false)}
+            >
+              취소
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 생성 다이얼로그 ---------------------------------------------------- */}
       <Dialog
@@ -572,7 +749,7 @@ export default function BudgetsPage() {
               <p className="text-destructive text-sm" role="alert">
                 {errorMessage(
                   createMutation.error,
-                  "예산을 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+                  "예산을 만들지 못했어요. 잠시 후 다시 시도해 주세요."
                 )}
               </p>
             ) : null}
@@ -613,11 +790,7 @@ export default function BudgetsPage() {
                 : ""}
             </DialogDescription>
           </DialogHeader>
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={onUpdate}
-            noValidate
-          >
+          <form className="flex flex-col gap-4" onSubmit={onUpdate} noValidate>
             <div className="flex flex-col gap-2">
               <Label htmlFor="edit-budget-name">예산 이름 (선택)</Label>
               <Input
@@ -642,13 +815,16 @@ export default function BudgetsPage() {
                 value={editAmount}
                 onChange={(e) => setEditAmount(e.target.value)}
               />
-              {/* 지난달 실지출을 근거로 보여준다. 값을 자동으로 채우지는 않는다 —
-                  "지난달만큼 쓰겠다"가 사용자의 의도라는 근거가 없다. */}
-              {prevMonthSpent != null ? (
+              {/* 실지출 평균은 거래에서 다시 계산한 참고값이다. 계획 금액을 자동으로
+                  바꾸지 않는다 — 과거 소비가 다음 계획의 의도라는 근거는 없다. */}
+              {editing ? (
                 <p className="text-muted-foreground text-[13px]">
-                  {formatMonth(addMonths(month, -1))} 실지출은{" "}
-                  {formatMoney(prevMonthSpent, editing?.currency ?? "KRW")}
-                  이었어요
+                  최근 3개월 실지출 평균은{" "}
+                  {formatMoney(
+                    editing.threeMonthAverageSpent,
+                    editing.currency
+                  )}
+                  이에요
                 </p>
               ) : null}
             </div>
@@ -661,7 +837,7 @@ export default function BudgetsPage() {
               <p className="text-destructive text-sm" role="alert">
                 {errorMessage(
                   updateMutation.error,
-                  "수정 내용을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.",
+                  "수정 내용을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."
                 )}
               </p>
             ) : null}
@@ -696,7 +872,9 @@ export default function BudgetsPage() {
             <AlertDialogTitle>이 예산을 삭제할까요?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `'${deleteTarget.name ?? deleteTarget.scopeLabel}' 예산이 목록에서 사라져요. 기록된 거래 내역은 그대로 남아요.`
+                ? `'${
+                    deleteTarget.name ?? deleteTarget.scopeLabel
+                  }' 예산이 목록에서 사라져요. 기록된 거래 내역은 그대로 남아요.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

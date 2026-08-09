@@ -2,11 +2,27 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · AI 도우미 (/ai)
  *
- * 자연어 가계부 질의 전용 대화 화면. 대시보드의 스크롤 피드에서 입력창을 분리해
- * "집중해서 대화하는" 성격에 맞는 전용 surface로 제공한다.
- *  - 빈 상태: 인사 + 추천 질문 칩(탭 → 바로 질문).
- *  - 대화: 질문(오른쪽)·답변(왼쪽) 말풍선 스택, 최신이 아래.
- *  - 입력: 헤더~탭바 사이를 채우는 fixed 패널의 하단(탭바에 밀착).
+ * 두 범위(dual-mode)의 대화 화면이다.
+ *  - `금융`: 자연어 가계부 질의(`POST /v1/ai/finance-query`).
+ *  - `업무 기억`: 가져온 Slack 기록 기반 질의(`POST /v1/ai/work-query`).
+ *    답변에는 **채널·시각·스니펫 출처**가 반드시 따라붙는다. 출처 없는 업무
+ *    답변은 내보내지 않는다(서버가 근거 없으면 `refused`를 준다).
+ *
+ * ## 정직함이 이 화면의 설계 원칙이다
+ * 1) **못 하는 걸 할 수 있다고 말하지 않는다.** 예전 빈 상태는 "무엇이든
+ *    물어보세요"였는데 실제로는 지출 집계만 답한다. 카피를 실제 능력으로 줄였다.
+ * 2) **미지원 질문에 다른 답을 대신 주지 않는다.** 서버가 `refused`를 주면 그대로
+ *    "아직 못 답해요 + 이런 건 물어보실 수 있어요"로 보여 준다. 오류 스타일(빨강)로
+ *    그리지 않는다 — 거부는 실패가 아니라 정직한 답이다.
+ * 3) **없는 데이터를 있는 척하지 않는다.** 업무 기억은 진입 시
+ *    `GET /v1/slack/workspaces`를 먼저 조회한다. 0개면 가짜 예시 질문이나 가짜
+ *    최근 기록 대신 "가져온 Slack 기록이 없습니다"를 명시한다. 업로드 동선은
+ *    두지 않는다 — 서버는 Slack export ZIP을 처리하지 못하고(단일 JSON 번들만,
+ *    `docs/api/slack.md` §1) 진행 상태 조회 API도 없어, 파일 선택기를 열면
+ *    사용자가 실패를 이해할 수 없는 자리에 세우는 셈이다.
+ * 4) **소유자 경계.** 워크스페이스 목록은 서버가 소유자 본인 것만 준다(PRD §26).
+ *    가족 구성원은 이름도 message count도 받지 못하고 빈 배열을 받으므로, 이
+ *    화면에서도 자연히 "가져온 기록 없음"으로 보인다.
  *
  * 레이아웃: 문서 흐름(main pt/pb)에 의존하는 높이 calc 대신 fixed 패널로
  * 헤더 아래~탭바 위를 정확히 채운다(globals.css의 --app-header-h/--app-tabbar-h와
@@ -16,12 +32,16 @@
  * 폴백(native.ts)으로 패널 하단을 키보드 위로 끌어올린다.
  * 답변 금액은 서버 SQL 집계 근거이며 LLM이 지어내지 않는다(백엔드 계약).
  * ------------------------------------------------------------------------- */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Send, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import type { FinanceQueryResponse } from "@family/contracts";
+import type {
+  Citation,
+  FinanceQueryResponse,
+  WorkQueryResponse,
+} from "@family/contracts";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,11 +50,19 @@ import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
 import { cn } from "@/lib/utils";
 
-const SUGGESTIONS = [
+/** 대화 범위. 서버 엔드포인트·근거 출처가 완전히 다르다. */
+type Scope = "finance" | "work";
+
+/**
+ * 금융 추천 질문 — 전부 실제로 답할 수 있는 형태만 둔다.
+ * (예전에 있던 "지난달이랑 비교해줘"는 기간 비교 기능이 없어 지금은 거부된다.
+ * 답하지 못할 질문을 화면이 권하면 사용자는 두 번 속는다.)
+ */
+const FINANCE_SUGGESTIONS = [
   "이번 달 총 지출 얼마야?",
-  "카페에 얼마 썼어?",
-  "지난달이랑 비교해줘",
-  "이번 달 식비 얼마야?",
+  "이번 달 식비 얼마 썼어?",
+  "이번 달 어디서 제일 많이 썼어?",
+  "지난달 카페 얼마 썼어?",
 ];
 
 /** 이 거리(px) 이내면 '바닥에 붙어 있음'으로 간주 — 자동 스크롤 유지 판단 기준. */
@@ -42,14 +70,23 @@ const NEAR_BOTTOM_PX = 80;
 
 interface Turn {
   id: number;
+  scope: Scope;
   question: string;
   answer?: string;
+  /** 서버가 "답할 근거가 없다"고 한 경우(오류 아님). */
+  refused?: boolean;
+  /** 거부와 함께 제시하는 "대신 이렇게 물어보세요". */
+  suggestions?: string[];
+  /** 업무 답변의 출처(채널·시각·스니펫). 업무 답변은 항상 하나 이상 있다. */
+  citations?: Citation[];
+  /** 네트워크/서버 오류 — 이때만 오류 스타일로 그린다. */
   error?: boolean;
 }
 
 export default function AiPage() {
   const { authedFetch } = useAuth();
   const { householdId } = useHousehold();
+  const [scope, setScope] = useState<Scope>("finance");
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,7 +97,18 @@ export default function AiPage() {
   const atBottomRef = useRef(true);
   const prevTurnCount = useRef(0);
 
-  const mutation = useMutation({
+  // 업무 기억 범위를 열 때만 조회한다 — 금융만 쓰는 사용자에게 불필요한 요청을
+  // 만들지 않는다. 소유자가 아니면 서버가 빈 배열을 준다(PRD §26).
+  const workspacesQuery = useQuery({
+    queryKey: ["slack", "workspaces"],
+    queryFn: () => authedFetch((token) => api.slack.listWorkspaces(token)),
+    enabled: scope === "work",
+    staleTime: 60_000,
+  });
+  const workspaces = workspacesQuery.data ?? [];
+  const workspace = workspaces[0];
+
+  const financeMutation = useMutation({
     mutationFn: (question: string) =>
       authedFetch((token) =>
         api.ai.financeQuery(token, {
@@ -69,6 +117,13 @@ export default function AiPage() {
         }),
       ),
   });
+
+  const workMutation = useMutation({
+    mutationFn: (vars: { workspaceId: string; question: string }) =>
+      authedFetch((token) => api.ai.workQuery(token, vars)),
+  });
+
+  const pending = financeMutation.isPending || workMutation.isPending;
 
   // 새 질문 추가 → 무조건 바닥으로(사용자 액션). 답변 갱신 → 사용자가 위로
   // 스크롤해 읽는 중이면 강제로 끌어내리지 않고, 바닥 근처였을 때만 따라간다.
@@ -104,15 +159,25 @@ export default function AiPage() {
 
   async function ask(question: string) {
     const q = question.trim();
-    if (!q || !householdId || mutation.isPending) return;
+    if (!q || pending) return;
+    if (scope === "finance" && !householdId) return;
+    if (scope === "work" && !workspace) return;
+
     const id = nextId.current++;
-    setTurns((prev) => [...prev, { id, question: q }]);
+    const asked = scope;
+    setTurns((prev) => [...prev, { id, scope: asked, question: q }]);
     setInput("");
     try {
-      const res: FinanceQueryResponse = await mutation.mutateAsync(q);
-      setTurns((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, answer: res.answer } : t)),
-      );
+      const patch: Partial<Turn> =
+        asked === "finance"
+          ? financeTurn(await financeMutation.mutateAsync(q))
+          : workTurn(
+              await workMutation.mutateAsync({
+                workspaceId: workspace!.workspaceId,
+                question: q,
+              }),
+            );
+      setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : "답변을 가져오지 못했어요.";
@@ -128,7 +193,18 @@ export default function AiPage() {
     ask(input);
   }
 
+  /** 범위를 바꾸면 대화를 비운다 — 근거가 다른 답변이 한 줄에 섞이면 오해가 된다. */
+  function switchScope(next: Scope) {
+    if (next === scope) return;
+    setScope(next);
+    setTurns([]);
+    setInput("");
+  }
+
   const empty = turns.length === 0;
+  const workReady = scope === "work" && workspace !== undefined;
+  const workBlocked =
+    scope === "work" && !workspacesQuery.isPending && workspace === undefined;
 
   return (
     // fixed 패널: 헤더 아래(top)~탭바 위(bottom)를 채운다. 문서 흐름 밖이라
@@ -142,6 +218,36 @@ export default function AiPage() {
       className="bg-background fixed inset-x-0 top-[var(--app-header-h)] bottom-[max(var(--app-tabbar-h),var(--kb-inset))] z-10"
     >
       <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-4">
+        {/* 범위 선택 — 어떤 근거로 답하는지가 바뀌므로 항상 보이게 둔다. */}
+        <div
+          role="tablist"
+          aria-label="질문 범위"
+          className="bg-muted mt-3 flex shrink-0 gap-1 rounded-xl p-1"
+        >
+          {(
+            [
+              { key: "finance", label: "금융" },
+              { key: "work", label: "업무 기억" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={scope === tab.key}
+              onClick={() => switchScope(tab.key)}
+              className={cn(
+                "h-9 flex-1 rounded-lg text-sm font-medium transition-colors",
+                scope === tab.key
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground",
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {/* 대화 영역(스크롤) — overscroll-contain: 끝 바운스가 바디로 번지지 않게 */}
         <div
           ref={scrollRef}
@@ -160,26 +266,78 @@ export default function AiPage() {
               <div className="bg-accent text-accent-foreground flex size-14 items-center justify-center rounded-2xl">
                 <Sparkles className="size-7" />
               </div>
-              <div className="flex flex-col gap-1">
-                <h1 className="text-xl font-bold tracking-tight">
-                  무엇이든 물어보세요
-                </h1>
-                <p className="text-muted-foreground text-sm">
-                  지출·예산에 대해 편하게 질문하면 바로 알려드려요.
+
+              {scope === "finance" ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    {/* 카피는 실제 능력까지만 — "무엇이든"은 지키지 못하는 약속이었다. */}
+                    <h1 className="text-xl font-bold tracking-tight">
+                      가계부에 대해 물어보세요
+                    </h1>
+                    <p className="text-muted-foreground text-sm">
+                      기간·카테고리·가맹점 기준의 지출 집계를 알려드려요. 그 밖의
+                      질문은 아직 답하기 어려워요.
+                    </p>
+                  </div>
+                  <div className="flex w-full max-w-sm flex-col gap-2">
+                    {FINANCE_SUGGESTIONS.map((s) => (
+                      <SuggestionButton key={s} text={s} onPick={ask} />
+                    ))}
+                  </div>
+                </>
+              ) : workspacesQuery.isPending ? (
+                <p className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Loader2 className="size-4 animate-spin" /> 가져온 기록을
+                  확인하고 있어요…
                 </p>
-              </div>
-              <div className="flex w-full max-w-sm flex-col gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => ask(s)}
-                    className="border-border hover:bg-muted rounded-xl border px-4 py-3 text-left text-sm transition-colors active:scale-[0.99]"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              ) : workspace ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <h1 className="text-xl font-bold tracking-tight">
+                      업무 기록에 대해 물어보세요
+                    </h1>
+                    <p className="text-muted-foreground text-sm">
+                      가져온 Slack 기록에서 근거를 찾아 답하고, 채널·시각·원문
+                      스니펫을 함께 보여드려요.
+                    </p>
+                  </div>
+                  {/* 검색 가능한 범위를 숫자로 밝힌다 — 무엇을 물어봐도 되는지의 근거. */}
+                  <dl className="border-border w-full max-w-sm rounded-xl border px-4 py-3 text-left text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-muted-foreground">워크스페이스</dt>
+                      <dd className="truncate font-medium">{workspace.name}</dd>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-3">
+                      <dt className="text-muted-foreground">검색 가능한 메시지</dt>
+                      <dd className="font-medium">
+                        {workspace.messageCount.toLocaleString("ko-KR")}건
+                      </dd>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-3">
+                      <dt className="text-muted-foreground">마지막 가져오기</dt>
+                      <dd className="font-medium">
+                        {formatSeoul(workspace.lastImportedAt)}
+                      </dd>
+                    </div>
+                  </dl>
+                </>
+              ) : (
+                // 빈 화면 대신 왜 비었는지를 말한다. 가짜 예시 질문·가짜 최근
+                // 기록은 두지 않는다 — 물어봐야 전부 "근거 없음"이 돌아온다.
+                <div className="flex w-full max-w-sm flex-col gap-2">
+                  <h1 className="text-xl font-bold tracking-tight">
+                    가져온 Slack 기록이 없습니다
+                  </h1>
+                  <p className="text-muted-foreground text-sm leading-relaxed">
+                    업무 기억은 가져온 Slack 기록에서만 답을 찾아요. 아직 가져온
+                    기록이 없어서 지금은 물어볼 수 있는 게 없어요.
+                  </p>
+                  <p className="text-muted-foreground text-sm leading-relaxed">
+                    현재 가져오기는 개발자용 JSON 업로드(<code>POST /v1/slack/import</code>)
+                    로만 가능해요. 앱에서 바로 올리는 기능은 아직 없어요.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-4 py-4">
@@ -199,6 +357,7 @@ export default function AiPage() {
                         있어요…
                       </div>
                     ) : (
+                      // 거부(refused)는 오류가 아니다 — 빨간 스타일을 쓰지 않는다.
                       <div
                         className={cn(
                           "max-w-[85%] rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
@@ -211,6 +370,36 @@ export default function AiPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* 거부 시 "대신 이런 건 물어보실 수 있어요" */}
+                  {t.refused && t.suggestions && t.suggestions.length > 0 ? (
+                    <div className="flex flex-wrap gap-2 pl-1">
+                      {t.suggestions.map((s) => (
+                        <SuggestionChip key={s} text={s} onPick={ask} />
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {/* 업무 답변 출처 — 채널·시각·스니펫. 없으면 답변도 없다. */}
+                  {t.citations && t.citations.length > 0 ? (
+                    <ul className="flex flex-col gap-1.5 pl-1">
+                      {t.citations.map((c) => (
+                        <li
+                          key={c.chunkId}
+                          className="border-border text-muted-foreground rounded-lg border px-3 py-2 text-xs leading-relaxed"
+                        >
+                          <span className="text-foreground font-medium">
+                            {c.channelName ? `#${c.channelName}` : "채널 미상"}
+                          </span>
+                          <span className="mx-1.5">·</span>
+                          <span>{formatSeoul(c.occurredAt)}</span>
+                          <p className="mt-1 line-clamp-3 whitespace-pre-wrap">
+                            {c.snippet}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -219,10 +408,12 @@ export default function AiPage() {
 
         {/* 입력 — 패널 하단(탭바/키보드에 밀착).
             Input은 전송 중에도 disabled하지 않는다: 포커스가 끊기면 모바일
-            키보드가 매 질문마다 닫혔다 열린다(중복 전송은 ask()의 isPending
+            키보드가 매 질문마다 닫혔다 열린다(중복 전송은 ask()의 pending
             가드 + submit 버튼 disabled가 막는다). h-11/size-11: 터치 타깃
-            44px 통일(기존 40px input vs 36px 버튼 어긋남 해소). 포커스 줌
-            방어(16px)는 globals.css의 pointer:coarse 전역 규칙이 담당. */}
+            44px 통일. 포커스 줌 방어(16px)는 globals.css의 pointer:coarse
+            전역 규칙이 담당.
+            업무 기억에 가져온 기록이 없으면 입력 자체를 막는다 — 물어봐도
+            전부 "근거 없음"이라 시도하게 두는 게 더 불친절하다. */}
         <form
           onSubmit={onSubmit}
           className="bg-background flex items-center gap-2 border-t py-3"
@@ -231,20 +422,32 @@ export default function AiPage() {
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="궁금한 걸 물어보세요"
+            placeholder={
+              workBlocked
+                ? "가져온 Slack 기록이 없어요"
+                : scope === "work"
+                  ? "업무 기록에서 찾을 내용을 물어보세요"
+                  : "지출에 대해 물어보세요"
+            }
             enterKeyHint="send"
+            disabled={workBlocked}
             className="h-11"
           />
           <Button
             type="submit"
             size="icon"
             className="size-11"
-            disabled={mutation.isPending || input.trim() === ""}
+            disabled={
+              pending ||
+              input.trim() === "" ||
+              workBlocked ||
+              (scope === "work" && !workReady)
+            }
             aria-label="질문 보내기"
             // 버튼 탭이 input의 포커스를 뺏어 키보드가 닫히는 것 방지(Android).
             onPointerDown={(e) => e.preventDefault()}
           >
-            {mutation.isPending ? (
+            {pending ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Send className="size-4" />
@@ -254,4 +457,84 @@ export default function AiPage() {
       </div>
     </div>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* 응답 → 말풍선 매핑                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** 가계부 응답. `refused`면 답 대신 안내 + 예시 질문을 싣는다(오류 아님). */
+function financeTurn(res: FinanceQueryResponse): Partial<Turn> {
+  return {
+    answer: res.answer,
+    refused: res.refused,
+    suggestions: res.refused ? res.suggestions : undefined,
+  };
+}
+
+/**
+ * 업무 응답. 근거가 없으면 서버가 `refused: true` + `answer: null`을 준다 —
+ * 이때 **가계부 총액 같은 다른 답으로 갈아타지 않는다**(B8과 같은 원칙).
+ */
+function workTurn(res: WorkQueryResponse): Partial<Turn> {
+  if (res.refused || res.answer === null) {
+    return {
+      answer:
+        "가져온 기록에서 근거를 찾지 못했어요. 다른 낱말로 다시 물어보시겠어요?",
+      refused: true,
+    };
+  }
+  return { answer: res.answer, refused: false, citations: res.citations };
+}
+
+/* -------------------------------------------------------------------------- */
+/* 작은 조각                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function SuggestionButton({
+  text,
+  onPick,
+}: {
+  text: string;
+  onPick: (q: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(text)}
+      className="border-border hover:bg-muted rounded-xl border px-4 py-3 text-left text-sm transition-colors active:scale-[0.99]"
+    >
+      {text}
+    </button>
+  );
+}
+
+function SuggestionChip({
+  text,
+  onPick,
+}: {
+  text: string;
+  onPick: (q: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(text)}
+      className="border-border hover:bg-muted rounded-full border px-3 py-1.5 text-xs transition-colors active:scale-[0.99]"
+    >
+      {text}
+    </button>
+  );
+}
+
+/** ISO → 'YYYY. M. D. HH:mm' (Asia/Seoul). null은 '아직 없음'. */
+function formatSeoul(iso: string | null): string {
+  if (!iso) return "아직 없음";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "아직 없음";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }

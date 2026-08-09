@@ -928,17 +928,25 @@ export class TransactionPromotionService {
         );
       }
 
+      const { from, to, periodMonth } = currentSeoulMonth();
+      const effectiveMonth = `${periodMonth}-01`;
       const matched = await this.db
         .select()
         .from(schema.budgets)
         .where(
-          and(eq(schema.budgets.householdId, householdId), or(...scopeMatches)),
+          and(
+            eq(schema.budgets.householdId, householdId),
+            // 과거 계획은 감사 기록이다. 현재 거래가 과거월 예산 알림을 다시 울리면 안 된다.
+            eq(schema.budgets.effectiveMonth, effectiveMonth),
+            or(...scopeMatches),
+          ),
         );
       if (matched.length === 0) return;
 
-      const { from, to, periodMonth } = currentSeoulMonth();
-
       for (const budget of matched) {
+        const budgetPeriodMonth = budget.effectiveMonth.slice(0, 7);
+        // 조회 조건과 insert 사이의 계약을 한 번 더 확인해 alert_state의 월 불일치를 막는다.
+        if (budgetPeriodMonth !== periodMonth) continue;
         if (budget.amount <= 0) continue;
         const spent = await this.budgetScopeSpent(budget, from, to);
         const usagePct = Math.floor((spent / budget.amount) * 100);
@@ -949,7 +957,7 @@ export class TransactionPromotionService {
           if (usagePct < threshold) continue;
           const [inserted] = await this.db
             .insert(schema.budgetAlertState)
-            .values({ budgetId: budget.id, periodMonth, threshold })
+            .values({ budgetId: budget.id, periodMonth: budgetPeriodMonth, threshold })
             .onConflictDoNothing({
               target: [
                 schema.budgetAlertState.budgetId,
@@ -970,7 +978,7 @@ export class TransactionPromotionService {
           threshold: toSend,
         };
         await this.notificationQueue.add('dispatch', payload, {
-          jobId: `notif_budget_${budget.id}_${periodMonth}_${toSend}`,
+          jobId: `notif_budget_${budget.id}_${budgetPeriodMonth}_${toSend}`,
           removeOnComplete: true,
         });
       }

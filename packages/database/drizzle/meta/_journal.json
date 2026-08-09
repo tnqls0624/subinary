@@ -358,6 +358,27 @@
       "when": 1786108444626,
       "tag": "0050_card_sms_idempotency_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786108445626,
+      "tag": "0051_household_consent_revocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786108446626,
+      "tag": "0052_budget_month_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786108447626,
+      "tag": "0053_recurring_series",
+      "breakpoints": true
     }
   ]
 }

@@ -357,7 +357,7 @@ describe('스키마 선언과 마이그레이션의 인덱스 이름이 같다',
 
   for (const name of [
     'device_credentials_device_active_unique',
-    'budgets_household_scope_unique',
+    'budgets_household_month_scope_unique',
   ]) {
     it(name, () => {
       assert.ok(
@@ -422,5 +422,188 @@ describe('0049 — 스키마 선언과 마이그레이션의 일치', () => {
     // 반대로 0049에는 6개가 전부 있어야 한다.
     const declared = sqlText.match(/"card_transactions_v2_[a-z_]+"/g) ?? [];
     assert.equal(new Set(declared).size, 6, 'v2 제약이 6개가 아니다');
+  });
+});
+
+describe('0051 — 동의 철회(버전된 동의 + 상태 전이)', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0051_household_consent_revocation.sql'),
+    'utf8',
+  );
+
+  it('철회를 표현할 컬럼을 추가한다', () => {
+    for (const fragment of [
+      'ADD COLUMN "status" text DEFAULT \'granted\' NOT NULL',
+      'ADD COLUMN "revoked_at" timestamp with time zone',
+      'ADD COLUMN "revoked_reason" text',
+    ]) {
+      assert.ok(sqlText.includes(fragment), `0051에 ${fragment}이 없다`);
+    }
+  });
+
+  it('기존 행을 지우지 않는다 (가산적 마이그레이션)', () => {
+    // 동의 이력은 증빙이다. DELETE가 한 줄이라도 들어가면 "언제 동의했는가"를 잃는다.
+    assert.ok(!/\bDELETE\s+FROM\b/i.test(sqlText));
+    assert.ok(!/\bDROP\s+(TABLE|COLUMN)\b/i.test(sqlText));
+  });
+
+  it('CHECK 제약이 schema.ts와 마이그레이션 양쪽에 같은 이름으로 있다', () => {
+    for (const name of [
+      'household_consents_status_check',
+      'household_consents_revoked_at_check',
+      'household_consents_scope_idx',
+    ]) {
+      assert.ok(schemaText.includes(`'${name}'`), `schema.ts에 ${name}이 없다`);
+      assert.ok(sqlText.includes(`"${name}"`), `0051에 ${name}이 없다`);
+    }
+  });
+
+  it('status와 revoked_at의 정합을 DB가 강제한다', () => {
+    // "철회했다는데 언제인지 모르는 행"은 개인정보 동의에서 증빙이 되지 못한다.
+    assert.match(
+      sqlText,
+      /CHECK \(\("status" = 'revoked'\) = \("revoked_at" is not null\)\)/,
+    );
+  });
+
+  it('원문을 추적할 수 없는 동의 버전이 있으면 추측하지 않고 멈춘다', () => {
+    // 0048과 같은 태도. 코드에 문구가 없는 버전은 "무엇에 동의했는가"를 답할 수 없다.
+    assert.match(sqlText, /RAISE EXCEPTION/);
+    assert.match(sqlText, /consent_version NOT IN \('v1', 'v2'\)/);
+  });
+
+  it('적용 전 재고 조사 쿼리를 주석에 남긴다 (0047·0048 관습)', () => {
+    assert.match(sqlText, /SELECT consent_type, consent_version, count\(\*\)/);
+  });
+});
+
+describe('0052 — 예산 월 원장', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0052_budget_month_ledger.sql'),
+    'utf8',
+  );
+  const apiText = readFileSync(
+    resolve(here, '../../../apps/api/src/budgets/budget.service.ts'),
+    'utf8',
+  );
+  const controllerText = readFileSync(
+    resolve(here, '../../../apps/api/src/budgets/budget.controller.ts'),
+    'utf8',
+  );
+  const contractText = readFileSync(
+    resolve(here, '../../contracts/src/budget.ts'),
+    'utf8',
+  );
+  const workerText = readFileSync(
+    resolve(
+      here,
+      '../../../apps/worker/src/promotion/transaction-promotion.service.ts',
+    ),
+    'utf8',
+  );
+
+  it('기존 행은 배포 순간의 서울 월초에만 귀속하고 과거월을 복제하지 않는다', () => {
+    assert.match(sqlText, /ADD COLUMN "effective_month" date/);
+    assert.match(
+      sqlText,
+      /date_trunc\('month', current_timestamp AT TIME ZONE 'Asia\/Seoul'\)::date/,
+    );
+    assert.match(sqlText, /ALTER COLUMN "effective_month" SET NOT NULL/);
+    assert.equal(
+      (sqlText.match(/UPDATE "budgets"/g) ?? []).length,
+      1,
+      '월초 귀속 외에 기존 계획을 복제·수정하는 UPDATE가 있다',
+    );
+    assert.ok(!/INSERT INTO "budgets"/i.test(sqlText));
+  });
+
+  it('예상 밖 scope 정합 오류는 조용히 보정하지 않고 멈춘다', () => {
+    assert.match(sqlText, /RAISE EXCEPTION/);
+    assert.match(
+      sqlText,
+      /\(scope_type = 'household'\) <> \(scope_ref_id IS NULL\)/,
+    );
+    assert.ok(!/\bDELETE\s+FROM\b/i.test(sqlText));
+  });
+
+  it('기존 단일 예산 유니크를 월별 유니크 두 종류로 교체한다', () => {
+    assert.match(
+      sqlText,
+      /DROP CONSTRAINT "budgets_household_scope_type_scope_ref_id_unique"/,
+    );
+    assert.match(sqlText, /DROP INDEX "budgets_household_scope_unique"/);
+    assert.match(
+      sqlText,
+      /UNIQUE\("household_id", "effective_month", "scope_type", "scope_ref_id"\)/,
+    );
+    assert.match(
+      sqlText,
+      /CREATE UNIQUE INDEX "budgets_household_month_scope_unique"[\s\S]*\("household_id", "effective_month"\)[\s\S]*WHERE "scope_type" = 'household'/,
+    );
+  });
+
+  it('복사 멱등 원장은 가구·키당 하나이고 결과 budget ID를 보존한다', () => {
+    assert.match(sqlText, /CREATE TABLE "budget_copy_operations"/);
+    assert.match(sqlText, /"copied_budget_ids" jsonb NOT NULL/);
+    assert.match(
+      sqlText,
+      /"budget_copy_ops_household_idempotency_unique"[\s\S]*UNIQUE\("household_id", "idempotency_key"\)/,
+    );
+  });
+
+  it('복사 멱등 키는 본문이 아닌 HTTP Idempotency-Key 헤더 계약이다', () => {
+    assert.match(controllerText, /@Headers\('idempotency-key'\)/);
+    assert.match(controllerText, /Idempotency-Key header must be a valid UUID/);
+    assert.ok(
+      !/budgetCopyRequestSchema[\s\S]*?idempotencyKey[\s\S]*?\}\);/.test(
+        contractText,
+      ),
+      '복사 본문에 멱등 키가 중복 정의됐다',
+    );
+  });
+
+  it('Drizzle 선언과 마이그레이션의 월 컬럼·인덱스 이름이 같다', () => {
+    for (const fragment of [
+      "date('effective_month', { mode: 'string' })",
+      "'budgets_household_month_scope_ref_unique'",
+      "'budgets_household_month_scope_unique'",
+      "'budgets_household_effective_month_idx'",
+      'export const budgetCopyOperations = pgTable(',
+    ]) {
+      assert.ok(
+        schemaText.includes(fragment),
+        `schema.ts에 ${fragment}가 없다`,
+      );
+    }
+    for (const name of [
+      'budgets_household_month_scope_ref_unique',
+      'budgets_household_month_scope_unique',
+      'budgets_household_effective_month_idx',
+      'budget_copy_ops_household_idempotency_unique',
+    ]) {
+      assert.ok(sqlText.includes(`"${name}"`), `0052에 ${name}이 없다`);
+    }
+  });
+
+  it('API 목록·중복 검사가 effective_month를 조건에 넣고 과거월 mutation을 막는다', () => {
+    assert.match(
+      apiText,
+      /eq\(schema\.budgets\.effectiveMonth, period\.effectiveMonth\)/,
+    );
+    assert.match(
+      apiText,
+      /eq\(schema\.budgets\.effectiveMonth, effectiveMonth\)/,
+    );
+    assert.match(apiText, /past month budgets are read-only/);
+  });
+
+  it('예산 알림은 현재 서울월 계획만 조회하고 그 월을 alert_state에 기록한다', () => {
+    assert.match(
+      workerText,
+      /eq\(schema\.budgets\.effectiveMonth, effectiveMonth\)/,
+    );
+    assert.match(workerText, /periodMonth: budgetPeriodMonth/);
   });
 });

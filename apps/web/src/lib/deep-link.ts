@@ -29,6 +29,18 @@ export function transactionsHref(filter: TransactionFilterLink): string {
 }
 
 /**
+ * 거래 **한 건의 상세**를 여는 경로.
+ *
+ * 거래 화면이 이미 `?txn=<id>`를 읽어 상세 다이얼로그를 연다(푸시 알림 딥링크가 쓰던
+ * 경로다. 목록에 없는 거래는 단건 조회로 폴백한다). 할 일 목록처럼 "이 항목을 지금
+ * 처리하라"는 화면은 목록이 아니라 그 건으로 바로 보내야 한다 — 목록으로 보내면
+ * 사용자가 자기가 누른 건을 다시 찾아야 한다.
+ */
+export function transactionDetailHref(transactionId: string): string {
+  return `/transactions?txn=${encodeURIComponent(transactionId)}`;
+}
+
+/**
  * 예산 스코프 → 그 예산이 집계하는 거래 목록 경로.
  *
  * `household` 예산은 축이 없으므로 달만 건다. 대상이 있어야 하는 스코프인데

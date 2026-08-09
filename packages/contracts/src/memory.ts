@@ -173,9 +173,21 @@ export const memorySummarySchema = z.object({
 });
 export type MemorySummary = z.infer<typeof memorySummarySchema>;
 
+/**
+ * 커서 페이지네이션 응답 필드(Memory·Graph 목록 공통 규약).
+ *
+ * 응답 형태는 `{ items }`를 그대로 유지하고 `nextCursor`만 **추가**한다 —
+ * `apps/mcp`가 이미 `items`를 읽고 있어서 배열 래핑을 바꾸면 조용히 깨진다.
+ * `nextCursor`가 null이면 마지막 페이지다. 값은 불투명 문자열이므로 해석하지 말고
+ * 다음 요청의 `cursor=`에 그대로 실어 보낸다. 목록은 항상 상한이 걸린 채로
+ * 반환된다(`limit` 미지정 시 서버 기본값).
+ */
+const nextCursorSchema = z.string().nullable();
+
 /** `GET /v1/memory/candidates` — candidates for a workspace (optional status filter). */
 export const candidateListResponseSchema = z.object({
   items: z.array(candidateSummarySchema),
+  nextCursor: nextCursorSchema,
 });
 export type CandidateListResponse = z.infer<typeof candidateListResponseSchema>;
 
@@ -185,5 +197,6 @@ export type CandidateListResponse = z.infer<typeof candidateListResponseSchema>;
  */
 export const memoryListResponseSchema = z.object({
   items: z.array(memorySummarySchema),
+  nextCursor: nextCursorSchema,
 });
 export type MemoryListResponse = z.infer<typeof memoryListResponseSchema>;

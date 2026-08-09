@@ -19,7 +19,9 @@ Phase 7 은 Phase 6 이 수집한 Slack 스레드/메시지를 **스레드 단�
 | 동작 | 방식 | 경로 |
 |---|---|---|
 | 검색(디버그/검증) | JWT | `POST /v1/ai/retrieval` |
-| 출처 포함 질의응답 | JWT | `POST /v1/ai/work-query` |
+| 출처 포함 질의응답(업무 기억) | JWT | `POST /v1/ai/work-query` |
+| 자연어 가계부 질의(금융) | JWT | `POST /v1/ai/finance-query` |
+| 월간 인사이트 | JWT | `GET /v1/ai/monthly-insights` |
 
 - **스코프(`workspaceId`)**: RAG/AI 는 개인 데이터 컨테이너 **`workspaces.id`** 를 스코프로 쓴다
   (Slack import 응답의 `slackWorkspaceId`(= `slack_workspaces.id`)가 **아니다**). `workspaceId` 는
@@ -217,6 +219,87 @@ curl -s -X POST http://localhost:3001/v1/ai/work-query \
 - **멱등 인덱싱(ADR-0012 §6)**: `chunks` UNIQUE(`workspaceId, sourceType, sourceRefId`) +
   `onConflictDoUpdate`, `embeddings` UNIQUE(`chunkId`) + `onConflictDoUpdate`. 재import/재인덱싱해도
   청크/임베딩이 중복 없이 덮어써져 검색 결과 수가 안정이다.
+
+---
+
+## 4-1. 자연어 가계부 질의 — `POST /v1/ai/finance-query`
+
+가족 가계부에 대한 자연어 질문을 **SQL 집계에 근거한** 해요체 답변으로 돌려준다. 금액은 전부
+analytics 의 SQL 집계에서 오며 LLM 이 만들지 않는다. work-query 와 달리 스코프는 `householdId` 이고
+활성 구성원이면 누구나 질문할 수 있다(공개범위 스코프는 그대로 적용).
+
+### 요청 (`financeQueryRequestSchema`)
+
+| 필드 | 필수 | 규칙 |
+|---|---|---|
+| `householdId` | ✅ | `households.id`(uuid). 요청자가 활성 구성원이어야 함(아니면 `403`). |
+| `question` | ✅ | 1~300자. |
+
+### 응답 `200 OK` — 답변 (`financeQueryResponseSchema`)
+
+```json
+{
+  "answer": "2026년 8월 카페 지출은 42,300원이에요. (7건)",
+  "data": {
+    "month": "2026-08",
+    "aggregate": "byCategory",
+    "categorySlug": "cafe",
+    "categoryName": "카페",
+    "totalNet": 42300,
+    "transactionCount": 7
+  },
+  "method": "llm",
+  "refused": false,
+  "suggestions": []
+}
+```
+
+### 응답 `200 OK` — 지원하지 않는 질문(정직한 거부)
+
+```json
+{
+  "answer": "이 질문은 아직 답하기 어려워요. 지금은 기간·카테고리·가맹점 기준의 지출 집계만 알려드릴 수 있어요.",
+  "method": "fallback",
+  "refused": true,
+  "suggestions": ["이번 달 총 지출 얼마야?", "이번 달 식비 얼마 썼어?", "이번 달 어디서 제일 많이 썼어?"]
+}
+```
+
+- **거부는 오류가 아니다.** HTTP `200` 이고 `data` 가 **없다**. 클라이언트는 오류 스타일(빨강)로 그리지
+  말고 "아직 못 답해요 + 이런 건 물어보실 수 있어요"로 안내한다.
+- **왜 거부가 필요한가**: 예전에는 의도 분류가 실패하면 조용히 `aggregate='total'` 로 떨어져,
+  "지난달이랑 비교해줘" 같은 **지원하지 않는 질문에도 월 총지출**이 답으로 나갔다. 사용자는 그것을
+  자기 질문의 답이라고 믿는다 — 틀린 답보다 나쁜 것은 틀린 답을 자신 있게 하는 것이다.
+- **거부 기준은 "분류 경로"가 아니라 "분류 결과"다.** LLM 경로든 휴리스틱 폴백 경로든, 지원하는 집계
+  축(`total`/`byCategory`/`byMerchant`)을 하나도 알아보지 못했을 때만 거부한다. "LLM 이 실패했으면
+  (`method='fallback'`) 무조건 거부"가 아니다 — 그러면 LLM 이 한 번 흔들렸다는 이유로 답할 수 있는
+  질문까지 거부하게 되어 절대 규약 #1(LLM 실패가 파이프라인을 중단시키지 않는다)을 어긴다.
+- **지원 범위**: 기간(월) × {전체 · 카테고리별 · 가맹점별} 지출 금액/건수. 기간 비교, 미래 예측,
+  지출과 무관한 질문은 현재 거부 대상이다.
+
+### 관측 — 거부율/폴백율
+
+질의 1건이 `pipeline_runs`(`pipeline_name='finance-query'`) + `pipeline_step_runs`(`step_name='answer'`)
+1건으로 남는다. **질문 원문은 저장하지 않는다**(로그 정책과 동일). 대신 지원 우선순위를 정하는 데
+필요한 구조만 `metrics` 에 담는다: `intentMethod`(llm/fallback) · `answerMethod`(llm/fallback/refusal) ·
+`aggregate` · `refused` · `unsupportedKind`(comparison/count/forecast/other) · `categoryResolved`.
+
+```sql
+-- 최근 7일 거부율과 "무엇을 요구하다 거부됐는지"
+select
+  s.metrics->>'unsupportedKind'                         as unsupported_kind,
+  count(*) filter (where (s.metrics->>'refused')::bool) as refused,
+  count(*)                                              as total
+from pipeline_step_runs s
+join pipeline_runs r on r.id = s.pipeline_run_id
+where r.pipeline_name = 'finance-query'
+  and r.started_at > now() - interval '7 days'
+group by 1 order by refused desc;
+```
+
+- `ai_invocations` 행에도 이 질의의 `pipeline_run_id` 가 붙으므로, 거부율과 LLM 호출 비용을 같은 축으로
+  조인할 수 있다.
+- 질문 **원문 단위**로 "무엇이 거부됐는지"를 보려면 보존 정책 결정 + 마이그레이션이 필요하다(현재 범위 밖).
 
 ---
 

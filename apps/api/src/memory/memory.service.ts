@@ -38,7 +38,6 @@ import {
 import { Queue } from 'bullmq';
 import {
   and,
-  desc,
   eq,
   gt,
   inArray,
@@ -51,10 +50,12 @@ import {
 
 import type {
   CandidateApproveRequest,
+  CandidateListResponse,
   CandidateStatus,
   CandidateSummary,
   MemoryCreateRequest,
   MemoryExtractResponse,
+  MemoryListResponse,
   MemoryStatus,
   MemorySummary,
   MemorySupersedeRequest,
@@ -65,6 +66,15 @@ import { schema, type Db } from '@family/database';
 import { QUEUE_NAMES } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import {
+  DEFAULT_PAGE_SIZE,
+  decodeKeysetCursor,
+  keysetAfter,
+  keysetOrderBy,
+  parseCursorTimestamp,
+  takePage,
+  type KeysetKey,
+} from './pagination';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -76,18 +86,55 @@ import { DB } from '../database/database.constants';
  */
 const MANUAL_CONFIDENCE = 100;
 
+/**
+ * 후보 목록 정렬 키 — `extractedAt desc` 뒤에 유일한 `id`를 붙여 전순서를 만든다.
+ * 같은 배치에서 추출된 후보는 `extractedAt`이 밀리초까지 같은 경우가 흔하다
+ * (한 워커 잡이 chunk 여럿을 같은 시각으로 기록한다). tie-breaker가 없으면
+ * 그 묶음이 페이지 경계에서 통째로 누락되거나 중복된다.
+ */
+const CANDIDATE_KEYS: readonly KeysetKey[] = [
+  {
+    name: 'extractedAt',
+    column: schema.memoryCandidates.extractedAt,
+    direction: 'desc',
+    parse: parseCursorTimestamp,
+  },
+  { name: 'id', column: schema.memoryCandidates.id, direction: 'desc' },
+];
+
+/** 기억 목록 정렬 키 — `createdAt desc` + tie-breaker `id`. */
+const MEMORY_KEYS: readonly KeysetKey[] = [
+  {
+    name: 'createdAt',
+    column: schema.memories.createdAt,
+    direction: 'desc',
+    parse: parseCursorTimestamp,
+  },
+  { name: 'id', column: schema.memories.id, direction: 'desc' },
+];
+
 /* -------------------------------------------------------------------------- */
 /* Option shapes                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 커서 페이지네이션 입력. `limit`은 컨트롤러의 zod 스키마가 기본값·최대값을
+ * 강제하지만, 서비스를 직접 부르는 경로(테스트·내부 호출)에서도 상한이 사라지지
+ * 않도록 여기서 기본값을 한 번 더 둔다.
+ */
+export interface PageOptions {
+  limit?: number;
+  cursor?: string;
+}
+
 /** Filters for {@link MemoryService.listCandidates}. */
-export interface ListCandidatesOptions {
+export interface ListCandidatesOptions extends PageOptions {
   workspaceId: string;
   status?: CandidateStatus;
 }
 
 /** Filters for {@link MemoryService.listMemories} (spec §1.3/§6.2). */
-export interface ListMemoriesOptions {
+export interface ListMemoriesOptions extends PageOptions {
   workspaceId: string;
   type?: MemoryType;
   status?: MemoryStatus;
@@ -178,33 +225,53 @@ export class MemoryService {
   /* Candidates                                                              */
   /* ---------------------------------------------------------------------- */
 
-  /** Lists a workspace's candidates (newest first), optionally filtered by status. */
+  /**
+   * Lists a workspace's candidates (newest first), optionally filtered by status,
+   * one keyset page at a time (기본 {@link DEFAULT_PAGE_SIZE}건).
+   */
   async listCandidates(
     userId: string,
     options: ListCandidatesOptions,
-  ): Promise<CandidateSummary[]> {
+  ): Promise<CandidateListResponse> {
     const { workspaceId, status } = options;
     await this.assertOwnedWorkspace(userId, workspaceId);
 
+    const limit = options.limit ?? DEFAULT_PAGE_SIZE;
     const filters: SQL[] = [
       eq(schema.memoryCandidates.workspaceId, workspaceId),
     ];
     if (status) {
       filters.push(eq(schema.memoryCandidates.status, status));
     }
+    if (options.cursor) {
+      const after = keysetAfter(
+        CANDIDATE_KEYS,
+        decodeKeysetCursor(CANDIDATE_KEYS, options.cursor),
+      );
+      if (after) filters.push(after);
+    }
 
+    // limit+1: 여분 1행의 유무가 곧 '다음 페이지 있음'(별도 COUNT 없음).
     const rows = await this.db
       .select()
       .from(schema.memoryCandidates)
       .where(and(...filters))
-      .orderBy(desc(schema.memoryCandidates.extractedAt));
+      .orderBy(...keysetOrderBy(CANDIDATE_KEYS))
+      .limit(limit + 1);
+
+    const page = takePage(rows, limit, CANDIDATE_KEYS);
 
     this.logger.log(
       `memory candidates listed workspace=${workspaceId} ` +
-        `status=${status ?? 'all'} count=${rows.length}`,
+        `status=${status ?? 'all'} limit=${limit} ` +
+        `paged=${options.cursor ? 'cursor' : 'first'} ` +
+        `count=${page.rows.length} more=${page.nextCursor !== null}`,
     );
 
-    return rows.map(toCandidateSummary);
+    return {
+      items: page.rows.map(toCandidateSummary),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**
@@ -427,15 +494,20 @@ export class MemoryService {
   /**
    * Lists a workspace's (non-deleted) memories with `current`/`asOf` and
    * type/status filtering (spec §1.3), newest first, with provenance sources
-   * attached and `isCurrent` derived.
+   * attached and `isCurrent` derived — one keyset page at a time.
+   *
+   * 커서는 시간 필터(`current`/`asOf`)와 **독립**이다: 커서 조건은 정렬 키
+   * (`createdAt`,`id`)에만 걸리고 시간 필터는 그대로 AND로 남으므로, 같은 필터를
+   * 유지하는 한 페이지를 넘겨도 모집단이 흔들리지 않는다.
    */
   async listMemories(
     userId: string,
     options: ListMemoriesOptions,
-  ): Promise<MemorySummary[]> {
+  ): Promise<MemoryListResponse> {
     const { workspaceId, type, status, current, asOf } = options;
     await this.assertOwnedWorkspace(userId, workspaceId);
 
+    const limit = options.limit ?? DEFAULT_PAGE_SIZE;
     const now = new Date();
     const filters: SQL[] = [
       eq(schema.memories.workspaceId, workspaceId),
@@ -473,24 +545,39 @@ export class MemoryService {
         filters.push(validAsOf);
       }
     }
+    if (options.cursor) {
+      const after = keysetAfter(
+        MEMORY_KEYS,
+        decodeKeysetCursor(MEMORY_KEYS, options.cursor),
+      );
+      if (after) filters.push(after);
+    }
 
     const rows = await this.db
       .select()
       .from(schema.memories)
       .where(and(...filters))
-      .orderBy(desc(schema.memories.createdAt));
+      .orderBy(...keysetOrderBy(MEMORY_KEYS))
+      .limit(limit + 1);
 
-    const sourcesByMemory = await this.loadSources(rows.map((r) => r.id));
+    // 절단이 먼저다 — 여분 1행까지 sources를 조인하면 페이지마다 헛일이 붙는다.
+    const page = takePage(rows, limit, MEMORY_KEYS);
+    const sourcesByMemory = await this.loadSources(page.rows.map((r) => r.id));
 
     this.logger.log(
       `memory list workspace=${workspaceId} type=${type ?? 'all'} ` +
         `status=${status ?? 'all'} current=${current ?? false} ` +
-        `asOf=${asOf ?? 'none'} count=${rows.length}`,
+        `asOf=${asOf ?? 'none'} limit=${limit} ` +
+        `paged=${options.cursor ? 'cursor' : 'first'} ` +
+        `count=${page.rows.length} more=${page.nextCursor !== null}`,
     );
 
-    return rows.map((row) =>
-      toMemorySummary(row, sourcesByMemory.get(row.id) ?? [], now),
-    );
+    return {
+      items: page.rows.map((row) =>
+        toMemorySummary(row, sourcesByMemory.get(row.id) ?? [], now),
+      ),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**

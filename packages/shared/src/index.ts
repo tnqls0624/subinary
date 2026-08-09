@@ -1,10 +1,19 @@
 export {
   CATEGORY_KEYWORD_RULES,
   DEFAULT_CATEGORIES,
+  buildMerchantAliasIndex,
   categorizeByKeyword,
   normalizeMerchant,
+  regroupByCanonicalMerchant,
+  resolveCanonicalMerchant,
 } from './categorization.js';
-export type { CategoryDef, CategoryKeywordRule } from './categorization.js';
+export type {
+  CanonicalMerchantGroup,
+  CategoryDef,
+  CategoryKeywordRule,
+  MerchantAliasIndex,
+  MerchantAliasRow,
+} from './categorization.js';
 export {
   DEFAULT_TIMEZONE,
   QUEUE_DEFAULT_JOB_OPTIONS,

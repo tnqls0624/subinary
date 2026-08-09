@@ -26,7 +26,11 @@ import { Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import type { HouseholdRole, InvitationPreview } from "@family/contracts";
+import {
+  currentHouseholdConsentDocument,
+  type HouseholdRole,
+  type InvitationPreview,
+} from "@family/contracts";
 
 import { ConnectionError } from "@/components/connection-error";
 import { Button } from "@/components/ui/button";
@@ -284,20 +288,38 @@ function JoinInner() {
 
         {invitationCard}
 
-        <label className="bg-muted flex cursor-pointer items-start gap-3 rounded-xl p-4 text-sm">
-          <input
-            type="checkbox"
-            className="border-input text-primary focus-visible:ring-ring/50 mt-0.5 size-4 rounded-sm border focus-visible:ring-[3px]"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-          />
-          <span className="flex flex-col gap-0.5">
-            <span className="font-medium">가족 데이터 공유에 동의해요</span>
-            <span className="text-muted-foreground text-[13px]">
-              공동 지출과 예산을 가족끼리 서로 열람할 수 있어요.
+        {/*
+         * 동의 문구는 **코드가 단일 출처**다(@family/contracts). 여기에 문장을 직접
+         * 적으면 서버가 기록하는 버전과 사용자가 실제로 읽은 문구가 갈라진다 —
+         * 그러면 "누가 어느 문구에 동의했는가"를 나중에 답할 수 없다(C-3).
+         * 문구를 고치려면 contracts에서 새 버전을 만들고 상수를 올린다.
+         */}
+        <div className="bg-muted flex flex-col gap-3 rounded-xl p-4 text-sm">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="border-input text-primary focus-visible:ring-ring/50 mt-0.5 size-4 rounded-sm border focus-visible:ring-[3px]"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            <span className="font-medium">
+              {currentHouseholdConsentDocument.headline}
             </span>
-          </span>
-        </label>
+          </label>
+          <div className="flex flex-col gap-2 pl-7">
+            {currentHouseholdConsentDocument.clauses.map((clause) => (
+              <span key={clause.title} className="flex flex-col gap-0.5">
+                <span className="text-[13px] font-medium">{clause.title}</span>
+                <span className="text-muted-foreground text-[13px] leading-relaxed">
+                  {clause.body}
+                </span>
+              </span>
+            ))}
+          </div>
+          <p className="text-muted-foreground pl-7 text-[12px]">
+            동의한 문구와 시각은 더보기 › 개인정보에서 언제든 다시 볼 수 있어요.
+          </p>
+        </div>
 
         <div className="flex flex-col gap-2">
           <Button

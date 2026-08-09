@@ -10,10 +10,12 @@
  * schemas wrapped as DTOs.
  */
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -26,7 +28,9 @@ import { z } from 'zod';
 
 import {
   budgetCreateRequestSchema,
+  budgetCopyRequestSchema,
   budgetUpdateRequestSchema,
+  type BudgetCopyResponse,
   type BudgetListResponse,
   type BudgetSummary,
 } from '@family/contracts';
@@ -38,6 +42,7 @@ import {
 import { BudgetService } from './budget.service';
 
 class BudgetCreateDto extends createZodDto(budgetCreateRequestSchema) {}
+class BudgetCopyDto extends createZodDto(budgetCopyRequestSchema) {}
 class BudgetUpdateDto extends createZodDto(budgetUpdateRequestSchema) {}
 
 /** `GET /v1/budgets?householdId=&month=` — household required, month optional. */
@@ -56,7 +61,7 @@ export class BudgetController {
 
   /**
    * GET /v1/budgets?householdId=&month= — list a household's budgets with each
-   * scope's current-month usage (any active member).
+   * scope's selected-month usage (any active member).
    */
   @Get()
   list(
@@ -77,6 +82,25 @@ export class BudgetController {
     @Body() dto: BudgetCreateDto,
   ): Promise<BudgetSummary> {
     return this.budgetService.create(user.userId, dto);
+  }
+
+  /** POST /v1/budgets/copy — 선택월 계획을 바로 다음 달로 원자적 복사한다. */
+  @Post('copy')
+  copy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: BudgetCopyDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ): Promise<BudgetCopyResponse> {
+    const parsedKey = z.string().uuid().safeParse(idempotencyKey);
+    if (!parsedKey.success) {
+      throw new BadRequestException(
+        'Idempotency-Key header must be a valid UUID',
+      );
+    }
+    return this.budgetService.copy(user.userId, {
+      ...dto,
+      idempotencyKey: parsedKey.data,
+    });
   }
 
   /** PATCH /v1/budgets/:id — update name/amount (owner/admin). */
