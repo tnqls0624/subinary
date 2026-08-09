@@ -15,11 +15,9 @@
  * 새 백엔드는 없다 — 세 소스 모두 홈이 이미 호출하던 쿼리이고, `useTodoCounts()`가
  * 같은 queryKey를 공유하므로 홈↔여기를 오가도 요청이 늘지 않는다.
  *
- * **하단 탭이 없는 이유**: 탭 슬롯 신설은 IA 개편(정기 지출·예산 원장이 확정된 뒤)
- * 한 덩어리로 미뤄져 있다(로드맵 5-1). 재학습을 두 번 시키지 않으려는 결정이다.
- * 그래서 이 라우트는 **탭 없이도 완결적으로 동작해야 한다** — 진입점은 홈 '할 일'
- * 카드이고, 뒤로가기는 홈으로 간다. 탭이 생기면 배지는 `useTodoCounts().total`을
- * 그대로 쓰면 된다.
+ * **진입점**: 하단 탭 '할 일'(IA 개편에서 '더보기' 자리를 받았다 — 이유는
+ * `(app)/layout.tsx` 상단 주석)과 홈 '할 일' 카드, 둘 다다. 탭 배지는 이 화면과
+ * 같은 `useTodoCounts().total`을 쓴다 — 배지와 목록이 다른 수를 세면 안 된다.
  *
  * '처리 완료 이력' 섹션은 로드맵 와이어프레임에 있지만 **소스가 없다** — 확정한
  * 문자·거래에 "누가 언제 처리했는지"를 남기는 테이블이 없다(결제 실패만 해결/확인
@@ -36,7 +34,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ListRow,
   Money,
-  PageBackHeader,
   ReviewInboxDialog,
   StatusBadge,
   declineReasonHint,
@@ -65,11 +62,15 @@ export default function TodoPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5">
-      <PageBackHeader
-        title="할 일"
-        subtitle="확인이 필요한 것들을 기간 제한 없이 모아뒀어요"
-        backHref="/dashboard"
-      />
+      {/* 탭 루트가 된 뒤로 뒤로가기 화살표를 뗐다 — 하단 탭으로 직접 오는 화면에
+          "뒤로"는 갈 곳이 없고, 홈으로 되돌리는 화살표는 탭을 되돌리는 것처럼 읽힌다.
+          제목은 탭 라벨('할 일')과 중복이라 스크린리더용으로만 남긴다. */}
+      <div>
+        <h1 className="sr-only">할 일</h1>
+        <p className="text-muted-foreground text-sm">
+          확인이 필요한 것들을 기간 제한 없이 모아뒀어요
+        </p>
+      </div>
 
       {loading ? (
         <div className="space-y-2">

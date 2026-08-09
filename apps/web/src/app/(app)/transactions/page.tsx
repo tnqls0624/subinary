@@ -11,7 +11,7 @@
  * - 타인 summary_only(masked) 항목은 가맹점을 '(비공개)'로 표기하고 편집을 막는다.
  * - 권한은 서버(서비스 계층)가 강제하며, 실패 시 배너로 메시지를 노출한다.
  * ------------------------------------------------------------------------- */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -232,7 +232,20 @@ function chipClass(active: boolean): string {
 /* Page                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함) — 거래 화면의
+ * 달·필터는 URL이 소유하므로 여기서 경계를 친다. `/login`·`/join`·`/register`가
+ * 쓰던 것과 같은 형태로 맞춰, 어떤 화면은 감싸고 어떤 화면은 아닌 상태를 없앤다.
+ */
 export default function TransactionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <TransactionsView />
+    </Suspense>
+  );
+}
+
+function TransactionsView() {
   const { authedFetch } = useAuth();
   const { householdId } = useHousehold();
   const queryClient = useQueryClient();

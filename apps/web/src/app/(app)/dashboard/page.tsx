@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
 
 import type {
   BudgetScopeType,
@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/card";
 import {
   BarList,
+  EmptyState,
   ListRow,
   Money,
   MonthSwitcher,
@@ -133,7 +134,20 @@ const SCOPE_LABEL: Record<BudgetScopeType, string> = {
 
 // --- 페이지 -----------------------------------------------------------------
 
+/**
+ * `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함) — 홈 화면의
+ * 달·필터는 URL이 소유하므로 여기서 경계를 친다. `/login`·`/join`·`/register`가
+ * 쓰던 것과 같은 형태로 맞춰, 어떤 화면은 감싸고 어떤 화면은 아닌 상태를 없앤다.
+ */
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardView />
+    </Suspense>
+  );
+}
+
+function DashboardView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const thisMonth = currentMonth();
@@ -204,8 +218,8 @@ export default function DashboardPage() {
   const recentQuery = useTransactions({ limit: 10 }, poll);
 
   // 할 일 백로그(월 무관) — 결제 실패 · 확인 필요 거래 · 읽지 못한 문자.
-  // 세는 규칙은 `useTodoCounts()`가 갖고 있고, `/todo`와 (다음 웨이브의) 탭 배지가
-  // 같은 훅을 쓴다. 홈이 자기 방식으로 또 세면 화면마다 숫자가 갈린다.
+  // 세는 규칙은 `useTodoCounts()`가 갖고 있고, `/todo`와 하단 탭 배지가 같은 훅을
+  // 쓴다. 홈이 자기 방식으로 또 세면 화면마다 숫자가 갈린다.
   const todo = useTodoCounts(poll);
 
   // --- 파생 데이터 ----------------------------------------------------------
@@ -1201,26 +1215,3 @@ function SeeAllLink({
   );
 }
 
-/** 빈 상태(이모지 + 해요체 안내 + 선택 CTA 1개). */
-function EmptyState({
-  emoji,
-  title,
-  description,
-  action,
-}: Readonly<{
-  emoji: string;
-  title: string;
-  description: string;
-  action?: ReactNode;
-}>) {
-  return (
-    <div className="flex flex-col items-center gap-1.5 py-8 text-center">
-      <span className="text-3xl" aria-hidden="true">
-        {emoji}
-      </span>
-      <p className="mt-1 text-[15px] font-semibold">{title}</p>
-      <p className="text-muted-foreground text-[13px]">{description}</p>
-      {action ? <div className="mt-3 w-full max-w-60">{action}</div> : null}
-    </div>
-  );
-}

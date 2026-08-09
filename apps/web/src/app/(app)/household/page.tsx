@@ -79,7 +79,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
+import {
+  EmptyState,
+  ListRow,
+  PageBackHeader,
+  StatusBadge,
+} from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -328,22 +333,11 @@ export default function HouseholdPage() {
               {errorMessage(membersQuery.error, "구성원을 불러오지 못했어요.")}
             </p>
           ) : members.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <span className="bg-muted flex size-12 items-center justify-center rounded-full">
-                <Users
-                  className="text-muted-foreground size-6"
-                  aria-hidden="true"
-                />
-              </span>
-              <div className="flex flex-col gap-1">
-                <p className="text-[15px] font-semibold">
-                  아직 구성원이 없어요
-                </p>
-                <p className="text-muted-foreground text-[13px]">
-                  초대 링크를 만들어 가족을 초대해 보세요
-                </p>
-              </div>
-            </div>
+            <EmptyState
+              icon={<Users />}
+              title="아직 구성원이 없어요"
+              description="초대 링크를 만들어 가족을 초대해 보세요"
+            />
           ) : (
             <div className="flex flex-col">
               {members.map((m) => {

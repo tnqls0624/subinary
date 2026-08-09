@@ -13,8 +13,9 @@
  * - 수정(이름/금액) Dialog / 삭제 AlertDialog(질문형). CRUD는 owner/admin만
  *   (PRD §7.2, 서버에서도 강제). 조건부 대상 필드가 있어 폼은 useState 유지.
  * ------------------------------------------------------------------------- */
-import { useMemo, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MoreHorizontal, Plus, Wallet } from "lucide-react";
 
@@ -64,12 +65,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MonthSwitcher, UsageBar } from "@/components/widgets";
+import { EmptyState, MonthSwitcher, UsageBar } from "@/components/widgets";
 import { API_BASE_URL, ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { budgetTransactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
-import { addMonths } from "@/lib/month";
+import { addMonths, isMonthKey } from "@/lib/month";
 import {
   useAnalyticsMonths,
   useBudgets,
@@ -168,7 +169,20 @@ function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
   );
 }
 
+/**
+ * `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함) — 예산 화면의
+ * 달·필터는 URL이 소유하므로 여기서 경계를 친다. `/login`·`/join`·`/register`가
+ * 쓰던 것과 같은 형태로 맞춰, 어떤 화면은 감싸고 어떤 화면은 아닌 상태를 없앤다.
+ */
 export default function BudgetsPage() {
+  return (
+    <Suspense fallback={null}>
+      <BudgetsView />
+    </Suspense>
+  );
+}
+
+function BudgetsView() {
   const { authedFetch } = useAuth();
   const { householdId, activeMembership } = useHousehold();
   const queryClient = useQueryClient();
@@ -177,9 +191,29 @@ export default function BudgetsPage() {
     activeMembership?.role === "owner" || activeMembership?.role === "admin";
 
   const thisMonth = currentMonth();
-  // 보고 있는 달. 홈과 달리 URL에 싣지 않는다 — 예산 화면으로 오는 딥링크가 없고,
-  // 하단 탭으로 오갈 때 이전 선택이 남아 있으면 "왜 지난달이 보이지" 가 된다.
-  const [month, setMonth] = useState(thisMonth);
+  // 보고 있는 달은 URL(`?month=YYYY-MM`)이 소유한다 — 홈·거래와 같은 규칙이다.
+  //
+  // 예전에는 로컬 state였다. "탭으로 돌아오면 이번 달로 리셋되는 게 낫다"는 판단이
+  // 었는데, 사용자에게는 그냥 버그로 읽혔다: 홈에서 7월을 보다가 예산 탭을 누르면
+  // 8월이 나온다. C-4가 월 원장을 넣어 "어느 달의 계획인가"가 화면의 주제가 된
+  // 뒤로는 더 어긋난다. 무효한 값은 조용히 이번 달로 되돌린다.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const monthParam = searchParams.get("month");
+  const month = monthParam && isMonthKey(monthParam) ? monthParam : thisMonth;
+  // 이번 달이면 쿼리스트링을 없애 링크를 짧게 유지한다(기본 상태 = 파라미터 없음).
+  // replace: 달을 5번 넘겼다고 뒤로가기를 5번 눌러야 하면 안 된다.
+  const setMonth = useCallback(
+    (next: string) => {
+      router.replace(
+        next === thisMonth
+          ? "/budgets"
+          : `/budgets?month=${encodeURIComponent(next)}`,
+        { scroll: false },
+      );
+    },
+    [router, thisMonth],
+  );
   const isCurrentMonth = month === thisMonth;
   const isPastMonth = month < thisMonth;
   const isFutureMonth = month > thisMonth;
@@ -438,36 +472,37 @@ export default function BudgetsPage() {
           </Card>
         ) : items.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-              <span className="bg-accent text-accent-foreground flex size-12 items-center justify-center rounded-full">
-                <Wallet className="size-6" aria-hidden="true" />
-              </span>
-              <p className="mt-1 text-[15px] font-semibold">
-                {isPastMonth ? "예산 기록이 없어요" : "아직 예산이 없어요"}
-              </p>
-              <p className="text-muted-foreground text-sm">
-                {isPastMonth
-                  ? "월 원장을 도입하기 전이거나 그 달에 만든 계획이 없어요"
-                  : isCurrentMonth
-                  ? "예산을 만들어 두면 넘치기 전에 미리 알 수 있어요"
-                  : "다음 달 계획을 미리 만들어 둘 수 있어요"}
-              </p>
-              {/* 과거월에서는 CTA도 권한 안내도 띄우지 않는다 — 그 달에 예산이
-                  없었다는 사실만 남기면 되고, 지금 만들 수 있는 것은 이번 달 예산이다. */}
-              {canEdit ? (
-                <Button
-                  type="button"
-                  size="lg"
-                  className="mt-3"
-                  onClick={() => setCreateOpen(true)}
-                >
-                  예산 만들기
-                </Button>
-              ) : !canManage && isCurrentMonth ? (
-                <p className="text-muted-foreground text-[13px]">
-                  예산은 가족의 소유자나 관리자가 만들 수 있어요
-                </p>
-              ) : null}
+            {/* 과거월에서는 CTA도 권한 안내도 띄우지 않는다 — 그 달에 예산이
+                없었다는 사실만 남기면 되고, 지금 만들 수 있는 것은 이번 달 예산이다. */}
+            <CardContent>
+              <EmptyState
+                icon={<Wallet />}
+                iconClassName="bg-accent text-accent-foreground"
+                title={isPastMonth ? "예산 기록이 없어요" : "아직 예산이 없어요"}
+                description={
+                  isPastMonth
+                    ? "월 원장을 도입하기 전이거나 그 달에 만든 계획이 없어요"
+                    : isCurrentMonth
+                    ? "예산을 만들어 두면 넘치기 전에 미리 알 수 있어요"
+                    : "다음 달 계획을 미리 만들어 둘 수 있어요"
+                }
+                action={
+                  canEdit ? (
+                    <Button
+                      type="button"
+                      size="lg"
+                      className="w-full"
+                      onClick={() => setCreateOpen(true)}
+                    >
+                      예산 만들기
+                    </Button>
+                  ) : !canManage && isCurrentMonth ? (
+                    <p className="text-muted-foreground text-[13px]">
+                      예산은 가족의 소유자나 관리자가 만들 수 있어요
+                    </p>
+                  ) : null
+                }
+              />
             </CardContent>
           </Card>
         ) : (

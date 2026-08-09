@@ -573,7 +573,7 @@ PO 원 점수의 Effort는 M이 2와 3에 걸쳐 있다 — 원문 값을 그대
 | C-3 Control Center 본체 (보존정책 선택 · 원문 purge 잡 · 삭제 이력) | L | 법적 보관·삭제 요구가 관할·운영 정책 검토를 필요로 한다. 8주에 불완전하게 밀어 넣으면 "지웠다고 했는데 남아 있다"가 되어 P0-2보다 나쁜 신뢰 사고가 된다 | S3의 버전된 동의 스키마가 배포된 직후, 다음 분기 첫 항목 |
 | owner 데이터 내보내기 · 가족 그룹 삭제 (PO B9) | L | 비동기 export·만료 링크·재인증·유예 기간·감사 이벤트가 한 묶음이다. 위 항목과 같은 데이터 모델을 쓰므로 따로 만들면 두 번 만든다 | Control Center 본체와 동시 |
 | C-6 Dual-mode AI 허브 (Slack 업로드 · 업무 질의 · 기억 후보 승인 · 타임라인) | L | RICE 15.0으로 최하위이고 owner 전용이라 Reach가 가장 작다. **Memory·Graph 목록 API에 페이지 상한이 없어**(`apps/api/src/memory/memory.controller.ts:59-77`) 표면을 열면 그대로 성능 사고가 된다. 구현 비용은 이미 지불됐으므로 자산이 사라지지는 않는다 | 페이지네이션(아래) 완료 후. 그 전에 S4에서 카피·거부만 정직하게 만든다 |
-| C-8 할 일 **탭 신설** + `/more` 3그룹 재편 + 아바타 메뉴 확장 (데이터 표면 `/todo`는 완료) | M + S | 하단 탭 구조 변경은 사용자 재학습 비용이 든다. 정기 지출(S4)과 예산 원장이 홈·`/more`의 정보량을 바꾸므로, **표면이 확정된 뒤 한 번에** 옮겨야 재학습이 한 번으로 끝난다. 화면과 데이터는 이미 있으므로 남은 것은 탭 슬롯과 배지뿐이고, 배지는 `useTodoCounts().total`을 그대로 쓴다 | S4 종료 후 IA 개편을 한 덩어리로 |
+| ~~C-8 할 일 탭 신설 + `/more` 3그룹 재편 + 아바타 메뉴 확장~~ **(2026-08-10 처리됨)** | M + S | 보류 조건이던 "표면 확정"이 `0f56d77`로 충족돼 **한 덩어리로** 옮겼다(ADR-0031). '더보기' 탭이 헤더 아바타로 올라가고 그 슬롯을 '할 일'이 받았다. 재학습은 한 번으로 끝났고, IA에 묶여 있던 P2·P3도 같이 정리했다(아래 표 참조) | — |
 | 비밀번호 찾기 | M | 저장소 전체에 `password-reset`/`forgot` 구현이 0건이고, 메일 발송 인프라부터 필요하다 | 인증 인프라 작업을 여는 시점. 그때까지 로그인 실패 반복 시 안내 문구만 제공 |
 | 정기 결제 완전판 (다음 예상일 · 월 구독 총액 · 해지 종료 처리 · 카드 교체 CTA) | M | S4는 **후보 표시와 사용자 확정까지만** 한다. 예상일·총액은 확정 데이터가 쌓인 뒤라야 정확도를 평가할 수 있다 | 확정 후보가 축적되고 정밀도 목표를 만족한 뒤 |
 
@@ -584,24 +584,25 @@ PO 원 점수의 Effort는 M이 2와 3에 걸쳐 있다 — 원문 값을 그대
 | HMAC nonce 만료 행 정리 잡 부재 (테이블 무한 증가) | `apps/api/src/devices/device-hmac.guard.ts:121` · `docs/adr/0007-device-hmac-authentication.md:129` | 현재 수집량에서 즉시 장애는 아니다. **테이블 크기를 운영 지표로 감시하다가 임계를 넘으면 승격한다** |
 | ~~Memory·Graph 목록 API 페이지 상한 없음~~ **(2026-08-09 처리됨)** | `apps/api/src/memory/pagination.ts` | C-6 표면을 열기 직전에 커서 페이지네이션으로 해소. 남은 미적용: `graph/timeline` · `graph/entities/:id`(둘 다 단일 엔티티 범위라 상한이 그 엔티티의 차수로 묶인다) |
 | ADR-0023 파서 품질 지표(`llm_span_reject_rate` 등) 미저장 | `docs/adr/0023-card-sms-ai-parsing-cascade.md:198` · `apps/worker/src/processors/card-sms-parse.processor.ts:227` | 카드사 문구 개편을 조기 감지하는 관측 자산이지만, S2에서 파서 자체를 바꾸므로 **변경 후의 파이프라인에 맞춰 지표를 정의**하는 편이 낫다 |
-| `/more/merchants` 액션 바가 iOS 탭바와 겹침 | `apps/web/src/app/(app)/more/merchants/page.tsx:239` (하드코딩 `bottom-20`) · `apps/web/src/app/globals.css:174` | 레이아웃 기하 토큰(`--app-tabbar-h`)으로 바꾸는 S 작업. IA 개편과 함께 |
+| ~~`/more/merchants` 액션 바가 iOS 탭바와 겹침~~ **(2026-08-10 처리됨)** | `apps/web/src/app/globals.css`의 `--app-tabbar-h` | IA 개편과 함께 토큰으로 교체(ADR-0031). 키보드가 열리면 토큰이 0이 되어 액션 바가 입력바에 붙는 동작도 따라온다 |
 | Android 하드웨어 뒤로가기가 루트에서 앱을 닫지 못함 | 프론트 진단 P2 | 네이티브 셸 사용자 한정 |
 | `/devices`에서 권한 없는 구성원에게 폐기·재발급 메뉴 노출 | 프론트 진단 P2 | 서버가 권한을 막고 있어 데이터 사고는 아니다. 마법사 개편(S3)에서 같은 다이얼로그를 만지므로 그때 함께 |
 | SSE 힌트 무효화 범위에 결제 실패·가맹점·카드 누락 | 프론트 진단 P2 | 새로고침으로 복구된다 |
 | 취소 연결 후보를 "최근 승인 100건"에서만 탐색 | 프론트 진단 P2 | S2에서 취소 도메인 서비스를 공통화하므로 그 위에서 다시 판단 |
-| 딥링크로 열 수 없는 거래를 열면 무반응 · 터치 타깃 44px 불일치 · `PageBackHeader` 뒤로가기 `/more` 고정 · `useSearchParams` Suspense 경계 불일치 | 프론트 진단 P2 | 개별 S이지만 사용자 손실이 작다. IA 개편 배치에 묶어 한 번에 |
+| 딥링크로 열 수 없는 거래를 열면 무반응 | 프론트 진단 P2 | 남아 있다. 거래 상세 폴백(403/404)에서 조용히 목록에 머무는 동작 — IA 개편 때 화면을 열지 않아 손대지 않았다 |
+| ~~터치 타깃 44px 불일치 · `PageBackHeader` 뒤로가기 `/more` 고정 · `useSearchParams` Suspense 경계 불일치~~ **(2026-08-10 처리됨)** | 프론트 진단 P2 | IA 개편 배치에서 함께 정리(ADR-0031). 뒤로가기는 `lib/nav-history.ts`로 "온 길"과 "딥링크로 연 화면"을 구분한다. 44px은 **만진 화면 안에서만** — 전면 스윕은 하지 않았다 |
 
 ### 5-3. P3 · 디자인 시스템 부채
 
 | 항목 | 근거 |
 |---|---|
 | 모바일 `trailingSlash: true`와 알림 딥링크 경로 표기 불일치 `[가설]` · `/budgets` 전월 예산 이중 조회 · `/declines` React key 충돌 가능 · `/ai` 대화 내역 휘발 | 프론트 진단 P3 |
-| 빈 상태 마크업 4종 (`EmptyState`가 `dashboard`에만 지역 정의 — `widgets` 승격 필요) | `apps/web/src/app/(app)/dashboard/page.tsx:1155` vs `cards:409`, `devices:238`, `household:331`, `budgets:353` |
+| ~~빈 상태 마크업 4종~~ **(2026-08-10 처리됨)** | `apps/web/src/components/widgets/empty-state.tsx`로 승격. 홈·카드·가족·예산이 그것을 쓴다(ADR-0031) |
 | 페이지 헤더 3종 (`PageBackHeader` / `sr-only h1` / 일반 `h1`) · 파괴적 확인 버튼 배치 2종 · 월 선택 인터랙션 2종(`MonthSwitcher` vs 필터칩) | 디자인 진단 D-2 |
 | `components/ui`에 checkbox 프리미티브 부재로 원시 `<input type="checkbox">` 사용 | `apps/web/src/app/(app)/transactions/page.tsx:1392` · `apps/web/src/app/join/page.tsx:146` |
 | 하드코딩 색상 4곳(`text-amber-600`, `bg-destructive text-white` 2곳, `member-color.ts` 팔레트) — 토큰 우회 | `apps/web/src/app/(app)/cards/page.tsx:596` 외 |
 | 버튼 라벨·로딩 문구·종결어미 불일치 (`저장하기`/`저장`, `불러오는 중…`/`불러오고 있어요…` 5종, 합쇼체 혼재) | 디자인 진단 C-2·C-3·C-5 |
-| `/budgets`만 월 선택을 URL에 저장하지 않아 홈에서 7월을 보다 예산 탭을 누르면 8월로 리셋 | `apps/web/src/app/(app)/budgets/page.tsx:131-133` (의도적 결정이나 사용자에겐 버그로 읽힘) |
+| ~~`/budgets`만 월 선택을 URL에 저장하지 않음~~ **(2026-08-10 처리됨)** | 홈·거래와 같이 `?month=`가 소유한다. 월 원장(ADR-0030) 이후로는 "어느 달의 계획인가"가 화면의 주제라 리셋이 더 어긋났다 |
 
 **공통 이유**: 위 항목들은 개별 공수가 작지만 **각각 배포하면 리뷰·회귀 비용이 본체보다 크다.** S4 이후 IA 개편에 묶어 한 번에 처리하되, 해당 화면을 다른 이유로 여는 스프린트가 있으면 그때 함께 정리한다(예: S3의 마법사 작업 중 `/devices` 문구·권한 메뉴).
 

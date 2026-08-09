@@ -67,7 +67,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
+import {
+  EmptyState,
+  ListRow,
+  PageBackHeader,
+  StatusBadge,
+} from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -406,29 +411,20 @@ export default function CardsPage() {
               {errorMessage(cardsQuery.error, "카드를 불러오지 못했어요.")}
             </p>
           ) : cards.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <span className="bg-muted flex size-12 items-center justify-center rounded-full">
-                <CreditCard
-                  className="text-muted-foreground size-6"
-                  aria-hidden="true"
-                />
-              </span>
-              <div className="flex flex-col gap-1">
-                <p className="text-[15px] font-semibold">
-                  아직 등록된 카드가 없어요
-                </p>
-                <p className="text-muted-foreground text-[13px]">
-                  카드를 등록하면 문자 내역이 자동으로 연결돼요
-                </p>
-              </div>
-              <Button
-                type="button"
-                className="mt-1"
-                onClick={() => setRegisterOpen(true)}
-              >
-                <Plus /> 카드 등록하기
-              </Button>
-            </div>
+            <EmptyState
+              icon={<CreditCard />}
+              title="아직 등록된 카드가 없어요"
+              description="카드를 등록하면 문자 내역이 자동으로 연결돼요"
+              action={
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => setRegisterOpen(true)}
+                >
+                  <Plus /> 카드 등록하기
+                </Button>
+              }
+            />
           ) : (
             <div className="flex flex-col">
               {cards.map((c) => {

@@ -234,9 +234,12 @@ export default function MerchantsPage() {
         </>
       )}
 
-      {/* 선택 액션 바 — 2개 이상 골랐을 때만 뜬다(하단 탭 위로 띄움). */}
+      {/* 선택 액션 바 — 2개 이상 골랐을 때만 뜬다(하단 탭 위로 띄움).
+          높이는 `--app-tabbar-h`(globals.css)에서 가져온다. 하드코딩 `bottom-20`
+          (=5rem)은 safe-area를 빼먹어 iPhone(inset 34px)에서 탭바가 이 바를 덮었고,
+          탭 구성이 바뀔 때마다 다시 어긋난다. 토큰이 단일 출처다. */}
       {selected.size >= 2 ? (
-        <div className="fixed inset-x-0 bottom-20 z-30 px-4">
+        <div className="fixed inset-x-0 bottom-[calc(var(--app-tabbar-h)+0.5rem)] z-30 px-4">
           <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border bg-background/95 p-3 shadow-lg backdrop-blur">
             <span className="flex-1 pl-1 text-sm">
               {selected.size}개를 골랐어요
