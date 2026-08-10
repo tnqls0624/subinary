@@ -7,7 +7,7 @@
  * - 주 액션은 '어디서 썼는지 보기'(→ 그 예산 스코프로 필터된 거래 목록, C-7).
  *   수정/삭제는 `⋯` 메뉴로 내렸다 — 초과를 알린 뒤 '예산을 늘려라/지워라'만
  *   제안하는 건 가계부가 줄 수 있는 최악의 조언이다.
- * - 상태 카피: usageRate 80%↑ 경고(text-warning), 100%↑ 초과(text-destructive).
+ * - 상태 카피: usageRate 80%↑ 경고(text-warning-strong), 100%↑ 초과(text-destructive).
  * - 생성: 상단 우측 "예산 만들기" 주 CTA → Dialog("얼마까지 쓸까요?").
  *   scopeType + (member/category/card면) 대상 select + 월 예산 금액(KRW 정수).
  * - 수정(이름/금액) Dialog / 삭제 AlertDialog(질문형). CRUD는 owner/admin만
@@ -156,7 +156,7 @@ function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
   }
   if (budget.usageRate >= 0.8) {
     return (
-      <p className="text-warning text-[13px] font-medium">
+      <p className="text-warning-strong text-[13px] font-medium">
         예산이 얼마 안 남았어요
       </p>
     );

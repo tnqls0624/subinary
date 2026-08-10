@@ -589,7 +589,7 @@ export default function CardsPage() {
                   비워 두면 이 카드로는 문자가 자동 연결되지 않아요.
                 </p>
               ) : duplicateTail ? (
-                <p className="text-warning text-[13px]">
+                <p className="text-warning-strong text-[13px]">
                   뒤 4자리가 같은 카드가 이미 있어요. 문자가 어느 카드에 연결될지
                   섞일 수 있어요.
                 </p>

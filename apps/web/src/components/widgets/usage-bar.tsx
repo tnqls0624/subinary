@@ -49,7 +49,7 @@ export function UsageBar({
     usageRate >= 1
       ? "text-destructive"
       : usageRate >= 0.8
-        ? "text-warning"
+        ? "text-warning-strong"
         : "text-muted-foreground";
 
   const body = (

@@ -161,7 +161,7 @@ export default function TodoPage() {
             key={t.id}
             href={transactionDetailHref(t.id)}
             icon={<CircleAlert />}
-            iconClassName="bg-warning/15 text-warning"
+            iconClassName="bg-warning/15 text-warning-strong"
             title={merchantLabel(t)}
             subtitle={formatDate(t.approvedAt)}
             value={<Money amount={t.netAmount} currency={t.currency} />}
@@ -198,7 +198,7 @@ export default function TodoPage() {
             key={e.id}
             onClick={() => setSelectedSms(e)}
             icon={<MailWarning />}
-            iconClassName="bg-warning/15 text-warning"
+            iconClassName="bg-warning/15 text-warning-strong"
             title={e.sender}
             subtitle={smsSubtitle(e)}
             value={

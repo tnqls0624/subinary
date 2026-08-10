@@ -23,7 +23,7 @@ const KIND_STYLE: Record<
   { icon: typeof TrendingUp; className: string }
 > = {
   trend: { icon: TrendingUp, className: "text-accent-foreground bg-accent" },
-  anomaly: { icon: AlertTriangle, className: "text-warning bg-warning/10" },
+  anomaly: { icon: AlertTriangle, className: "text-warning-strong bg-warning/10" },
   budget: { icon: Wallet, className: "text-destructive bg-destructive/10" },
 };
 

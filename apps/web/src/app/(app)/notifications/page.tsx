@@ -36,7 +36,7 @@ interface KindMeta {
 /** 알림 유형별 아이콘 + 원형 배경색. */
 const KIND_META: Record<NotificationKind, KindMeta> = {
   transaction: { icon: CreditCard, className: "bg-primary/15 text-primary" },
-  budget: { icon: CircleAlert, className: "bg-warning/15 text-warning" },
+  budget: { icon: CircleAlert, className: "bg-warning/15 text-warning-strong" },
   reminder: { icon: CircleCheck, className: "bg-accent text-accent-foreground" },
   summary: { icon: ChartColumn, className: "bg-primary/15 text-primary" },
   decline: { icon: AlertTriangle, className: "bg-destructive/10 text-destructive" },

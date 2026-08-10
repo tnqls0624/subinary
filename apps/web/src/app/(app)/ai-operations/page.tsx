@@ -73,8 +73,8 @@ function Dashboard({ data }: { data: LearningOperationsMetricsResponse }) {
               unhealthy
                 ? "bg-destructive/10 text-destructive"
                 : warning
-                  ? "bg-warning/15 text-warning"
-                  : "bg-success/15 text-success"
+                  ? "bg-warning/15 text-warning-strong"
+                  : "bg-success/15 text-success-strong"
             }`}
           >
             {unhealthy || warning ? (

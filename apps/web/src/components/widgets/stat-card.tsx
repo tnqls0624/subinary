@@ -22,7 +22,7 @@ const TREND_ARROW: Record<TrendDirection, string> = {
 
 const TREND_CLASS: Record<TrendDirection, string> = {
   up: "text-destructive",
-  down: "text-success",
+  down: "text-success-strong",
   flat: "text-muted-foreground",
 };
 

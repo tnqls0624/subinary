@@ -925,7 +925,7 @@ function TodoCard({
           <ListRow
             href="/transactions"
             icon={<CircleAlert />}
-            iconClassName="bg-warning/15 text-warning"
+            iconClassName="bg-warning/15 text-warning-strong"
             title="확인이 필요한 거래"
             subtitle={
               todo.reviewsError
@@ -938,7 +938,7 @@ function TodoCard({
                   !todo.reviewsLoading &&
                   !todo.reviewsError &&
                   todo.reviews.length > 0
-                    ? "text-warning"
+                    ? "text-warning-strong"
                     : "text-muted-foreground"
                 }
               >
@@ -958,7 +958,7 @@ function TodoCard({
           <>
             <ListRow
               icon={<MailWarning />}
-              iconClassName="bg-warning/15 text-warning"
+              iconClassName="bg-warning/15 text-warning-strong"
               title="확인이 필요한 문자"
               subtitle={
                 todo.smsError
@@ -971,7 +971,7 @@ function TodoCard({
                 <span
                   className={
                     !todo.smsLoading && !todo.smsError && recentSmsCount > 0
-                      ? "text-warning"
+                      ? "text-warning-strong"
                       : "text-muted-foreground"
                   }
                 >
