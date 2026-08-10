@@ -517,9 +517,9 @@ export default function CategoriesPage() {
                           <AlertDialogCancel>취소</AlertDialogCancel>
                           <AlertDialogAction
                             onClick={() => void onDelete(cat)}
-                            className="bg-destructive text-white hover:bg-destructive/90"
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           >
-                            삭제
+                            삭제하기
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>

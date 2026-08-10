@@ -291,8 +291,14 @@ export async function initKeyboardUx(): Promise<void> {
 interface InitNativeOptions {
   /** 딥링크로 들어온 앱-내부 경로(예: "/join?token=..."). 라우터로 이동시킨다. */
   onDeepLink?: (path: string) => void;
-  /** Android 하드웨어 뒤로가기 — 루트에서 눌리면 앱 종료 여부 판단용. */
-  canGoBack?: () => boolean;
+  /**
+   * Android 하드웨어 뒤로가기 1회.
+   *
+   * **무엇을 할지는 앱이 정한다.** 예전에는 여기서 `window.history.length > 1`로
+   * 판정했는데, 탭을 한 번이라도 옮기면 루트에서도 참이라 앱이 영영 안 닫혔다.
+   * 판정은 현재 경로를 아는 쪽(`native-bootstrap.tsx` + `lib/back-button.ts`)에 있다.
+   */
+  onBackButton?: () => void;
   /**
    * 백그라운드 → 포그라운드 복귀 콜백. 네이티브 앱은 웹뷰가 계속 살아있어
    * 복귀 시 리로드가 없으므로, 그 사이 서버에서 바뀐 데이터(다른 가족의
@@ -539,15 +545,25 @@ export async function initNative(opts: InitNativeOptions = {}): Promise<void> {
     if (isActive) opts.onAppActive?.();
   });
 
-  // Android 하드웨어 뒤로가기: 이동 가능하면 히스토리 back, 루트면 앱을 백그라운드로.
+  // Android 하드웨어 뒤로가기 — 판정은 앱(현재 경로를 아는 쪽)이 한다.
   App.addListener("backButton", () => {
-    if (opts.canGoBack?.()) {
-      window.history.back();
-    } else {
-      void App.exitApp();
-    }
+    opts.onBackButton?.();
   });
 
   // 웹뷰 첫 렌더가 끝난 뒤 스플래시 제거(FOUC 방지).
   await SplashScreen.hide();
+}
+
+/**
+ * 앱 종료(Android). 웹·iOS에서는 아무 일도 하지 않는다 — iOS는 앱이 스스로 닫는 것을
+ * 허용하지 않고(HIG·심사 거부 사유), 웹에는 닫을 앱이 없다.
+ */
+export async function exitApp(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { App } = await import("@capacitor/app");
+    await App.exitApp();
+  } catch {
+    // 플러그인 로드/호출 실패는 무시 — 실패해도 사용자는 그냥 앱에 남는다.
+  }
 }

@@ -882,7 +882,7 @@ function BudgetsView() {
                 className="h-11 w-full"
                 disabled={updateMutation.isPending}
               >
-                {updateMutation.isPending ? "저장하는 중…" : "저장하기"}
+                {updateMutation.isPending ? "저장 중…" : "저장하기"}
               </Button>
               <Button
                 type="button"

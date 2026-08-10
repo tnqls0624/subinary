@@ -68,9 +68,15 @@ interface CollectSetupWizardProps {
    * 들어오면 null이다 — 그때는 토큰을 다시 보여줄 수 없고 재발급만 가능하다.
    */
   issued: DeviceSecretResponse | null;
-  /** 토큰을 잃어버렸을 때 재발급(rotate) 시키기. */
-  onReissue: () => void;
-  reissuePending: boolean;
+  /**
+   * 토큰을 잃어버렸을 때 재발급(rotate) 시키기.
+   *
+   * **재발급 권한이 없으면 넘기지 않는다**(undefined) — 서버가 owner 또는 장치를
+   * 등록한 본인만 통과시키므로, 그 밖의 구성원에게 버튼을 보여 주면 누를 때마다
+   * 실패한다(lib/device-permission.ts).
+   */
+  onReissue?: () => void;
+  reissuePending?: boolean;
   /**
    * 열릴 때 시작할 단계. 재발급·설정 이어가기로 들어오면 앱은 이미 깔려 있으므로
    * 2단계부터 시작한다 — 이미 한 일을 다시 시키면 사용자는 화면을 닫는다.
@@ -99,7 +105,7 @@ export function CollectSetupWizard({
   device,
   issued,
   onReissue,
-  reissuePending,
+  reissuePending = false,
   initialStep = 1,
 }: CollectSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>(initialStep);
@@ -300,19 +306,23 @@ export function CollectSetupWizard({
             ) : (
               <div className="bg-muted flex flex-col gap-2 rounded-lg p-3">
                 <p className="text-[13px]">
-                  열쇠 값은 등록할 때 한 번만 보여드려요. 적어둔 값이 없다면 새로
-                  발급받아 다시 넣어 주세요.
+                  열쇠 값은 등록할 때 한 번만 보여드려요.{" "}
+                  {onReissue
+                    ? "적어둔 값이 없다면 새로 발급받아 다시 넣어 주세요."
+                    : "적어둔 값이 없다면 이 장치를 등록한 사람이나 가족의 소유자가 새로 발급해 줄 수 있어요."}
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={onReissue}
-                  disabled={reissuePending}
-                >
-                  <RefreshCw />
-                  {reissuePending ? "발급하고 있어요…" : "새로 발급받기"}
-                </Button>
+                {onReissue ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onReissue}
+                    disabled={reissuePending}
+                  >
+                    <RefreshCw />
+                    {reissuePending ? "발급 중…" : "새로 발급받기"}
+                  </Button>
+                ) : null}
               </div>
             )}
 

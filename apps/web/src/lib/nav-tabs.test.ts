@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_PATHS,
   activeTabFor,
+  isTabRoot,
   isUnder,
   normalizePath,
+  TAB_ROOTS,
   TODO_PATHS,
 } from "./nav-tabs";
 
@@ -94,5 +96,31 @@ describe("activeTabFor — 모바일 trailingSlash", () => {
     expect(activeTabFor("/todo/")).toBe("todo");
     expect(activeTabFor("/more/privacy/")).toBe("account");
     expect(activeTabFor("/dashboard/")).toBe("home");
+  });
+});
+
+describe("isTabRoot — 뒤로가기가 앱을 닫아야 하는 지점", () => {
+  it("탭 루트 5개는 참", () => {
+    for (const root of TAB_ROOTS) {
+      expect(isTabRoot(root)).toBe(true);
+    }
+    expect(TAB_ROOTS).toHaveLength(5);
+  });
+
+  it("끝 슬래시(모바일 빌드)도 같은 판정", () => {
+    expect(isTabRoot("/dashboard/")).toBe(true);
+    expect(isTabRoot("/ai/")).toBe(true);
+  });
+
+  it("탭이 켜지는 하위 화면은 루트가 아니다 — 여기서는 상위로 올라가야 한다", () => {
+    expect(activeTabFor("/declines")).toBe("todo");
+    expect(isTabRoot("/declines")).toBe(false);
+    expect(isTabRoot("/transactions/abc")).toBe(false);
+  });
+
+  it("관리 화면·알림함은 루트가 아니다", () => {
+    for (const path of ["/more", "/devices", "/household", "/notifications"]) {
+      expect(isTabRoot(path)).toBe(false);
+    }
   });
 });

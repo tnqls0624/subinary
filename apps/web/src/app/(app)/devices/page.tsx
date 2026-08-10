@@ -72,9 +72,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ListRow, PageBackHeader, StatusBadge } from "@/components/widgets";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { canManageDevice, findMyMemberId } from "@/lib/device-permission";
 import { isSetupComplete } from "@/lib/device-signal";
 import { useHousehold } from "@/lib/household-context";
-import { useDevices } from "@/lib/queries";
+import { useDevices, useHouseholdMembers } from "@/lib/queries";
 import { formatDate } from "@/lib/format";
 
 /** 플랫폼 표시 라벨. */
@@ -93,11 +94,25 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export default function DevicesPage() {
-  const { authedFetch } = useAuth();
-  const { householdId } = useHousehold();
+  const { authedFetch, user } = useAuth();
+  const { householdId, activeMembership } = useHousehold();
   const queryClient = useQueryClient();
 
   const devicesQuery = useDevices();
+
+  // 재발급·폐기 권한 판정 재료. 둘 다 서버 응답에서 온다 — 역할은 /auth/me의 멤버십,
+  // 내 memberId는 구성원 목록에서 내 userId로 찾는다(lib/device-permission.ts).
+  // 이 화면에 구성원 목록 요청이 하나 는다(가족·거래·예산 화면과 같은 queryKey라
+  // 거기서 오면 캐시가 재사용된다). 소유자는 이 응답 없이도 판정되므로 목록이
+  // 늦거나 실패해도 소유자가 자기 장치에서 잠기지 않는다.
+  const membersQuery = useHouseholdMembers();
+  const permission = useMemo(
+    () => ({
+      role: activeMembership?.role ?? null,
+      myMemberId: findMyMemberId(membersQuery.data, user?.id),
+    }),
+    [activeMembership, membersQuery.data, user?.id],
+  );
 
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<DevicePlatform>("ios");
@@ -294,7 +309,10 @@ export default function DevicesPage() {
                       )
                     }
                   />
-                  {d.status === "active" ? (
+                  {/* 권한이 없으면 메뉴 자체를 감춘다 — 눌러도 항상 403인 버튼을
+                      비활성으로 남겨 두면 "언젠가 되는 것"으로 읽힌다. */}
+                  {d.status === "active" &&
+                  canManageDevice(permission, d.memberId) ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -445,7 +463,7 @@ export default function DevicesPage() {
                 className="h-11 w-full"
                 disabled={registerMutation.isPending}
               >
-                {registerMutation.isPending ? "등록하고 있어요…" : "등록하기"}
+                {registerMutation.isPending ? "등록 중…" : "등록하기"}
               </Button>
               <Button
                 type="button"
@@ -468,7 +486,12 @@ export default function DevicesPage() {
           device={wizardDevice}
           issued={wizard.issued}
           initialStep={wizard.initialStep}
-          onReissue={() => rotateMutation.mutate(wizard.deviceId)}
+          // 재발급 권한이 없으면 아예 넘기지 않는다 — 마법사가 버튼을 감춘다.
+          onReissue={
+            canManageDevice(permission, wizardDevice.memberId)
+              ? () => rotateMutation.mutate(wizard.deviceId)
+              : undefined
+          }
           reissuePending={rotateMutation.isPending}
         />
       ) : null}

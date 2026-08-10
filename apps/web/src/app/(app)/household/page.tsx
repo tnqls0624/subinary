@@ -693,7 +693,7 @@ export default function HouseholdPage() {
                     disabled={inviteMutation.isPending}
                   >
                     {inviteMutation.isPending
-                      ? "만들고 있어요…"
+                      ? "만드는 중…"
                       : "초대 만들기"}
                   </Button>
                   <Button

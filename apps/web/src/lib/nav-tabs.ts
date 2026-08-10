@@ -42,6 +42,21 @@ export const ACCOUNT_PATHS: ReadonlyArray<string> = [
   "/ai-operations",
 ];
 
+/**
+ * 하단 탭이 가리키는 **루트 경로 5개**(중앙 AI 버튼 포함). 순서는 탭바와 같다.
+ *
+ * `TODO_PATHS`/`ACCOUNT_PATHS`와 다른 목록인 이유: 저것들은 "어느 탭을 밝힐까"(하위
+ * 경로 포함)이고, 이것은 "여기가 그 탭의 첫 화면인가"다. Android 하드웨어 뒤로가기가
+ * 앱을 닫아야 하는 지점이 정확히 이 5곳이다(lib/back-button.ts).
+ */
+export const TAB_ROOTS: ReadonlyArray<string> = [
+  "/dashboard",
+  "/transactions",
+  "/ai",
+  "/budgets",
+  "/todo",
+];
+
 /** 끝 슬래시를 뗀 경로(루트는 `/` 유지). */
 export function normalizePath(pathname: string): string {
   if (!pathname) return "/";
@@ -54,6 +69,17 @@ export function isUnder(pathname: string, base: string): boolean {
   const path = normalizePath(pathname);
   const root = normalizePath(base);
   return path === root || path.startsWith(`${root}/`);
+}
+
+/**
+ * 지금 화면이 탭의 **루트**인가(하위 경로는 false).
+ *
+ * `activeTabFor(p) != null`과 헷갈리기 쉽다 — 그쪽은 `/transactions/123`도 '거래
+ * 탭'으로 세지만 여기서는 false다. 뒤로가기는 하위 화면에서 상위로 올라가야 한다.
+ */
+export function isTabRoot(pathname: string): boolean {
+  const path = normalizePath(pathname);
+  return TAB_ROOTS.some((root) => path === normalizePath(root));
 }
 
 /**

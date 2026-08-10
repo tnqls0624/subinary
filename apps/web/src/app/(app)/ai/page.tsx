@@ -34,7 +34,14 @@
  * ------------------------------------------------------------------------- */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Send, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { toast } from "sonner";
 
 import type {
@@ -45,6 +52,11 @@ import type {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  aiChatStorageKey,
+  loadAiChat,
+  saveAiChat,
+} from "@/lib/ai-chat-history";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
@@ -68,8 +80,13 @@ const FINANCE_SUGGESTIONS = [
 /** 이 거리(px) 이내면 '바닥에 붙어 있음'으로 간주 — 자동 스크롤 유지 판단 기준. */
 const NEAR_BOTTOM_PX = 80;
 
+/** 저장 키가 어긋난 순간에 쓰는 고정 빈 배열(매 렌더 새 배열이면 effect가 헛돈다). */
+const EMPTY_TURNS: Turn[] = [];
+
 interface Turn {
   id: number;
+  /** 저장 시각(ms) — 보존 기간 판정에 쓴다(lib/ai-chat-history.ts). */
+  at: number;
   scope: Scope;
   question: string;
   answer?: string;
@@ -88,7 +105,32 @@ export default function AiPage() {
   const { householdId } = useHousehold();
   const [scope, setScope] = useState<Scope>("finance");
   const [input, setInput] = useState("");
-  const [turns, setTurns] = useState<Turn[]>([]);
+
+  /* --- 대화 보존 -----------------------------------------------------------
+   * 대화는 `(가족, 범위)` 단위로 로컬에 남는다(lib/ai-chat-history.ts). 상태에
+   * **어느 키의 대화인지**를 함께 들고 있는 이유: 가족이나 범위가 바뀌면 로드
+   * effect가 새 대화를 넣기 전에 저장 effect가 먼저 돌 수 있는데, 그때 이전 범위의
+   * 문답을 새 키에 덮어쓰면 금융 답변이 업무 기억 쪽에 섞인다. 키가 어긋나면
+   * 저장도 화면 표시도 하지 않는다. */
+  const historyKey = householdId ? aiChatStorageKey(householdId, scope) : null;
+  const [chat, setChat] = useState<{ key: string | null; turns: Turn[] }>({
+    key: null,
+    turns: [],
+  });
+  const turns = useMemo(
+    () => (chat.key === historyKey ? chat.turns : EMPTY_TURNS),
+    [chat, historyKey],
+  );
+  const setTurns = useCallback(
+    (updater: (prev: Turn[]) => Turn[]) => {
+      setChat((prev) => ({
+        key: historyKey,
+        turns: updater(prev.key === historyKey ? prev.turns : []),
+      }));
+    },
+    [historyKey],
+  );
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
@@ -124,6 +166,27 @@ export default function AiPage() {
   });
 
   const pending = financeMutation.isPending || workMutation.isPending;
+
+  // 진입/가족·범위 전환 → 저장된 대화 복원. id는 화면 안에서만 쓰는 번호라 복원한
+  // 최대값 다음부터 이어 준다(같은 id가 두 번 나오면 말풍선이 잘못 재사용된다).
+  //
+  // 답이 없는 문답은 버린다: 요청 중에 화면을 떠난 것이라 이어받을 요청이 없고,
+  // 복원하면 영원히 '살펴보고 있어요…'로 남는다.
+  useEffect(() => {
+    if (!historyKey) return;
+    const restored = loadAiChat<Turn>(historyKey, Date.now()).filter(
+      (t) => t.answer !== undefined,
+    );
+    nextId.current = restored.reduce((max, t) => Math.max(max, t.id), 0) + 1;
+    setChat({ key: historyKey, turns: restored });
+  }, [historyKey]);
+
+  // 대화가 바뀔 때마다 저장. 키가 어긋난 커밋(전환 직후 1프레임)은 건너뛴다 —
+  // 여기서 쓰면 이전 범위의 답변이 새 범위 키에 들어간다.
+  useEffect(() => {
+    if (!historyKey || chat.key !== historyKey) return;
+    saveAiChat(historyKey, chat.turns, Date.now());
+  }, [historyKey, chat]);
 
   // 새 질문 추가 → 무조건 바닥으로(사용자 액션). 답변 갱신 → 사용자가 위로
   // 스크롤해 읽는 중이면 강제로 끌어내리지 않고, 바닥 근처였을 때만 따라간다.
@@ -165,7 +228,10 @@ export default function AiPage() {
 
     const id = nextId.current++;
     const asked = scope;
-    setTurns((prev) => [...prev, { id, scope: asked, question: q }]);
+    setTurns((prev) => [
+      ...prev,
+      { id, at: Date.now(), scope: asked, question: q },
+    ]);
     setInput("");
     try {
       const patch: Partial<Turn> =
@@ -193,11 +259,14 @@ export default function AiPage() {
     ask(input);
   }
 
-  /** 범위를 바꾸면 대화를 비운다 — 근거가 다른 답변이 한 줄에 섞이면 오해가 된다. */
+  /**
+   * 범위 전환. 두 범위는 **근거가 다른 답변**이라 한 줄에 섞이면 오해가 되므로
+   * 화면을 갈아 끼운다. 다만 지우지는 않는다 — 저장이 `(가족, 범위)`별이라
+   * 돌아오면 아까 보던 대화가 그대로 있다(로드 effect가 채운다).
+   */
   function switchScope(next: Scope) {
     if (next === scope) return;
     setScope(next);
-    setTurns([]);
     setInput("");
   }
 

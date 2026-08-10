@@ -34,6 +34,7 @@ import {
 
 import { ConnectionError } from "@/components/connection-error";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHouseholdStore } from "@/lib/store";
@@ -296,9 +297,8 @@ function JoinInner() {
          */}
         <div className="bg-muted flex flex-col gap-3 rounded-xl p-4 text-sm">
           <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              className="border-input text-primary focus-visible:ring-ring/50 mt-0.5 size-4 rounded-sm border focus-visible:ring-[3px]"
+            <Checkbox
+              className="mt-0.5"
               checked={consent}
               onChange={(e) => setConsent(e.target.checked)}
             />

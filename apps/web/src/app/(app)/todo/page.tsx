@@ -36,6 +36,7 @@ import {
   Money,
   ReviewInboxDialog,
   StatusBadge,
+  declineGroupKey,
   declineReasonHint,
   pendingCountText,
   useTodoCounts,
@@ -114,7 +115,8 @@ export default function TodoPage() {
           return (
             <ListRow
               // 묶음은 조회 시점 집계라 id가 없다 — (가맹점, 금액)이 묶음의 키다.
-              key={`${d.merchant}-${d.amount}`}
+              // 이어 붙이지 않는 이유는 declineGroupKey의 주석에 있다.
+              key={declineGroupKey(d)}
               href="/declines"
               icon={<AlertTriangle />}
               iconClassName="bg-destructive/10 text-destructive"

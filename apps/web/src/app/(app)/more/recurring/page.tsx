@@ -153,7 +153,7 @@ function SeriesRow({
           // 반복 거절은 기존 사유별 조치 화면으로 연결한다 — 여기서 조치를 새로 만들지 않는다.
           <Link
             href="/declines"
-            className="flex items-center gap-1.5 text-[13px] text-amber-600 dark:text-amber-500"
+            className="flex items-center gap-1.5 text-warning text-[13px]"
           >
             <AlertTriangle className="size-3.5 shrink-0" />
             <span className="truncate">

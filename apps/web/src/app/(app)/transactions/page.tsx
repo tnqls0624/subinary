@@ -29,6 +29,7 @@ import { DEFAULT_TIMEZONE } from "@family/shared";
 import { Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -80,6 +81,10 @@ import {
   useHouseholdMembers,
   useInfiniteTransactions,
 } from "@/lib/queries";
+import {
+  detailFallbackCopy,
+  detailFallbackReason,
+} from "@/lib/transaction-detail-fallback";
 import { cn } from "@/lib/utils";
 import { AddTransactionDialog } from "./add-transaction-dialog";
 
@@ -472,9 +477,10 @@ function TransactionsView() {
   const [addOpen, setAddOpen] = useState(false);
 
   // 푸시 알림 딥링크(?txn=<id>) → 해당 거래 상세 열기. 목록에 없을 수 있어
-  // (다른 월/필터) 단건 조회로 폴백한다. 볼 수 없는 거래(private/masked)는
-  // 403/404가 나므로 조용히 리스트로 남는다. 상세를 연 뒤 URL에서 ?txn을 제거해,
-  // 같은 알림을 다시 탭하면(같은 경로 push) effect가 재실행되어 다시 열리게 한다.
+  // (다른 월/필터) 단건 조회로 폴백한다. 조회가 실패하면 **조용히 리스트에 머물지
+  // 않고** 이유를 말한다(아래 detailFallback) — 예전에는 아무 일도 일어나지 않아
+  // 사용자가 앱이 멈춘 줄 알았다. 상세를 연 뒤 URL에서 ?txn을 제거해, 같은 알림을
+  // 다시 탭하면(같은 경로 push) effect가 재실행되어 다시 열리게 한다.
   useEffect(() => {
     const txnParam = searchParams.get("txn");
     if (!txnParam) return;
@@ -510,6 +516,12 @@ function TransactionsView() {
       detailFallbackQuery.data ??
       null)
     : null;
+
+  // 폴백까지 실패한 경우 = 열 수 없는 딥링크. 이유(없음/막힘/오류)를 구분해 알린다.
+  const detailFallbackError =
+    detailId != null && !inList && detailFallbackQuery.isError
+      ? detailFallbackCopy(detailFallbackReason(detailFallbackQuery.error))
+      : null;
 
   const mutation = useMutation({
     mutationFn: (action: RowAction): Promise<TransactionSummary> =>
@@ -1037,6 +1049,41 @@ function TransactionsView() {
         />
       ) : null}
 
+      {/* 열 수 없는 딥링크 — 상세가 열렸어야 할 자리에 이유를 띄운다.
+          모달인 이유: 사용자가 방금 "이 거래를 보여줘"를 눌렀고, 그 자리에 답이
+          없으면 목록 어딘가의 토스트로는 못 알아챈다. */}
+      <AlertDialog
+        open={detailFallbackError !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{detailFallbackError?.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {detailFallbackError?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>닫기</AlertDialogCancel>
+            {detailFallbackError?.retryable ? (
+              // 일시적 오류만 재시도를 권한다. 없는/막힌 거래는 다시 눌러도 같다.
+              <AlertDialogAction
+                disabled={detailFallbackQuery.isFetching}
+                onClick={(e) => {
+                  // preventDefault: 재시도는 다이얼로그를 닫지 않는다(또 실패할 수 있다).
+                  e.preventDefault();
+                  void detailFallbackQuery.refetch();
+                }}
+              >
+                {detailFallbackQuery.isFetching ? "불러오는 중…" : "다시 시도"}
+              </AlertDialogAction>
+            ) : null}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {memoTarget ? (
         <MemoModal
           txn={memoTarget}
@@ -1403,9 +1450,7 @@ function TransactionDetailDialog({
             )}
 
             <label className="flex w-fit cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                className="size-4"
+              <Checkbox
                 checked={applyRule}
                 onChange={(e) => onApplyRuleChange(e.target.checked)}
               />
@@ -1517,10 +1562,10 @@ function TransactionDetailDialog({
                 <AlertDialogFooter>
                   <AlertDialogCancel>취소</AlertDialogCancel>
                   <AlertDialogAction
-                    className="bg-destructive text-white hover:bg-destructive/90"
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     onClick={onDelete}
                   >
-                    삭제
+                    삭제하기
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

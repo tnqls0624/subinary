@@ -589,7 +589,7 @@ export default function CardsPage() {
                   비워 두면 이 카드로는 문자가 자동 연결되지 않아요.
                 </p>
               ) : duplicateTail ? (
-                <p className="text-[13px] text-amber-600 dark:text-amber-500">
+                <p className="text-warning text-[13px]">
                   뒤 4자리가 같은 카드가 이미 있어요. 문자가 어느 카드에 연결될지
                   섞일 수 있어요.
                 </p>
@@ -637,7 +637,7 @@ export default function CardsPage() {
                 className="h-11 w-full"
                 disabled={createMutation.isPending}
               >
-                {createMutation.isPending ? "등록하고 있어요…" : "등록하기"}
+                {createMutation.isPending ? "등록 중…" : "등록하기"}
               </Button>
               <Button
                 type="button"
@@ -723,7 +723,7 @@ export default function CardsPage() {
                 className="h-11 w-full"
                 disabled={updateMutation.isPending}
               >
-                {updateMutation.isPending ? "저장하고 있어요…" : "저장하기"}
+                {updateMutation.isPending ? "저장 중…" : "저장하기"}
               </Button>
               <Button
                 type="button"

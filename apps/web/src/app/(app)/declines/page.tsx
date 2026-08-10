@@ -17,27 +17,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PageBackHeader } from "@/components/widgets";
+import {
+  declineGroupKey,
+  declineReasonHint,
+  PageBackHeader,
+} from "@/components/widgets";
 import { formatRelativeTime, formatWon } from "@/lib/format";
 import { useDeclineList, useSetDeclineDismissed } from "@/lib/queries";
-import type { CardSmsDeclineGroup, CardSmsDeclineReason } from "@family/contracts";
-
-/** 사유 → 사용자가 할 일. 미등록 사유는 문구를 만들지 않는다(추측 안내 금지). */
-const REASON_HINT: Partial<Record<CardSmsDeclineReason, string>> = {
-  lost_or_stolen: "분실 신고된 카드예요 · 결제수단을 바꿔주세요",
-  limit_exceeded: "한도를 넘었어요",
-  insufficient_balance: "잔액이 부족해요",
-  expired_card: "유효기간이 지났어요",
-  suspended: "정지된 카드예요",
-  invalid_credential: "카드 정보가 맞지 않아요",
-};
+import type { CardSmsDeclineGroup } from "@family/contracts";
 
 function DeclineRow({ item }: { item: CardSmsDeclineGroup }) {
   const autoResolved = item.resolvedAt !== null;
   const dismissed = item.dismissedAt !== null;
   // 조치가 끝난 것(자동 해결 또는 사용자 확인)은 회색 톤으로 내린다.
   const done = autoResolved || dismissed;
-  const hint = item.reason ? REASON_HINT[item.reason] : undefined;
+  // 사유 → 조치 문구는 홈 '할 일' 카드와 **같은 표**를 쓴다(사본을 두면 갈린다).
+  const hint = declineReasonHint(item.reason);
   const mutation = useSetDeclineDismissed();
 
   return (
@@ -162,10 +157,7 @@ export default function DeclinesPage() {
               </p>
               <Card className="divide-border divide-y overflow-hidden p-0">
                 {unresolved.map((item) => (
-                  <DeclineRow
-                    key={`${item.merchant}-${item.amount}`}
-                    item={item}
-                  />
+                  <DeclineRow key={declineGroupKey(item)} item={item} />
                 ))}
               </Card>
             </div>
@@ -178,10 +170,7 @@ export default function DeclinesPage() {
               </p>
               <Card className="divide-border divide-y overflow-hidden p-0">
                 {resolved.map((item) => (
-                  <DeclineRow
-                    key={`${item.merchant}-${item.amount}`}
-                    item={item}
-                  />
+                  <DeclineRow key={declineGroupKey(item)} item={item} />
                 ))}
               </Card>
             </div>

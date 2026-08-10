@@ -47,6 +47,9 @@ import {
 } from "./api-client";
 import { useAuth } from "./auth-context";
 import { useHousehold } from "./household-context";
+import { TRANSACTION_SCOPE_KEYS } from "./invalidation-scope";
+
+export { TRANSACTION_SCOPE_KEYS };
 
 /**
  * 처리 대기 백로그를 한 번에 스캔할 상한 — 거래·카드문자 목록 API의 최대 limit과 같다.
@@ -90,21 +93,21 @@ export const queryKeys = {
 };
 
 /**
- * 거래 변화에 영향받는 쿼리 일괄 무효화(거래·집계·예산·인사이트·카드문자 이벤트).
+ * 거래 변화에 영향받는 쿼리 일괄 무효화.
  * 뮤테이션 onSuccess와 실시간 힌트(activity-provider) 양쪽에서 공용으로 쓴다 —
  * 새 화면이 생겨도 여기 한 곳만 유지하면 무효화 누락이 없다.
+ *
+ * ⚠️ **비용은 화면에 떠 있는 쿼리 수만큼이다.** `invalidateQueries`는 활성 관찰자가
+ * 있는 쿼리만 다시 가져오므로, 접두를 늘려도 그 화면이 안 쓰는 쿼리는 요청이 되지
+ * 않는다. 다만 `useTodoCounts()`는 IA 개편 이후 **하단 탭 배지 때문에 모든 화면에서
+ * 돈다**(app/(app)/layout.tsx) — 그 훅의 4개 쿼리는 힌트마다 재요청된다:
+ * 거래 2건(`pending_review`·`duplicate_suspected`)과 카드문자 검토함은 원래도
+ * 무효화 대상이었고, 여기서 늘어난 것은 **결제 실패 1건뿐**이다. 힌트는 400ms
+ * 디바운스되므로(activity-provider.tsx) 승격 폭주도 1회로 합쳐진다.
+ * `merchants`·`cards`는 각각 `/more/merchants`·거래/카드 화면에서만 활성이다.
  */
 export function invalidateTransactionScope(qc: QueryClient): void {
-  for (const key of [
-    ["transactions"],
-    ["analytics"],
-    ["budgets"],
-    ["monthly-insights"],
-    ["card-sms-events"],
-    ["merchant-label-candidates"],
-    // 카테고리 이름 변경/삭제(가족 원격 편집)가 목록·아이콘에 반영되도록 포함.
-    ["categories"],
-  ]) {
+  for (const key of TRANSACTION_SCOPE_KEYS) {
     void qc.invalidateQueries({ queryKey: key });
   }
 }

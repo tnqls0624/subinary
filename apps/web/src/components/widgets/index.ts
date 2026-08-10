@@ -9,7 +9,7 @@ export { EmptyState } from "./empty-state";
 export { PageBackHeader } from "./page-back-header";
 export { MonthSwitcher } from "./month-switcher";
 export { ReviewInboxDialog } from "./review-inbox-dialog";
-export { declineReasonHint } from "./decline-hint";
+export { declineGroupKey, declineReasonHint } from "./decline-hint";
 // 할 일(Inbox) 건수 — 홈 카드·/todo·(다음 웨이브의) 탭 배지가 같은 정의를 쓴다.
 export {
   HOME_SMS_WINDOW_MS,

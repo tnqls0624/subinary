@@ -33,6 +33,7 @@ import type {
   UserSummary,
 } from "@family/contracts";
 
+import { clearAiChatHistory } from "./ai-chat-history";
 import { ApiError, api, type AccessToken } from "./api-client";
 import {
   authenticateBiometric,
@@ -160,6 +161,9 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     // "로그아웃했는가"와 "이 캐시의 주인이 바뀔 수 있는가"는 다른 질문이고, 후자가
     // 참인 건 세션이 닫히는 모든 경로에서 동일하다. 재로그인하면 다시 받아온다.
     queryClient.clear();
+    // `/ai` 대화는 react-query 캐시가 아니라 localStorage에 있다 — 같은 이유로
+    // 함께 버린다. 금융 질문·답변이 담기므로 다음 사용자에게 남으면 안 된다.
+    clearAiChatHistory();
   }, [setAccessToken, queryClient]);
 
   const getAccessToken = useCallback<() => AccessToken>(

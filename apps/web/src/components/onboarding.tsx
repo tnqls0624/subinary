@@ -214,7 +214,7 @@ export function Onboarding() {
                   disabled={form.formState.isSubmitting}
                 >
                   {form.formState.isSubmitting
-                    ? "만들고 있어요…"
+                    ? "만드는 중…"
                     : "가족 만들기"}
                 </Button>
                 <Button
