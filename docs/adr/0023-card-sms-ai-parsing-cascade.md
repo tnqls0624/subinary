@@ -201,6 +201,15 @@ labelSchemaVersion:'card-sms-parse-v1')`에 **템플릿 지문과 함께** 저�
 `template_cache_hit_rate`, 검토 대기 적체 건수를 노출한다. 앞의 둘이 오르면 카드사 문구 개편
 신호다. 기존 `pipeline_runs` / `ai_invocations`가 실행·호출 추적을 이미 담당한다.
 
+**구현 상태 (2026-08-10)**: 원자료 기록·집계·조회가 붙었다. 레이어별 정수 카운터는 파싱 1건마다
+`pipeline_step_runs.metrics`에 들어가고(`apps/worker/src/card-sms/parse-quality.ts`), 비율은 읽을 때
+계산한다(`packages/database/src/parser-quality.ts`). 조회는 워커 내부 전용
+`GET /v1/health/parser-quality`다. 표본이 0인 비율은 `0`이 아니라 `null`로 내보낸다 — 자세한 운영
+절차와 `null`/`0` 구분의 이유는 `docs/operations/card-sms-parser-quality.md`.
+
+임계 초과 자동 경보는 아직 없다(`operational_alert_kind` enum 확장 마이그레이션이 필요해 배포와
+함께 처리할 라운드로 미뤘다).
+
 ## 관련
 
 - ADR-0017 버전드 AI 학습 데이터 파이프라인 (여기서는 확장하지 않기로 결정)

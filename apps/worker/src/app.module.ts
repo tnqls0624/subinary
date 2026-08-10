@@ -4,6 +4,7 @@ import { loadConfig } from '@family/config';
 
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
 import { ProcessorsModule } from './processors/processors.module';
 import { QueueModule } from './queue/queue.module';
 
@@ -14,6 +15,7 @@ import { QueueModule } from './queue/queue.module';
     DatabaseModule,
     QueueModule,
     ProcessorsModule,
+    MaintenanceModule,
     HealthModule,
   ],
 })

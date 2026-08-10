@@ -13,6 +13,11 @@ import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 
 import { LlmSpanExtractorService } from '../card-sms/llm-span-extractor.service';
+import {
+  createParseQualityProbe,
+  parseQualityMetrics,
+  type ParseQualityProbe,
+} from '../card-sms/parse-quality';
 import { TemplateRecipeService } from '../card-sms/template-recipe.service';
 import { DB } from '../database/database.module';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
@@ -60,6 +65,11 @@ export class CardSmsParseProcessor extends WorkerHost {
   }
 
   async process(job: Job<CardSmsParseJobData>): Promise<CardSmsParseJobResult> {
+    // 캐스케이드가 어느 레이어에서 끝났는지를 잡 결과가 아니라 probe로 모은다 —
+    // 잡 결과 타입(`CardSmsParseJobResult`)은 BullMQ 계약이라 관측용 필드로
+    // 오염시키지 않는다. ADR-0023 §관측 지표의 원자료다.
+    const quality = createParseQualityProbe();
+
     return trackPipelineExecution(
       this.db,
       {
@@ -85,10 +95,10 @@ export class CardSmsParseProcessor extends WorkerHost {
                 inputCount: 1,
                 outputCount: result.parseStatus === 'parse_failed' ? 0 : 1,
                 rejectedCount: result.parseStatus === 'parse_failed' ? 1 : 0,
-                metrics: { parseStatus: result.parseStatus },
+                metrics: parseQualityMetrics(quality, result.parseStatus),
               },
       },
-      ({ pipelineRunId }) => this.processTracked(job, pipelineRunId),
+      ({ pipelineRunId }) => this.processTracked(job, pipelineRunId, quality),
     );
   }
 
@@ -96,6 +106,7 @@ export class CardSmsParseProcessor extends WorkerHost {
   private async processTracked(
     job: Job<CardSmsParseJobData>,
     pipelineRunId: string,
+    quality: ParseQualityProbe,
   ): Promise<CardSmsParseJobResult> {
     const { cardSmsEventId } = job.data;
 
@@ -140,10 +151,12 @@ export class CardSmsParseProcessor extends WorkerHost {
     // 지문 exact match라 "비슷한 템플릿"으로 잘못 보내는 오탐이 없다(ADR-0023 S4).
     let parseSource: 'rule' | 'recipe' | 'llm-span' = 'rule';
     if (!parseable(result)) {
+      quality.recipeAttempted = true;
       const fromRecipe = await this.templateRecipe.extract(input);
       if (fromRecipe && parseable(fromRecipe.result)) {
         result = fromRecipe.result;
         parseSource = 'recipe';
+        quality.recipeHit = true;
       }
     }
 
@@ -151,11 +164,16 @@ export class CardSmsParseProcessor extends WorkerHost {
     // 만들지 않고 원문 인용만 하며, 실패는 null 이라 기존 parse_failed 흐름이 유지된다.
     let fromLlm = false;
     if (!parseable(result) && this.llmSpanExtractor.enabled) {
+      quality.llmAttempted = true;
       const extraction = await this.llmSpanExtractor.extract(
         input,
         event.householdId,
         pipelineRunId,
       );
+      // 거절 판정은 **결과 적용 여부와 무관**하다 — shadow 모드에서도 "유효 span을
+      // 못 냈다"는 사실은 그대로 세야 문구 개편 신호(llm_span_reject_rate)가 잡힌다.
+      quality.llmSpanRejected = !extraction || !parseable(extraction.result);
+      quality.llmRejectedSpans = extraction?.rejected.length ?? 0;
       // shadow 모드는 관찰만 한다 — 파싱 상태를 바꾸지 않는다.
       if (extraction && this.llmSpanExtractor.appliesResult && parseable(extraction.result)) {
         result = extraction.result;
@@ -163,6 +181,7 @@ export class CardSmsParseProcessor extends WorkerHost {
         parseSource = 'llm-span';
       }
     }
+    quality.parseSource = parseSource;
 
     // 금액은 minor units 정수만 허용(부동소수 금지, PRD §10). 파서 결함을 차단한다.
     const amount = result.amount ?? null;

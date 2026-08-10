@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { checkConnection, type Db } from '@family/database';
+import {
+  checkConnection,
+  readCardSmsParserQuality,
+  type CardSmsParserQuality,
+  type Db,
+} from '@family/database';
 import type { Redis } from 'ioredis';
 
 import { DB } from '../database/database.module';
@@ -41,6 +46,18 @@ export class HealthService {
       service: SERVICE_NAME,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * ADR-0023 파서 품질 지표. 워커는 prod에서 포트를 외부로 열지 않으므로(내부 도커
+   * 네트워크 전용) 별도 인증 없이 운영 도구가 읽는 진단 창구로 쓴다. 응답은 정수
+   * 카운트와 비율뿐이라 PII가 없다.
+   */
+  getParserQuality(windowDays?: number): Promise<CardSmsParserQuality> {
+    return readCardSmsParserQuality(
+      this.db,
+      windowDays === undefined ? {} : { windowDays },
+    );
   }
 
   async getReadiness(): Promise<ReadyzResponse> {

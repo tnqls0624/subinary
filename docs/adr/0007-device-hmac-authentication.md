@@ -140,7 +140,24 @@ Phase 2는 사용자의 스마트폰을 가족 그룹에 등록하고, 그 장�
 
 - 장치 신뢰모델이 강화(3자 검증, 하드웨어 키스토어 활용)되면 **비대칭 서명(Ed25519)**으로
   전환해 서버의 secret 보관 자체를 제거하는 것을 재검토한다.
-- nonce 저장이 병목이 되면 만료 정리 배치 또는 Redis 등 TTL 저장소로 이관을 검토한다.
+- ~~nonce 저장이 병목이 되면 만료 정리 배치 또는 Redis 등 TTL 저장소로 이관을 검토한다.~~
+  **정리 배치는 2026-08-10에 붙었다**(`apps/worker/src/maintenance/device-nonce-cleanup.service.ts`):
+  1시간 주기로 `expires_at < now()`를 1,000행씩·tick당 최대 20,000행까지 지운다. 배치로 쪼개는
+  이유는 한 문장 DELETE가 테이블을 오래 잠그면 그 사이 가드의 nonce INSERT가 대기하다 실패해
+  **정리 작업이 정상 인증을 깎기** 때문이다. Redis 이관은 여전히 미검토 — 현재 실측
+  `device_nonces` **0행**(HMAC 경로 미사용, 아래 참조)이라 병목이 아니다.
+
+### HMAC 경로 실사용 현황 (2026-08-10 실측)
+
+`device_nonces`가 **0행**이다. 가드는 서명 검증을 통과한 뒤에만 nonce를 INSERT하므로, 0행은
+"이 경로로 성공한 요청이 한 번도 없다"는 뜻이다. 원인은 경로 고장이 아니라 **클라이언트 부재**다:
+저장소 안에서 `POST /v1/mobile-events/card-sms`(HMAC)를 호출하는 코드가 0건이고, 수집 자동화
+설정(`apps/web/src/lib/collect-setup.ts`)은 전부 Bearer collect token 경로
+(`card-sms-token`·`card-sms-text`, ADR-0016)를 발급한다. 서명 경로 자체는 살아 있다 —
+`rawBody: true`가 켜져 있고 lenient JSON 수리 훅도 이 경로를 건드리지 않는다.
+
+즉 HMAC은 **구현·유지되지만 호출되지 않는 예비 경로**다. 폐기 판단은 이 ADR의 범위 밖이고,
+"0행"을 "안전하다"로 읽지 않도록 여기 적어 둔다.
 - 암호화 키 유출/정기 교체 요구가 생기면 `keyVersion` 기반 키 회전 절차(재암호화 마이그레이션)를
   도입한다.
 - 장치 수·요청 빈도가 커지면 timestamp 허용오차·nonce TTL을 재튜닝하고 rate limit을 추가한다.
