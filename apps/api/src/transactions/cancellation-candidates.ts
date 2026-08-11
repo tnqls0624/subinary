@@ -129,3 +129,23 @@ export function cancellationCandidateOrder(
     asc(schema.cardTransactions.id) as SQL,
   ];
 }
+
+/**
+ * 저장 경로가 쓰는 공개범위 판정 — {@link cancellationCandidateFilter}의
+ * `visibilityScope()`와 **같은 규칙을 한 행에 대해** 적용한다.
+ *
+ * 왜 여기에 두나: 목록은 SQL로, 저장은 TS로 거르므로 표현이 다를 수밖에 없다.
+ * 두 표현을 각자 두면 "후보엔 없는데 저장은 되는" 비대칭이 생긴다 — 실제로
+ * 그 상태였고, 타인의 `private` 승인에 UUID만 알면 연결(쓰기)이 됐다.
+ * 같은 파일에 나란히 두어 한쪽만 고치는 일을 어렵게 만든다.
+ *
+ * 역할 예외는 없다. `visibilityScope()`가 owner/admin을 봐주지 않으므로
+ * 여기서만 열면 "볼 수 없는 거래를 고칠 수 있다"가 된다.
+ */
+export function actorCanSeeApproval(
+  approval: { memberId: string; visibility: string },
+  actorMemberId: string,
+): boolean {
+  if (approval.memberId === actorMemberId) return true;
+  return approval.visibility !== 'private';
+}

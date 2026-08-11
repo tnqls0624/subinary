@@ -71,6 +71,7 @@ import { DB } from '../database/database.constants';
 import { MoneyShadowService } from '../money/money-shadow.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
+  actorCanSeeApproval,
   cancellationCandidateFilter,
   cancellationCandidateOrder,
 } from './cancellation-candidates';
@@ -982,6 +983,26 @@ export class TransactionService {
       if (approval.transactionType !== 'approval') {
         throw new BadRequestException('target is not an approval transaction');
       }
+      /*
+       * 승인 대상에도 공개범위를 건다.
+       *
+       * 이 검사가 없던 동안 저장 경로는 household·승인여부·통화·잔액만 봤고,
+       * 타인의 `private` 승인이라도 UUID만 알면 **연결(= 쓰기)** 이 됐다. 게다가
+       * 응답이 그 승인의 요약을 마스킹 없이 돌려줘 가려졌던 가맹점명까지 드러났다.
+       * 후보 엔드포인트가 타인의 `summary_only` 승인을 (가맹점만 가린 채) 후보로
+       * 주므로 그 id로 곧장 도달할 수 있었다 — 추측이 필요 없는 경로였다.
+       *
+       * 역할 예외를 두지 않는다. `visibilityScope()`도 owner/admin을 봐주지 않아
+       * 목록·상세·집계 어디서도 타인의 `private`은 보이지 않는다. 여기만 열면
+       * "owner는 볼 수 없는 거래를 고칠 수 있다"가 되어 규약이 갈라진다.
+       * (`assertCanMutate`의 권한자 예외는 **취소 행**에 적용된다 — 가족의 취소를
+       * 대신 정리하는 것은 허용하되, 대상 승인은 본인이 볼 수 있는 것이어야 한다.)
+       */
+      if (!actorCanSeeApproval(approval, actor.memberId)) {
+        // 존재를 숨긴다. 403을 주면 "그런 승인이 있긴 하다"가 새어 나가고,
+        // 상세 조회(:301 부근)도 같은 이유로 404를 준다.
+        throw new NotFoundException('transaction not found');
+      }
       // amount는 minor units라 통화가 다르면 뺄셈/비교가 무의미하다(USD 취소를 KRW
       // 승인에 연결 등). 동일 통화 거래끼리만 연결을 허용한다.
       if (approval.currency !== cancellation.currency) {
@@ -1040,7 +1061,13 @@ export class TransactionService {
     void this.realtimePublisher.publish(row.txn.householdId);
     // 사람이 고른 부모와 새 후보 규칙이 고를 부모가 같은지 센다(`link_target_differs`).
     this.moneyShadow.observe(cancellationId, 'api_link_cancellation');
-    return buildSummary(row.txn, row.categorySlug, false);
+    // 마스킹을 actor 기준으로 다시 계산한다. `false` 고정이던 동안 타인의
+    // `summary_only` 승인에 연결하면 가려졌던 가맹점명이 응답으로 드러났다.
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /** Flags a transaction as a suspected duplicate (owner/admin or row owner). */
