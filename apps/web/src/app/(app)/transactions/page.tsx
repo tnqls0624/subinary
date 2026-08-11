@@ -87,6 +87,10 @@ import {
 } from "@/lib/transaction-detail-fallback";
 import { cn } from "@/lib/utils";
 import { AddTransactionDialog } from "./add-transaction-dialog";
+import {
+  matchesCandidateSearch,
+  retainSelection,
+} from "./candidate-search";
 
 /* -------------------------------------------------------------------------- */
 /* Local types                                                                */
@@ -1671,38 +1675,58 @@ function LinkCancellationModal({
   onConfirm: (approvalTransactionId: string) => void;
 }>) {
   const { authedFetch } = useAuth();
-  const { householdId } = useHousehold();
   const [selected, setSelected] = useState("");
+  const [search, setSearch] = useState("");
 
-  // 취소액을 커버할 수 있는 잔액이 남은 승인 거래 후보를 조회한다.
-  const approvalsQuery = useQuery({
-    queryKey: ["link-approvals", householdId, cancellation.id],
-    enabled: householdId != null,
+  /*
+   * 후보는 **서버가 좁혀 준다**(통화 · 잔액 ≥ 취소액 · 취소보다 앞선 승인 · 공개범위).
+   *
+   * 이전에는 `list({ type:"approval", limit:100 })`로 최근 100건을 받아 여기서 걸렀다.
+   * 서버의 `MAX_LIMIT=100`이 상한이라 limit을 올려 우회할 수도 없어서, **승인이 100건을
+   * 넘긴 뒤로는 오래된 결제에 연결할 방법이 아예 없었다**(실측 136건). 자격 조건을
+   * 클라이언트에 다시 두지 않는 이유도 같다 — 규칙이 두 벌이면 "보이는데 저장하면
+   * 거부되는" 후보가 생긴다.
+   */
+  const candidatesQuery = useQuery({
+    queryKey: ["cancellation-candidates", cancellation.id],
     queryFn: () =>
       authedFetch((token) =>
-        api.transactions.list(token, {
-          householdId: householdId as string,
-          type: "approval",
-          limit: 100,
-        }),
+        api.transactions.cancellationCandidates(token, cancellation.id),
       ),
   });
 
-  const candidates = (approvalsQuery.data?.items ?? []).filter(
-    (a) =>
-      (a.status === "approved" || a.status === "partially_cancelled") &&
-      // 동일 통화 승인만 후보(amount=minor units — 이종 통화 잔액 비교는 무의미).
-      a.currency === cancellation.currency &&
-      a.amount - a.cancelledAmount >= cancellation.amount,
+  const candidates = candidatesQuery.data?.items ?? [];
+
+  // 표시용 좁히기(자격 판정이 아니다). 후보가 많아도 사용자가 금액·가맹점·날짜로 찾을
+  // 수 있어야 한다 — 목록만 길게 뿌리면 100건 상한과 실질적으로 같아진다.
+  const visible = candidates.filter((a) =>
+    matchesCandidateSearch(
+      {
+        merchant: merchantLabel(a),
+        amount: a.amount,
+        remaining: a.amount - a.cancelledAmount,
+        dateLabel: formatDate(a.approvedAt ?? a.createdAt, { dateOnly: true }),
+      },
+      search,
+    ),
   );
 
-  const options: Option[] = candidates.map((a) => ({
+  const options: Option[] = visible.map((a) => ({
     value: a.id,
     label: `${merchantLabel(a)} · 남은 금액 ${formatMoney(
       a.amount - a.cancelledAmount,
       a.currency,
-    )} · ${formatDate(a.approvedAt, { dateOnly: true })}`,
+    )} · ${formatDate(a.approvedAt ?? a.createdAt, { dateOnly: true })}${
+      a.excludedAt ? " · 합계 제외됨" : ""
+    }`,
   }));
+
+  // 고른 뒤 검색어를 바꿔 그 후보가 사라지면 선택을 버린다 — 안 그러면 화면에 보이지
+  // 않는 승인에 연결 버튼이 살아 있어 엉뚱한 결제에 취소가 붙는다.
+  const effectiveSelected = retainSelection(
+    selected,
+    visible.map((a) => a.id),
+  );
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -1715,34 +1739,91 @@ function LinkCancellationModal({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          {approvalsQuery.isLoading ? (
+          {candidatesQuery.isLoading ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
               결제 내역을 불러오고 있어요…
             </p>
-          ) : approvalsQuery.isError ? (
+          ) : candidatesQuery.isError ? (
+            /* "불러오지 못했어요"와 "연결할 결제가 없어요"는 다른 사실이다 —
+               실패를 빈 목록으로 보여 주면 사용자가 없는 것으로 오해한다. */
             <p className="text-destructive text-sm" role="alert">
               결제 내역을 불러오지 못했어요:{" "}
-              {errorMessage(approvalsQuery.error)}
+              {errorMessage(candidatesQuery.error)}
             </p>
-          ) : options.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              연결할 수 있는 결제가 없어요
-            </p>
+          ) : candidates.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-muted-foreground text-sm">
+                연결할 수 있는 결제가 없어요
+              </p>
+              {/* 왜 없는지까지 알려 준다 — 조건을 모르면 사용자가 할 수 있는 일이 없다. */}
+              <p className="text-muted-foreground mt-1 text-xs">
+                이 취소 금액{" "}
+                {formatMoney(cancellation.amount, cancellation.currency)} 이상이 남은
+                같은 통화 결제가 아직 없어요. 원래 결제 문자가 아직 수집되지 않았을 수도
+                있어요.
+              </p>
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="link-approval">원래 결제</Label>
-              <Select value={selected} onValueChange={setSelected}>
-                <SelectTrigger id="link-approval" className="w-full">
-                  <SelectValue placeholder="결제를 골라 주세요" />
-                </SelectTrigger>
-                <SelectContent>
-                  {options.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="link-approval-search">결제 찾기</Label>
+              {/* 후보가 많을 때 훑지 않고 찾을 수 있어야 한다. 서버가 상한 없이 전량을
+                  주므로 이 입력은 왕복 없이 즉시 좁힌다(자격 판정이 아니다). */}
+              <div className="relative">
+                <Search
+                  className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+                  aria-hidden
+                />
+                <Input
+                  id="link-approval-search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="가맹점 · 금액 · 날짜로 좁히기"
+                  className="h-11 pr-9 pl-9"
+                />
+                {search !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="검색어 지우기"
+                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full"
+                  >
+                    <X className="size-4" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
+
+              {options.length === 0 ? (
+                /* 후보는 있는데 검색어가 걸러 낸 상태. 위의 "후보 0건"과 다른 사실이다. */
+                <p className="text-muted-foreground py-4 text-center text-sm">
+                  검색어와 맞는 결제가 없어요. 검색어를 지우면 후보{" "}
+                  {candidates.length}건을 모두 볼 수 있어요.
+                </p>
+              ) : (
+                <>
+                  <Label htmlFor="link-approval">원래 결제</Label>
+                  <Select
+                    value={effectiveSelected}
+                    onValueChange={setSelected}
+                  >
+                    <SelectTrigger id="link-approval" className="w-full">
+                      <SelectValue placeholder="결제를 골라 주세요" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    후보 {options.length}건
+                    {options.length !== candidates.length
+                      ? ` (전체 ${candidates.length}건 중)`
+                      : ""}
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1750,8 +1831,8 @@ function LinkCancellationModal({
           <Button
             variant="default"
             className="h-11 w-full"
-            onClick={() => onConfirm(selected)}
-            disabled={busy || selected === ""}
+            onClick={() => onConfirm(effectiveSelected)}
+            disabled={busy || effectiveSelected === ""}
           >
             연결하기
           </Button>

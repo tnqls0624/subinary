@@ -70,6 +70,10 @@ import {
 import { DB } from '../database/database.constants';
 import { MoneyShadowService } from '../money/money-shadow.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
+import {
+  cancellationCandidateFilter,
+  cancellationCandidateOrder,
+} from './cancellation-candidates';
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -860,6 +864,67 @@ export class TransactionService {
       this.moneyShadow.observe(id, 'api_transaction_update');
     }
     return buildSummary(row.txn, row.categorySlug, false);
+  }
+
+  /**
+   * 이 취소 행에 연결할 수 있는 승인 후보 전량(`GET :id/cancellation-candidates`).
+   *
+   * ## 왜 목록 API로는 안 되는가
+   *
+   * 웹 모달이 `list({ type:'approval', limit:100 })`로 최근 100건만 받아 클라이언트에서
+   * 걸렀다. `MAX_LIMIT=100`이 상한이라 limit을 올려 우회할 수도 없어, **100건 밖의
+   * 승인은 사용자가 연결할 방법이 없었다.** 승인이 100건을 넘긴 뒤에야 조용히 발생하는
+   * 결함이다(2026-08-11 실측 136건).
+   *
+   * ## LIMIT을 걸지 않는다
+   *
+   * 이 엔드포인트의 존재 이유가 "말없이 잘려서 도달 불가"를 없애는 것이므로 상한을 두지
+   * 않고, 커서도 쓰지 않는다(`nextCursor: null` = 이게 전부라는 뜻). 반환 행 수는
+   * household의 승인 중 **통화 일치 + 잔액 ≥ 취소액 + 취소보다 앞선 것**으로 좁혀지므로
+   * 전체 승인 수보다 훨씬 작다. 수만 건 규모가 되면 그때 검색 파라미터와 함께
+   * 페이지네이션을 도입한다 — 그전에 상한을 두면 같은 결함을 다시 만든다.
+   *
+   * 권한 게이트는 {@link linkCancellation}과 **같다**: 후보 목록은 승인의 금액·가맹점·
+   * 날짜를 드러내므로, 연결할 수 없는 사람에게 보여 주면 조회 수단이 된다.
+   */
+  async listCancellationCandidates(
+    userId: string,
+    cancellationId: string,
+  ): Promise<TransactionListResponse> {
+    const cancellation = await this.loadTransaction(cancellationId);
+    const actor = await this.requireMembership(
+      cancellation.householdId,
+      userId,
+    );
+    this.assertCanMutate(actor, cancellation.memberId);
+
+    if (cancellation.transactionType !== 'cancellation') {
+      throw new BadRequestException('source is not a cancellation transaction');
+    }
+    // 이미 연결된 취소에 후보를 돌려주면 "고를 수 있다"는 거짓 신호가 된다. 빈 배열도
+    // 거짓말이다("후보가 없다"와 "이미 연결됐다"는 다른 사실이다). 저장 경로와 같은
+    // 409로 사실을 그대로 알린다.
+    if (cancellation.parentTransactionId) {
+      throw new ConflictException('cancellation is already linked');
+    }
+
+    const rows = await this.db
+      .select({
+        txn: schema.cardTransactions,
+        categorySlug: schema.expenseCategories.slug,
+      })
+      .from(schema.cardTransactions)
+      .leftJoin(
+        schema.expenseCategories,
+        eq(schema.cardTransactions.categoryId, schema.expenseCategories.id),
+      )
+      .where(cancellationCandidateFilter(cancellation, actor.memberId))
+      .orderBy(...cancellationCandidateOrder(cancellation));
+
+    const items = rows.map((r) =>
+      buildSummary(r.txn, r.categorySlug, maskedFor(r.txn, actor.memberId)),
+    );
+    return { items, nextCursor: null };
   }
 
   /**

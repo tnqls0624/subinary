@@ -132,6 +132,24 @@ export class TransactionController {
     return this.transactionService.get(user.userId, id);
   }
 
+  /**
+   * GET /v1/transactions/:id/cancellation-candidates — 이 **취소** 행에 연결할 수 있는
+   * 승인 후보 전량.
+   *
+   * 서버가 통화·잔액·시간 역전·공개범위를 미리 걸러 주므로 클라이언트가 전체 목록을
+   * 받아 필터할 필요가 없다. **LIMIT이 없다** — 이 엔드포인트는 "최근 100건만 보여서
+   * 오래된 승인에 도달할 수 없던" 문제를 없애기 위한 것이라 상한을 두면 원점이다.
+   * 반환 shape은 목록 API와 같은 `TransactionListResponse`이고 `nextCursor`는 항상
+   * `null`(= 이게 전부)이다.
+   */
+  @Get(':id/cancellation-candidates')
+  listCancellationCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<TransactionListResponse> {
+    return this.transactionService.listCancellationCandidates(user.userId, id);
+  }
+
   /** PATCH /v1/transactions/:id — update category/merchant/card/member/etc. */
   @Patch(':id')
   update(

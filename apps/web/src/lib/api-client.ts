@@ -656,6 +656,20 @@ export const api = {
       ),
     get: (accessToken: AccessToken, id: string) =>
       apiFetch<TransactionSummary>(`/v1/transactions/${id}`, { accessToken }),
+    /**
+     * 이 **취소** 행에 연결할 수 있는 승인 후보 전량.
+     *
+     * 서버가 통화·잔액·시간 역전·공개범위를 이미 걸러 준다. **자격 조건을 여기서 다시
+     * 거르지 말 것** — 규칙이 두 벌이 되면 "보이는데 저장하면 거부되는" 후보가 생긴다.
+     * `limit` 파라미터가 없는 것은 의도다(최근 100건만 보여 오래된 승인에 도달할 수
+     * 없던 결함을 없애기 위한 엔드포인트라 상한을 두면 원점이다). `nextCursor`는 항상
+     * `null` = 이게 전부라는 뜻.
+     */
+    cancellationCandidates: (accessToken: AccessToken, id: string) =>
+      apiFetch<TransactionListResponse>(
+        `/v1/transactions/${id}/cancellation-candidates`,
+        { accessToken },
+      ),
     labelCandidates: (
       accessToken: AccessToken,
       householdId: string,
