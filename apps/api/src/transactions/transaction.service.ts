@@ -864,7 +864,11 @@ export class TransactionService {
     if (input.amount !== undefined || input.occurredAt !== undefined) {
       this.moneyShadow.observe(id, 'api_transaction_update');
     }
-    return buildSummary(row.txn, row.categorySlug, false);
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /**
@@ -1087,7 +1091,11 @@ export class TransactionService {
     const row = await this.loadSummaryRow(id);
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
-    return buildSummary(row.txn, row.categorySlug, false);
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /**
@@ -1131,7 +1139,11 @@ export class TransactionService {
     const row = await this.loadSummaryRow(id);
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
-    return buildSummary(row.txn, row.categorySlug, false);
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /**
@@ -1154,7 +1166,11 @@ export class TransactionService {
     const row = await this.loadSummaryRow(id);
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
-    return buildSummary(row.txn, row.categorySlug, false);
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /** Undoes {@link exclude}: `excludedAt=null` so the row counts again. Idempotent. */
@@ -1173,7 +1189,11 @@ export class TransactionService {
     const row = await this.loadSummaryRow(id);
     // 편집 결과를 가족의 다른 열린 화면에 전파(best-effort, fire-and-forget).
     void this.realtimePublisher.publish(row.txn.householdId);
-    return buildSummary(row.txn, row.categorySlug, false);
+    return buildSummary(
+      row.txn,
+      row.categorySlug,
+      maskedFor(row.txn, actor.memberId),
+    );
   }
 
   /**
