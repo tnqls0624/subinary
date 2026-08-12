@@ -23,8 +23,37 @@ import { isNative } from "./native";
 /** Preferences 키 — 생체인식 잠금 설정(3값: null/"on"/"off"). */
 const BIOMETRIC_KEY = "family.biometricLogin";
 
-/** 생체인식 인증 시도의 결과 분류. */
-export type BiometricResult = "ok" | "cancelled" | "failed" | "unsupported";
+/**
+ * 생체인식 인증 시도의 결과 분류.
+ *
+ * `cancelled`(사용자가 취소)와 `interrupted`(OS가 프롬프트를 거둠)를 반드시
+ * 구분한다. 둘을 합쳐 두는 동안, 콜드 스타트에서 앱이 다 뜨기 전에 프롬프트를
+ * 띄워 시스템이 취소해 버리면 **사용자가 아무것도 하지 않았는데 로그아웃**됐다.
+ * 서버 세션은 멀쩡히 살아 있었다 — 앱이 스스로 세션을 닫은 것이다.
+ */
+export type BiometricResult =
+  | "ok"
+  | "cancelled"
+  | "interrupted"
+  | "failed"
+  | "unsupported";
+
+/** 시스템 취소로 중단됐을 때 다시 시도할 최대 횟수. */
+export const BIOMETRIC_MAX_ATTEMPTS = 3;
+
+/**
+ * 한 번 더 시도할 것인가.
+ *
+ * `interrupted`만 재시도한다. 사용자가 취소한 것(`cancelled`)을 재시도하면
+ * 프롬프트가 계속 다시 뜨는 셈이라 "취소"가 불가능해진다.
+ */
+export function shouldRetryBiometric(
+  result: BiometricResult,
+  attempt: number,
+  maxAttempts: number = BIOMETRIC_MAX_ATTEMPTS,
+): boolean {
+  return result === "interrupted" && attempt < maxAttempts;
+}
 
 export type BiometricPref = "on" | "off" | null;
 
@@ -62,10 +91,57 @@ export async function isBiometryAvailable(): Promise<boolean> {
  * 생체인식 프롬프트를 띄워 본인 확인을 수행한다.
  *
  * - "ok"          : 인증 성공 → 저장된 세션 사용 진행
- * - "cancelled"   : 사용자/시스템 취소 → 일반 로그인 화면으로
+ * - "cancelled"   : **사용자가** 취소 → 일반 로그인 화면으로
+ * - "interrupted" : OS가 프롬프트를 거둠 → 호출부가 재시도해야 한다
  * - "failed"      : 인증 실패·잠금(lockout) → 일반 로그인 화면으로
  * - "unsupported" : 미지원/미등록 기기 → 게이트를 건너뛴다(데드락 방지)
  */
+/**
+ * 앱이 실제로 전면에 올라올 때까지 기다린다(최대 `timeoutMs`).
+ *
+ * 콜드 스타트에서 프롬프트가 시스템 취소되는 근본 이유가 "아직 준비가 안 된 채로
+ * 띄웠다"이므로, 재시도 전에 이 조건을 맞춰야 같은 실패를 반복하지 않는다.
+ */
+async function waitUntilForeground(timeoutMs: number): Promise<void> {
+  if (typeof document === "undefined") return;
+  if (document.visibilityState === "visible") {
+    // 이미 보이더라도 한 프레임 양보한다 — visible 직후에는 액티비티 전환이
+    // 아직 끝나지 않아 프롬프트가 다시 거둬지는 경우가 있다.
+    await new Promise((r) => setTimeout(r, 250));
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      document.removeEventListener("visibilitychange", onChange);
+      clearTimeout(timer);
+      resolve();
+    };
+    const onChange = () => {
+      if (document.visibilityState === "visible") done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    document.addEventListener("visibilitychange", onChange);
+  });
+}
+
+/**
+ * 시스템 취소(`interrupted`)에 한해 앱이 전면에 오길 기다렸다가 다시 시도한다.
+ *
+ * 부트스트랩 게이트는 이것을 쓴다. 사용자 취소·실패는 그대로 돌려주므로
+ * "취소했는데 계속 뜬다"가 되지 않는다.
+ */
+export async function authenticateBiometricResilient(
+  reason: string,
+  maxAttempts: number = BIOMETRIC_MAX_ATTEMPTS,
+): Promise<BiometricResult> {
+  let result = await authenticateBiometric(reason);
+  for (let attempt = 1; shouldRetryBiometric(result, attempt, maxAttempts); attempt++) {
+    await waitUntilForeground(3_000);
+    result = await authenticateBiometric(reason);
+  }
+  return result;
+}
+
 export async function authenticateBiometric(
   reason: string,
 ): Promise<BiometricResult> {
@@ -102,9 +178,13 @@ export async function authenticateBiometric(
       if (e instanceof BiometryError) {
         switch (e.code) {
           case BiometryErrorType.userCancel:
+            return "cancelled";
+          // 시스템/앱이 프롬프트를 거둔 것 — 사용자의 의사 표시가 아니다.
+          // 콜드 스타트에서 액티비티가 준비되기 전에 프롬프트를 띄우면 여기로
+          // 떨어진다. 사용자 취소와 같이 다루면 아무 조작 없이 세션이 닫힌다.
           case BiometryErrorType.systemCancel:
           case BiometryErrorType.appCancel:
-            return "cancelled";
+            return "interrupted";
           case BiometryErrorType.biometryNotEnrolled:
           case BiometryErrorType.biometryNotAvailable:
           case BiometryErrorType.passcodeNotSet:

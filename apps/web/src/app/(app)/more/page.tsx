@@ -234,6 +234,10 @@ function BiometricToggleRow() {
             toast.error("이 기기에서는 생체인식을 사용할 수 없어요.");
           } else if (gate === "failed") {
             toast.error("본인 확인에 실패했어요.");
+          } else if (gate === "interrupted") {
+            // 사용자가 취소한 게 아니라 화면이 프롬프트를 거둔 것이다. 아무 말도
+            // 없이 토글이 되돌아가면 "눌러도 안 되는 버튼"으로 읽힌다.
+            toast.error("본인 확인 창이 닫혔어요. 다시 눌러 주세요.");
           }
           return;
         }

@@ -36,7 +36,7 @@ import type {
 import { clearAiChatHistory } from "./ai-chat-history";
 import { ApiError, api, type AccessToken } from "./api-client";
 import {
-  authenticateBiometric,
+  authenticateBiometricResilient,
   getBiometricPref,
   type BiometricResult,
 } from "./biometric";
@@ -263,8 +263,12 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   );
 
   const biometricLogin = useCallback(async (): Promise<BiometricResult> => {
-    const gate = await authenticateBiometric(BIOMETRIC_REASON);
-    if (gate === "cancelled" || gate === "failed") return gate;
+    const gate = await authenticateBiometricResilient(BIOMETRIC_REASON);
+    // ⚠️ `interrupted`를 여기서 막지 않으면 게이트를 통과시킨다 — 프롬프트를
+    // 시스템 취소로 만들 수만 있으면 생체인식 없이 세션이 열린다는 뜻이다.
+    if (gate === "cancelled" || gate === "failed" || gate === "interrupted") {
+      return gate;
+    }
     // "ok" 또는 "unsupported"(게이트 스킵) → 저장된 세션 복원 시도.
     // refreshSession이 토큰 저장/401 정리를 단일화해 처리한다.
     const refreshed = await refreshSession();
@@ -322,9 +326,19 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
         // 데드락이 되면 안 된다. 취소/실패는 로그인 화면으로 보낸다(토큰 보존
         // → 로그인 화면의 생체인식 재시도 버튼으로 다시 시도 가능).
         if (stored && (await getBiometricPref()) === "on") {
-          const gate = await authenticateBiometric(BIOMETRIC_REASON);
+          // 시스템 취소는 재시도한다. 콜드 스타트(5시간 이상 미사용 후 안드로이드가
+          // 프로세스를 회수한 뒤)에서 앱이 다 뜨기 전에 프롬프트를 띄우면 OS가
+          // 거둬 가는데, 그걸 사용자 취소로 처리하는 동안 **아무 조작도 하지
+          // 않은 사용자가 로그인 화면으로 튕겼다**. 서버 세션은 멀쩡했다.
+          const gate = await authenticateBiometricResilient(BIOMETRIC_REASON);
           if (cancelled) return;
-          if (gate === "cancelled" || gate === "failed") {
+          // 재시도까지 소진한 `interrupted`는 여기서 잠금 화면으로 보낸다 —
+          // 토큰은 보존되므로 로그인 화면의 생체인식 버튼으로 다시 열 수 있다.
+          if (
+            gate === "cancelled" ||
+            gate === "failed" ||
+            gate === "interrupted"
+          ) {
             clearSession();
             return;
           }
