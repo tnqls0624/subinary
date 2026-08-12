@@ -22,8 +22,12 @@ import {
 } from '@family/shared';
 import {
   compareTs,
+  convertSlackExportZip,
+  looksLikeZip,
   parseSlackExport,
   reconcileSlackMessages,
+  SlackZipError,
+  ZipError,
   type CurrentSlackMessageProjection,
   type IncomingSlackMessageProjection,
   type SlackImportSyncMode,
@@ -83,6 +87,33 @@ const TARGET_PRIORITY: Record<TargetChangeType, number> = {
   edited: 2,
   deleted: 3,
 };
+
+/**
+ * 실패를 **안전한 코드**로 접는다(마이그레이션 0054 / `slackImportErrorCodeSchema`).
+ *
+ * 왜 예외 메시지를 그대로 저장하지 않는가: 이 값은 DB에 남고 그대로 사용자 화면까지
+ * 간다. 예외 메시지에는 객체 키·파일 경로·JSON 조각이 섞여 들어올 수 있고, 그건 이
+ * 저장소의 로깅 규약 위반이다(원문·PII 비노출). 분류되지 않은 실패는 전부
+ * `internal_error`로 접고 상세는 **로그에만** 남긴다.
+ */
+function toImportErrorCode(error: unknown): string {
+  if (error instanceof ZipError || error instanceof SlackZipError) {
+    return error.code;
+  }
+  if (error instanceof Error) {
+    // 순수 파서(`parseSlackExport`)는 구조 오류를 이 접두로 던진다.
+    if (error.message.startsWith('invalid Slack export')) {
+      return 'bundle_invalid_structure';
+    }
+    if (error.message.startsWith('slack bundle is not valid JSON')) {
+      return 'bundle_invalid_json';
+    }
+    if (error.message.startsWith('slack source object could not be read')) {
+      return 'storage_unavailable';
+    }
+  }
+  return 'internal_error';
+}
 
 function messageTarget(message: {
   ts: string;
@@ -167,8 +198,107 @@ export class SlackImportProcessor extends WorkerHost {
                 },
               },
       },
-      ({ pipelineRunId }) => this.processTracked(job, pipelineRunId),
+      ({ pipelineRunId }) => this.recordStatus(job, pipelineRunId),
     );
+  }
+
+  /**
+   * 상태 기록을 감싼 래퍼: `processing` → (`completed` | `failed`).
+   *
+   * **왜 DB에 쓰는가**: BullMQ 잡은 `removeOnComplete`로 사라진다. 잡 상태에 기대면
+   * 새로고침·앱 재시작 뒤에 "성공했는지조차 모르는" 상태로 되돌아간다.
+   *
+   * **왜 실패도 기록하고 다시 던지는가**: BullMQ의 재시도·백오프는 그대로 살려야 하고
+   * (`attempts`), 동시에 사용자는 마지막 시도의 이유를 볼 수 있어야 한다. 그래서
+   * 기록한 뒤 원래 예외를 그대로 전파한다 — 삼키면 잡이 성공으로 보인다.
+   *
+   * 상태 행이 없을 수도 있다(0054 이전에 접수된 import). 그때는 조용히 넘어간다 —
+   * 상태를 못 남기는 것이 import를 실패시킬 이유는 아니다.
+   */
+  private async recordStatus(
+    job: Job<SlackImportJobData>,
+    pipelineRunId: string,
+  ): Promise<SlackImportJobResult> {
+    const { sourceItemId } = job.data;
+    const attempt = job.attemptsMade + 1;
+    const startedAt = new Date();
+
+    if (sourceItemId) {
+      await this.markImport(sourceItemId, {
+        status: 'processing',
+        attempt,
+        startedAt,
+        errorCode: null,
+        updatedAt: startedAt,
+      });
+    }
+
+    try {
+      const result = await this.processTracked(job, pipelineRunId);
+      if (sourceItemId) {
+        const finishedAt = new Date();
+        await this.markImport(
+          sourceItemId,
+          'skipped' in result
+            ? {
+                // source item이 사라진 경우다. 성공도 실패도 아니지만 화면이 영원히
+                // 돌지 않도록 종료 상태로 닫고, 이유는 코드로 남긴다.
+                status: 'failed',
+                errorCode: 'internal_error',
+                finishedAt,
+                updatedAt: finishedAt,
+              }
+            : {
+                status: 'completed',
+                errorCode: null,
+                channelCount: result.channelCount,
+                userCount: result.userCount,
+                messageCount: result.messageCount,
+                createdMessageCount: result.createdMessageCount,
+                updatedMessageCount: result.updatedMessageCount,
+                deletedMessageCount: result.deletedMessageCount,
+                skippedMessageCount: result.skippedMessageCount,
+                warningCount: result.warningCount,
+                finishedAt,
+                updatedAt: finishedAt,
+              },
+        );
+      }
+      return result;
+    } catch (error: unknown) {
+      if (sourceItemId) {
+        const finishedAt = new Date();
+        const isLastAttempt = attempt >= (job.opts?.attempts ?? 1);
+        await this.markImport(sourceItemId, {
+          // 아직 재시도가 남았으면 `processing`으로 두어 화면이 "실패했다"고 단정하지
+          // 않게 한다. 코드는 지금 이유를 먼저 채워 둔다(마지막 시도에서 확정된다).
+          status: isLastAttempt ? 'failed' : 'processing',
+          errorCode: toImportErrorCode(error),
+          finishedAt: isLastAttempt ? finishedAt : null,
+          updatedAt: finishedAt,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** 상태 행 부분 갱신. 행이 없으면(0054 이전 import) 아무 일도 하지 않는다. */
+  private async markImport(
+    sourceItemId: string,
+    patch: Partial<typeof schema.slackImports.$inferInsert>,
+  ): Promise<void> {
+    try {
+      await this.db
+        .update(schema.slackImports)
+        .set(patch)
+        .where(eq(schema.slackImports.sourceItemId, sourceItemId));
+    } catch (error: unknown) {
+      // 상태 기록 실패가 import 자체를 죽이면 안 된다. 원문·PII 없이 로그만 남긴다.
+      this.logger.warn(
+        { sourceItemId, reason: (error as Error).name },
+        'failed to record slack import status',
+      );
+    }
   }
 
   /** 실제 Slack 정규화. 바깥 wrapper가 실행 상태를 기록한다. */
@@ -216,16 +346,60 @@ export class SlackImportProcessor extends WorkerHost {
       throw new Error('slack source item has no current revision');
     }
 
-    // MinIO에서 원문 번들을 읽어 파싱한다. 원문 text·PII·secret은 로그에 남기지 않는다.
-    const raw = await this.storage.getObject(sourceItem.objectKey);
-    let bundle: unknown;
+    // MinIO에서 원문을 읽는다. 원문 text·PII·secret은 로그에 남기지 않는다.
+    let raw: Buffer;
     try {
-      bundle = JSON.parse(raw.toString('utf8'));
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'invalid JSON';
-      throw new Error(
-        `slack bundle is not valid JSON (sourceItemId=${sourceItemId}): ${message}`,
+      raw = await this.storage.getObject(sourceItem.objectKey);
+    } catch {
+      // 객체 키를 메시지에 넣지 않는다(로그·상태 양쪽에 남는 값이다).
+      throw new Error('slack source object could not be read');
+    }
+
+    /*
+     * 업로드는 **두 형식**이다.
+     *  - Slack Export **ZIP**: 여기서 푼다. 상한(개수·엔트리 크기·누적 크기·압축비)은
+     *    `convertSlackExportZip`이 **해제 도중** 강제한다 — API의 선검사는 선언값만 본
+     *    것이라 그것만으로는 거짓말한 헤더에 뚫린다.
+     *  - 사전 변환된 **단일 JSON 번들**: 기존 경로 그대로. 고급 사용자·스크립트가 쓰고
+     *    있을 수 있어 깨뜨리지 않는다(ADR-0011 §1).
+     *
+     * 판별은 확장자가 아니라 **매직 바이트**다. 객체 키는 API가 붙인 것이지만, 형식의
+     * 근거는 내용이어야 한다.
+     *
+     * 왜 API가 아니라 여기서 푸는가: 해제는 CPU·메모리를 쓰는 작업이고, API는 사용자
+     * 요청을 붙잡고 있는 프로세스다. 무거운 일은 이미 MinIO 원문을 읽어 파싱하는 이
+     * 워커의 몫이다.
+     */
+    let bundle: unknown;
+    let zipStats: { skippedDirectoryCount: number; skippedNoiseMessageCount: number } | null =
+      null;
+    if (looksLikeZip(raw)) {
+      const converted = convertSlackExportZip(raw);
+      bundle = converted.bundle;
+      zipStats = {
+        skippedDirectoryCount: converted.stats.skippedDirectoryCount,
+        skippedNoiseMessageCount: converted.stats.skippedNoiseMessageCount,
+      };
+      this.logger.info(
+        {
+          sourceItemId,
+          slackWorkspaceId,
+          entryCount: converted.stats.entryCount,
+          inflatedBytes: converted.stats.inflatedBytes,
+          dayFileCount: converted.stats.dayFileCount,
+          skippedDirectoryCount: converted.stats.skippedDirectoryCount,
+          skippedNoiseMessageCount: converted.stats.skippedNoiseMessageCount,
+          skippedInvalidMessageCount: converted.stats.skippedInvalidMessageCount,
+        },
+        'slack export zip converted',
       );
+    } else {
+      try {
+        bundle = JSON.parse(raw.toString('utf8'));
+      } catch {
+        // 파싱 오류 원문은 번들 조각을 담을 수 있어 메시지에 싣지 않는다.
+        throw new Error('slack bundle is not valid JSON');
+      }
     }
 
     // 구조 검증·정규화·스레드 그룹핑은 순수 파서가 담당한다(형식 오류는 throw).
@@ -687,6 +861,9 @@ export class SlackImportProcessor extends WorkerHost {
         duplicateIncomingCount: counts.duplicateIncomingCount,
         skippedMessageCount: counts.skippedMessageCount,
         warningCount: parsed.warnings.length,
+        // ZIP에서만 나오는 값. 무엇을 건너뛰었는지 숨기지 않는다.
+        zipSkippedDirectoryCount: zipStats?.skippedDirectoryCount,
+        zipSkippedNoiseMessageCount: zipStats?.skippedNoiseMessageCount,
       },
       'slack export imported',
     );

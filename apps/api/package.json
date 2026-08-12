@@ -19,6 +19,7 @@
     "@family/database": "workspace:*",
     "@family/rag": "workspace:^",
     "@family/shared": "workspace:*",
+    "@family/slack-parser": "workspace:*",
     "@family/transaction-domain": "workspace:*",
     "@fastify/cookie": "^11",
     "@fastify/multipart": "^10.1.0",

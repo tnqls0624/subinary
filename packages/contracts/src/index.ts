@@ -415,7 +415,11 @@ export type {
 
 export {
   slackImportSyncModeSchema,
+  slackImportFormatSchema,
+  slackImportStatusSchema,
+  slackImportErrorCodeSchema,
   slackImportResponseSchema,
+  slackImportStatusResponseSchema,
   slackWorkspaceSummarySchema,
   slackMessageSummarySchema,
   slackMessageListResponseSchema,
@@ -425,7 +429,11 @@ export {
 } from './slack.js';
 export type {
   SlackImportSyncMode,
+  SlackImportFormat,
+  SlackImportStatus,
+  SlackImportErrorCode,
   SlackImportResponse,
+  SlackImportStatusResponse,
   SlackWorkspaceSummary,
   SlackMessageSummary,
   SlackMessageListResponse,

@@ -40,8 +40,11 @@ import {
 } from 'drizzle-orm';
 
 import type {
+  SlackImportErrorCode,
+  SlackImportFormat,
   SlackImportSyncMode,
   SlackImportResponse,
+  SlackImportStatusResponse,
   SlackMessageListResponse,
   SlackMessageSummary,
   SlackThreadResponse,
@@ -49,6 +52,13 @@ import type {
 } from '@family/contracts';
 import { schema, type Db } from '@family/database';
 import { OUTBOX_EVENT_TYPES } from '@family/shared';
+import {
+  DEFAULT_ZIP_LIMITS,
+  SlackZipError,
+  ZipError,
+  looksLikeZip,
+  readZipDirectory,
+} from '@family/slack-parser';
 
 import { DB } from '../database/database.constants';
 import { ObjectStorageService } from '../storage/object-storage.service';
@@ -113,6 +123,11 @@ export interface SlackImportFields {
   workspaceName?: string;
   kind?: string;
   syncMode?: string;
+  /**
+   * 업로드된 파일 이름(multipart `filename`). ZIP은 내부에 워크스페이스 이름을 담고
+   * 있지 않으므로, 이름을 못 받았을 때 마지막 수단으로 파일명에서 뽑는다.
+   */
+  fileName?: string;
 }
 
 /** Query parameters for `GET /v1/slack/messages` (all raw strings). */
@@ -157,26 +172,44 @@ export class SlackService {
     fileBuffer: Buffer,
     fields: SlackImportFields,
   ): Promise<SlackImportResponse> {
-    const bundle = this.parseBundleShallow(fileBuffer);
     const kind = this.resolveKind(fields.kind);
     const syncMode = this.resolveSyncMode(fields.syncMode);
-
-    const bundleWorkspace =
-      isRecord(bundle) && isRecord(bundle.workspace) ? bundle.workspace : {};
-    const bundleName =
-      typeof bundleWorkspace.name === 'string' && bundleWorkspace.name !== ''
-        ? bundleWorkspace.name
-        : undefined;
-    const slackTeamId =
-      typeof bundleWorkspace.slackTeamId === 'string' &&
-      bundleWorkspace.slackTeamId !== ''
-        ? bundleWorkspace.slackTeamId
-        : null;
+    // 형식은 클라이언트 신고가 아니라 **매직 바이트**로 정한다. content-type이나
+    // 확장자는 사용자가 마음대로 쓸 수 있어 분기 근거로 삼을 수 없다.
+    const format: SlackImportFormat = looksLikeZip(fileBuffer) ? 'zip' : 'json';
 
     const overrideName =
       fields.workspaceName && fields.workspaceName.trim() !== ''
         ? fields.workspaceName.trim()
         : undefined;
+
+    let bundleName: string | undefined;
+    let slackTeamId: string | null = null;
+
+    if (format === 'zip') {
+      // ZIP은 **풀지 않는다.** central directory만 읽어 경로 탈출·개수·선언 크기·
+      // 선언 압축비를 즉시 검사하고, 걸리면 400으로 되돌린다 — 비동기 실패로 미루면
+      // 사용자는 한참 뒤에야 이유를 알게 된다. 실제 해제와 최종 판정은 워커 몫이다
+      // (선언값은 공격자가 쓴 값이라 그것만 믿으면 안 된다).
+      this.assertSafeZipShape(fileBuffer);
+      // Slack Export ZIP에는 워크스페이스 표시명을 담은 표준 파일이 없다. 이름을
+      // 지어내지 않고 사용자가 준 값 → 파일 이름 순으로 쓴다.
+      bundleName = this.workspaceNameFromFileName(fields.fileName);
+    } else {
+      const bundle = this.parseBundleShallow(fileBuffer);
+      const bundleWorkspace =
+        isRecord(bundle) && isRecord(bundle.workspace) ? bundle.workspace : {};
+      bundleName =
+        typeof bundleWorkspace.name === 'string' && bundleWorkspace.name !== ''
+          ? bundleWorkspace.name
+          : undefined;
+      slackTeamId =
+        typeof bundleWorkspace.slackTeamId === 'string' &&
+        bundleWorkspace.slackTeamId !== ''
+          ? bundleWorkspace.slackTeamId
+          : null;
+    }
+
     const name = overrideName ?? bundleName ?? DEFAULT_WORKSPACE_NAME;
     const mySlackUserId =
       fields.mySlackUserId && fields.mySlackUserId.trim() !== ''
@@ -191,7 +224,9 @@ export class SlackService {
     });
 
     const sourceItemId = randomUUID();
-    const objectKey = `slack/${workspace.id}/${sourceItemId}.json`;
+    // 확장자를 형식에 맞춘다 — 워커는 매직 바이트로 다시 판별하지만, 객체 키만 보고도
+    // 무엇이 들어 있는지 알 수 있어야 운영 조사가 가능하다.
+    const objectKey = `slack/${workspace.id}/${sourceItemId}.${format}`;
     const contentHash = createHash('sha256').update(fileBuffer).digest('hex');
     const sizeBytes = fileBuffer.byteLength;
 
@@ -201,7 +236,7 @@ export class SlackService {
     await this.storage.putObject(
       objectKey,
       fileBuffer,
-      'application/json; charset=utf-8',
+      format === 'zip' ? 'application/zip' : 'application/json; charset=utf-8',
     );
 
     const receivedAt = new Date();
@@ -249,11 +284,22 @@ export class SlackService {
         },
         occurredAt: receivedAt,
       });
+      // 상태 행은 outbox event와 **같은 트랜잭션**에서 만든다. 갈라지면 잡은 도는데
+      // 조회할 행이 없거나(404), 행은 있는데 잡이 없는(영원한 queued) 상태가 된다.
+      await tx.insert(schema.slackImports).values({
+        sourceItemId,
+        slackWorkspaceId: workspace.id,
+        status: 'queued',
+        format,
+        syncMode,
+        uploadBytes: sizeBytes,
+        queuedAt: receivedAt,
+      });
     });
 
     this.logger.log(
       `slack import accepted id=${sourceItemId} workspace=${workspace.id} ` +
-        `syncMode=${syncMode} hash=${contentHash.slice(0, 12)} ` +
+        `format=${format} syncMode=${syncMode} hash=${contentHash.slice(0, 12)} ` +
         `size=${sizeBytes} status=outbox_pending`,
     );
 
@@ -262,6 +308,57 @@ export class SlackService {
       slackWorkspaceId: workspace.id,
       syncMode,
       status: 'queued',
+      format,
+    };
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Import status                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * `GET /v1/slack/imports/:importId` — import 1건의 상태.
+   *
+   * **owner 전용 경계를 유지한다.** import 행을 먼저 찾고, 그 워크스페이스의 소유권을
+   * `requireOwnedSlackWorkspace`로 다시 확인한다 — 남의 importId를 알아내도(UUID라
+   * 사실상 불가능하지만) 상태·건수를 볼 수 없어야 한다.
+   */
+  async getImport(
+    userId: string,
+    importId: string,
+  ): Promise<SlackImportStatusResponse> {
+    const [row] = await this.db
+      .select()
+      .from(schema.slackImports)
+      .where(eq(schema.slackImports.sourceItemId, importId))
+      .limit(1);
+    if (!row) {
+      throw new NotFoundException('import not found');
+    }
+    // 소유자가 아니면 여기서 403이 난다(서비스 계층 강제, ADR-0011 §2).
+    await this.requireOwnedSlackWorkspace(userId, row.slackWorkspaceId);
+
+    return {
+      importId: row.sourceItemId,
+      slackWorkspaceId: row.slackWorkspaceId,
+      status: row.status,
+      format: row.format,
+      // sync_mode는 text 컬럼이라 계약 enum으로 좁혀 준다(과거 행 방어).
+      syncMode: row.syncMode === 'snapshot' ? 'snapshot' : 'merge',
+      errorCode: (row.errorCode as SlackImportErrorCode | null) ?? null,
+      uploadBytes: row.uploadBytes,
+      attempt: row.attempt,
+      channelCount: row.channelCount,
+      userCount: row.userCount,
+      messageCount: row.messageCount,
+      createdMessageCount: row.createdMessageCount,
+      updatedMessageCount: row.updatedMessageCount,
+      deletedMessageCount: row.deletedMessageCount,
+      skippedMessageCount: row.skippedMessageCount,
+      warningCount: row.warningCount,
+      queuedAt: row.queuedAt.toISOString(),
+      startedAt: row.startedAt?.toISOString() ?? null,
+      finishedAt: row.finishedAt?.toISOString() ?? null,
     };
   }
 
@@ -691,6 +788,60 @@ export class SlackService {
     } catch {
       throw new BadRequestException('file is not valid JSON');
     }
+  }
+
+  /**
+   * ZIP 선검사 — **압축을 풀지 않고** central directory만 읽는다.
+   *
+   * 여기서 걸리는 것은 CPU를 한 바이트도 쓰지 않고 400으로 되돌아간다. 실제 해제
+   * 상한은 워커가 inflate 도중에 다시 강제한다(선언 크기는 공격자가 쓴 값이라
+   * 선검사만으로는 뚫린다 — 두 겹이 필요하다).
+   *
+   * 오류 메시지에 엔트리 이름·경로를 넣지 않는다. 코드만 노출한다(로깅 규약).
+   */
+  private assertSafeZipShape(fileBuffer: Buffer): void {
+    try {
+      readZipDirectory(fileBuffer, DEFAULT_ZIP_LIMITS);
+    } catch (error: unknown) {
+      if (error instanceof ZipError || error instanceof SlackZipError) {
+        this.logger.warn(
+          `slack zip upload rejected code=${error.code} size=${fileBuffer.byteLength}`,
+        );
+        throw new BadRequestException({
+          message: 'slack export zip was rejected',
+          errorCode: error.code,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 업로드 파일 이름에서 워크스페이스 표시명을 뽑는다.
+   *
+   * Slack Export ZIP에는 워크스페이스 이름을 담은 **표준 파일이 없다.** 파일 이름은
+   * 보통 `우리팀 Slack export Jan 1 2026 - Jun 1 2026.zip` 형태라 앞부분이 팀 이름이다.
+   * 추측이 섞이므로 사용자가 `workspaceName`을 주면 **그쪽이 항상 이긴다**.
+   *
+   * 이 폴백이 없으면 모든 ZIP import가 기본 이름('Slack') 하나로 뭉쳐 서로 다른
+   * 워크스페이스가 한 컨테이너에 섞인다 — 조용한 데이터 오염이라 막아야 한다.
+   */
+  private workspaceNameFromFileName(fileName?: string): string | undefined {
+    if (!fileName) return undefined;
+    // 경로 성분은 버린다(브라우저가 전체 경로를 보내는 경우가 있다).
+    const base = fileName.split(/[\\/]/).pop() ?? fileName;
+    const stem = base.replace(/\.zip$/i, '');
+    const cleaned = stem
+      // `... Slack export Jan 1 2026 - Jun 1 2026` 꼬리를 떼면 앞이 팀 이름이다.
+      .replace(/\s*Slack export.*$/i, '')
+      // 제어문자는 화면·로그를 깨뜨리므로 버린다.
+      .replace(/[\u0000-\u001f]/g, '')
+      // 앞뒤 구분자만 정리한다. 이름 **안쪽** 공백은 지우지 않는다 —
+      // '우리 팀'이 '우리팀'이 되면 그건 다른 이름이다.
+      .replace(/^[\s_-]+|[\s_-]+$/g, '')
+      .replace(/\s+/g, ' ');
+    if (cleaned === '') return undefined;
+    return cleaned.slice(0, 100);
   }
 
   /** Validates the optional workspace kind field (default `company`). */

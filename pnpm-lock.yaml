@@ -44,6 +44,9 @@ importers:
       '@family/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@family/slack-parser':
+        specifier: workspace:*
+        version: link:../../packages/slack-parser
       '@family/transaction-domain':
         specifier: workspace:*
         version: link:../../packages/transaction-domain

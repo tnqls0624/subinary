@@ -2007,8 +2007,89 @@ export const slackThreads = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* slackImports                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Slack import 처리 상태(0054). 4개로 닫혀 있다. */
+export const slackImportStatus = pgEnum('slack_import_status', [
+  'queued',
+  'processing',
+  'completed',
+  'failed',
+]);
+
+/** 업로드 형식(0054). 기존 단일 JSON 경로와 새 Export ZIP 경로를 **둘 다** 유지한다. */
+export const slackImportFormat = pgEnum('slack_import_format', ['json', 'zip']);
+
+/**
+ * Slack import 1건의 관찰 가능한 상태(0054).
+ *
+ * 이 테이블이 없었을 때의 증상: 업로드 응답이 항상 `queued`라 워커에서 실패해도
+ * 사용자는 이유를 알 수 없었다. `importId`(= `sourceItemId`)가 사용자가 들고 있는
+ * 유일한 손잡이라 그것을 신원으로 삼는다(UNIQUE — 재시도가 행을 늘리지 않는다).
+ *
+ * BullMQ 잡 상태에 기대지 않는 이유: 잡은 `removeOnComplete`로 사라져 새로고침·앱
+ * 재시작 뒤에 상태가 증발한다.
+ *
+ * ⚠️ `errorCode`는 **안전한 코드**만 담는다. 원문·엔트리 이름·PII 금지(그대로 사용자
+ * 화면까지 간다). 자유 텍스트 컬럼을 일부러 만들지 않았다.
+ *
+ * 건수 컬럼이 nullable인 이유: `completed` 전에는 **모르는 것**이고, "모른다"와
+ * "0건"은 다른 사실이다.
+ */
+export const slackImports = pgTable(
+  'slack_imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceItemId: uuid('source_item_id')
+      .notNull()
+      .references(() => sourceItems.id),
+    slackWorkspaceId: uuid('slack_workspace_id')
+      .notNull()
+      .references(() => slackWorkspaces.id),
+    status: slackImportStatus('status').notNull().default('queued'),
+    format: slackImportFormat('format').notNull(),
+    syncMode: text('sync_mode').notNull(),
+    /** 업로드된 (압축) 파일 크기. 해제 후 크기는 완료 전에는 알 수 없다. */
+    uploadBytes: integer('upload_bytes').notNull().default(0),
+    errorCode: text('error_code'),
+    attempt: integer('attempt').notNull().default(0),
+    channelCount: integer('channel_count'),
+    userCount: integer('user_count'),
+    messageCount: integer('message_count'),
+    createdMessageCount: integer('created_message_count'),
+    updatedMessageCount: integer('updated_message_count'),
+    deletedMessageCount: integer('deleted_message_count'),
+    skippedMessageCount: integer('skipped_message_count'),
+    warningCount: integer('warning_count'),
+    queuedAt: timestamp('queued_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('slack_imports_source_item_id_unique').on(table.sourceItemId),
+    index('slack_imports_workspace_queued_at_idx').on(
+      table.slackWorkspaceId,
+      table.queuedAt.desc(),
+    ),
+    index('slack_imports_status_queued_at_idx').on(table.status, table.queuedAt),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* 추론 타입 (workspace & slack)                                              */
 /* -------------------------------------------------------------------------- */
+
+export type SlackImport = typeof slackImports.$inferSelect;
+export type NewSlackImport = typeof slackImports.$inferInsert;
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;

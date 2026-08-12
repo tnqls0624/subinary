@@ -607,3 +607,114 @@ describe('0052 — 예산 월 원장', () => {
     assert.match(workerText, /periodMonth: budgetPeriodMonth/);
   });
 });
+
+describe('0054 — Slack import 상태', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0054_slack_import_status.sql'),
+    'utf8',
+  );
+  const apiText = readFileSync(
+    resolve(here, '../../../apps/api/src/slack/slack.service.ts'),
+    'utf8',
+  );
+  const workerText = readFileSync(
+    resolve(
+      here,
+      '../../../apps/worker/src/processors/slack-import.processor.ts',
+    ),
+    'utf8',
+  );
+
+  it('가산적이다 — 기존 테이블을 바꾸거나 지우지 않는다', () => {
+    // 이 마이그레이션이 기존 데이터를 만지면 롤백이 "테이블 드롭"으로 끝나지 않는다.
+    assert.ok(
+      !/ALTER TABLE "(?!slack_imports")/.test(sqlText),
+      'slack_imports 이외의 테이블을 ALTER 한다',
+    );
+    // 문장 **시작** 위치만 본다 — FK 절의 `ON UPDATE no action`은 파괴적 구문이 아니다.
+    for (const forbidden of ['DROP TABLE', 'DROP COLUMN', 'DELETE FROM', 'UPDATE']) {
+      assert.ok(
+        !new RegExp(`^\\s*${forbidden}\\b`, 'im').test(sqlText),
+        `0054에 파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('상태 어휘 4개와 형식 어휘 2개를 만든다', () => {
+    assert.match(
+      sqlText,
+      /CREATE TYPE "public"\."slack_import_status"[\s\S]*?'queued',[\s\S]*?'processing',[\s\S]*?'completed',[\s\S]*?'failed'/,
+    );
+    // 기존 단일 JSON 업로드 경로를 깨뜨리지 않는다는 계약이 어휘에 남아 있어야 한다.
+    assert.match(
+      sqlText,
+      /CREATE TYPE "public"\."slack_import_format" AS ENUM \('json', 'zip'\)/,
+    );
+  });
+
+  it('importId(source_item_id)가 신원이고 유일하다 — 재시도가 행을 늘리지 않는다', () => {
+    assert.match(
+      sqlText,
+      /"slack_imports_source_item_id_unique" UNIQUE\("source_item_id"\)/,
+    );
+    assert.ok(
+      schemaText.includes("unique('slack_imports_source_item_id_unique')"),
+      'schema.ts에 유니크 선언이 없다',
+    );
+  });
+
+  it('자유 텍스트 오류 컬럼을 만들지 않는다 (원문·PII 유출 경로 차단)', () => {
+    // error_code만 있고 error_message/detail 류가 없어야 한다. 이 값은 그대로
+    // 사용자 화면까지 가므로 자유 텍스트 자리를 애초에 두지 않는다.
+    assert.ok(sqlText.includes('"error_code" text'), 'error_code가 없다');
+    for (const forbidden of ['error_message', 'error_detail', 'raw_error']) {
+      assert.ok(!sqlText.includes(forbidden), `${forbidden} 컬럼이 있다`);
+    }
+  });
+
+  it('건수 컬럼은 nullable이다 — "모른다"와 "0건"은 다른 사실이다', () => {
+    for (const column of [
+      'channel_count',
+      'user_count',
+      'message_count',
+      'warning_count',
+    ]) {
+      assert.match(
+        sqlText,
+        new RegExp(`"${column}" integer,`),
+        `${column}이 NOT NULL이거나 기본값을 갖는다`,
+      );
+    }
+  });
+
+  it('Drizzle 선언과 마이그레이션의 인덱스 이름이 같다', () => {
+    for (const name of [
+      'slack_imports_workspace_queued_at_idx',
+      'slack_imports_status_queued_at_idx',
+    ]) {
+      assert.ok(sqlText.includes(`"${name}"`), `0054에 ${name}이 없다`);
+      assert.ok(schemaText.includes(`'${name}'`), `schema.ts에 ${name}이 없다`);
+    }
+    assert.ok(
+      schemaText.includes('export const slackImports = pgTable('),
+      'schema.ts에 slackImports 선언이 없다',
+    );
+  });
+
+  it('API가 수락 시 queued 행을 만들고 owner 경계로 조회한다', () => {
+    assert.match(apiText, /schema\.slackImports/);
+    assert.match(apiText, /requireOwnedSlackWorkspace/);
+  });
+
+  it('워커가 processing/completed/failed를 모두 기록한다', () => {
+    for (const status of ["'processing'", "'completed'", "'failed'"]) {
+      assert.ok(
+        workerText.includes(status),
+        `워커가 ${status} 상태를 기록하지 않는다`,
+      );
+    }
+    // 잡이 사라져도 상태가 남아야 하므로 DB에 쓴다.
+    assert.match(workerText, /schema\.slackImports/);
+  });
+});

@@ -16,10 +16,10 @@
  *    그리지 않는다 — 거부는 실패가 아니라 정직한 답이다.
  * 3) **없는 데이터를 있는 척하지 않는다.** 업무 기억은 진입 시
  *    `GET /v1/slack/workspaces`를 먼저 조회한다. 0개면 가짜 예시 질문이나 가짜
- *    최근 기록 대신 "가져온 Slack 기록이 없습니다"를 명시한다. 업로드 동선은
- *    두지 않는다 — 서버는 Slack export ZIP을 처리하지 못하고(단일 JSON 번들만,
- *    `docs/api/slack.md` §1) 진행 상태 조회 API도 없어, 파일 선택기를 열면
- *    사용자가 실패를 이해할 수 없는 자리에 세우는 셈이다.
+ *    최근 기록 대신 "가져온 Slack 기록이 없습니다"를 명시한다. 그리고 **그 자리에
+ *    업로드를 둔다**(C-6 본체): 서버가 Slack Export ZIP을 직접 받고
+ *    (`docs/api/slack.md` §1), `GET /v1/slack/imports/:id`로 진행·실패를 확인할 수
+ *    있게 된 뒤에야 연 동선이다. 그 전에는 파일 선택기가 성공할 수 없는 약속이었다.
  * 4) **소유자 경계.** 워크스페이스 목록은 서버가 소유자 본인 것만 준다(PRD §26).
  *    가족 구성원은 이름도 message count도 받지 못하고 빈 배열을 받으므로, 이
  *    화면에서도 자연히 "가져온 기록 없음"으로 보인다.
@@ -61,6 +61,8 @@ import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
 import { cn } from "@/lib/utils";
+
+import { SlackImportPanel } from "./import-panel";
 
 /** 대화 범위. 서버 엔드포인트·근거 출처가 완전히 다르다. */
 type Scope = "finance" | "work";
@@ -389,22 +391,25 @@ export default function AiPage() {
                       </dd>
                     </div>
                   </dl>
+                  {/* 이미 기록이 있어도 새 Export를 이어 올릴 수 있어야 한다 —
+                      Slack 기록은 계속 쌓이고, 재업로드는 멱등이다(ADR-0011 §3). */}
+                  <SlackImportPanel />
                 </>
               ) : (
-                // 빈 화면 대신 왜 비었는지를 말한다. 가짜 예시 질문·가짜 최근
-                // 기록은 두지 않는다 — 물어봐야 전부 "근거 없음"이 돌아온다.
-                <div className="flex w-full max-w-sm flex-col gap-2">
-                  <h1 className="text-xl font-bold tracking-tight">
-                    가져온 Slack 기록이 없습니다
-                  </h1>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
-                    업무 기억은 가져온 Slack 기록에서만 답을 찾아요. 아직 가져온
-                    기록이 없어서 지금은 물어볼 수 있는 게 없어요.
-                  </p>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
-                    현재 가져오기는 개발자용 JSON 업로드(<code>POST /v1/slack/import</code>)
-                    로만 가능해요. 앱에서 바로 올리는 기능은 아직 없어요.
-                  </p>
+                // 빈 화면 대신 왜 비었는지를 말하고, **다음 행동을 바로 준다**.
+                // 예전에는 "개발자용 JSON 업로드로만 가능해요"로 끝나 막다른 길이었다
+                // (서버가 ZIP을 못 받았기 때문이다 — C-6 본체가 그 조건을 없앴다).
+                <div className="flex w-full max-w-sm flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <h1 className="text-xl font-bold tracking-tight">
+                      가져온 Slack 기록이 없습니다
+                    </h1>
+                    <p className="text-muted-foreground text-sm leading-relaxed">
+                      업무 기억은 가져온 Slack 기록에서만 답을 찾아요. 아직 가져온
+                      기록이 없어서 지금은 물어볼 수 있는 게 없어요.
+                    </p>
+                  </div>
+                  <SlackImportPanel />
                 </div>
               )}
             </div>
