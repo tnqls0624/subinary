@@ -1,8 +1,13 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { AppConfig } from '@family/config';
+import { Redis } from 'ioredis';
 import { QUEUE_DEFAULT_JOB_OPTIONS, QUEUE_NAMES } from '@family/shared';
 
 import { FxRateService } from '../promotion/fx-rate.service';
+import { MONEY_REDIS_CLIENT } from '../promotion/money.constants';
+import { MoneyRuntimeService } from '../promotion/money-runtime.service';
 import { MoneyShadowService } from '../promotion/money-shadow.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { OutboxDispatcherService } from '../outbox/outbox-dispatcher.service';
@@ -60,6 +65,27 @@ import { TestProcessor } from './test.processor';
   // Memory/Graph processor는 current chunk revision을 재검증하고 증분 파생 결과를 publish한다.
   // CategorySuggestProcessor는 DB(@Global) + createProviders(config.ai)로 LLM 분류를 제안한다.
   providers: [
+    // ADR-0027 5단계 선행: 모드 게시 + 승격 소비 일시정지. 큐(card-sms-parse)와
+    // 큐 밖 경로(알림 스케줄러의 정체 복구)를 **같은 플래그 하나로** 막는다.
+    {
+      provide: MONEY_REDIS_CLIENT,
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService): Redis => {
+        const redis = configService.get<AppConfig['redis']>('redis');
+        if (!redis) {
+          throw new Error('Redis configuration is missing');
+        }
+        return new Redis({
+          host: redis.host,
+          port: redis.port,
+          lazyConnect: true,
+          maxRetriesPerRequest: 1,
+          connectTimeout: 2_000,
+          commandTimeout: 2_000,
+        });
+      },
+    },
+    MoneyRuntimeService,
     TestProcessor,
     CardSmsParseProcessor,
     // L1: 사람이 확정한 템플릿 레시피로 LLM 없이 추출(ADR-0023 S4).

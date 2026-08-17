@@ -59,6 +59,30 @@ export {
   sumKrw,
 } from './money.js';
 export {
+  DEFAULT_MONEY_CONTRACT_MODE,
+  MONEY_CONTRACT_MODES,
+  MONEY_FENCE_DEFAULT_TTL_SEC,
+  MONEY_FENCE_MAX_TTL_SEC,
+  MONEY_FENCE_MESSAGE_KO,
+  MONEY_FENCE_RETRY_AFTER_SEC,
+  MONEY_MODE_HEARTBEAT_MS,
+  MONEY_MODE_TTL_SEC,
+  MONEY_RUNTIME_SERVICES,
+  moneyModeBootWarning,
+  moneyPromotionPauseKey,
+  moneyRuntimeKeyPrefix,
+  moneyServiceModeKey,
+  moneyWriteFenceKey,
+  parseMoneyContractMode,
+  verifyMoneyModeAgreement,
+} from './money-runtime.js';
+export type {
+  MoneyContractMode,
+  MoneyModeSnapshot,
+  MoneyModeVerdict,
+  MoneyRuntimeService,
+} from './money-runtime.js';
+export {
   REALTIME_CHANNEL_PREFIX,
   REALTIME_CHANNEL_PATTERN,
   realtimeChannel,

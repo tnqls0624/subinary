@@ -196,6 +196,35 @@ export const configSchema = z.object({
   web: z.object({
     corsOrigin: z.string().min(1).default('http://localhost:3000'),
   }),
+  money: z.object({
+    /**
+     * 금액 계약 모드 (ADR-0027 롤아웃 5단계). **기본값 `shadow` = 현재 운영 동작.**
+     *
+     * - `legacy`: 기존 쓰기 그대로, shadow 관측도 하지 않는다.
+     * - `shadow`: 기존 쓰기 + 새 계약의 예상 결과 대조(미적용 manifest). **현행.**
+     * - `v2`: enforce.
+     *
+     * ⚠️ **API와 worker가 같은 값을 받아야 한다.** 서로 다른 이름·다른 값을 쓰면
+     * "한 경로는 legacy, 한 경로는 v2"인 거래가 만들어질 수 있고 그것이 정확히
+     * ADR-0027 5단계가 금지한 상태다. `docker-compose*.yml`은 두 서비스가 **하나의
+     * anchor**에서 값을 받도록 묶여 있고, 런타임 불일치는 두 서비스가 Redis에 게시하는
+     * 모드로 감지한다(`@family/shared`의 `verifyMoneyModeAgreement`).
+     *
+     * ⚠️ `v2`는 **값으로만** 받아들여진다 — enforce 배선은 아직 없다. v2로 부팅하면
+     * 두 서비스가 경고를 남긴다.
+     */
+    contractMode: z.enum(['legacy', 'shadow', 'v2']).default('shadow'),
+    /**
+     * 쓰기 펜스를 켤 때 함께 지정되는 기본 TTL(초). 펜스는 **자동 만료**돼야 한다 —
+     * 켜고 못 끄면 그게 스스로 만든 장애다. 운영자가 스크립트에서 덮어쓸 수 있다.
+     */
+    fenceDefaultTtlSec: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(3_600)
+      .default(900),
+  }),
   notifications: z.object({
     /**
      * FCM 서비스 계정. 세 값이 모두 있으면 푸시가 활성화되고, 하나라도 없으면
@@ -289,6 +318,10 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
     },
     web: {
       corsOrigin: env.CORS_ORIGIN,
+    },
+    money: {
+      contractMode: env.MONEY_CONTRACT_MODE,
+      fenceDefaultTtlSec: env.MONEY_FENCE_DEFAULT_TTL_SEC,
     },
     notifications: {
       fcmProjectId: optionalEnvValue(env.FCM_PROJECT_ID),

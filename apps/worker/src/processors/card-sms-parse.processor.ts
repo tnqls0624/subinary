@@ -20,6 +20,7 @@ import {
 } from '../card-sms/parse-quality';
 import { TemplateRecipeService } from '../card-sms/template-recipe.service';
 import { DB } from '../database/database.module';
+import { MoneyRuntimeService } from '../promotion/money-runtime.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
@@ -55,12 +56,22 @@ export class CardSmsParseProcessor extends WorkerHost {
     private readonly realtimePublisher: RealtimePublisherService,
     private readonly llmSpanExtractor: LlmSpanExtractorService,
     private readonly templateRecipe: TemplateRecipeService,
+    private readonly moneyRuntime: MoneyRuntimeService,
     configService: ConfigService,
   ) {
     super();
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
     this.logger = createLogger('worker:card-sms-parse-processor', {
       pretty: nodeEnv !== 'production',
+    });
+    // ADR-0027 5단계: 승격 소비 일시정지 대상으로 자기 자신을 등록한다.
+    // `WorkerHost.worker`는 이 프로세스의 BullMQ Worker다 — `pause()`는 새 잡을
+    // 가져오지 않을 뿐 큐에서 지우지 않으므로 pause 중 들어온 잡은 그대로 쌓인다.
+    // getter로 감싸는 이유: `worker`는 Nest가 나중에 주입하므로 생성자 시점에 잡으면 안 된다.
+    this.moneyRuntime.register({
+      name: QUEUE_NAMES.CARD_SMS_PARSE,
+      pause: () => this.worker.pause(),
+      resume: () => this.worker.resume(),
     });
   }
 

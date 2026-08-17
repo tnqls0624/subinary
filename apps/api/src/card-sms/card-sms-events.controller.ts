@@ -6,7 +6,17 @@
  * principal is passed to the service as `actorUserId`; the service enforces
  * household membership and returns a 403 to non-members (PRD §26).
  */
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { createZodDto } from 'nestjs-zod';
 
 import {
@@ -23,6 +33,7 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
+import { MoneyWriteFenceGuard } from '../money/money-write-fence.guard';
 import { CardSmsQueryService } from './card-sms-query.service';
 import { CardSmsReviewService } from './card-sms-review.service';
 
@@ -119,8 +130,12 @@ export class CardSmsEventsController {
   /**
    * POST /v1/card-sms-events/:id/review — 격리·실패 건을 사람이 확인·교정해 확정한다
    * (ADR-0023 S3). 거래를 만들고 동시에 학습 라벨(`human_confirmed`)을 남긴다.
+   *
+   * 쓰기 펜스 대상(ADR-0027 5단계 "사람 검토 확정") — `card_transactions`를 직접 만든다.
+   * 막혀도 원문은 `card_sms_events`에 그대로 남아 있어 펜스가 풀린 뒤 다시 확정하면 된다.
    */
   @Post(':id/review')
+  @UseGuards(MoneyWriteFenceGuard)
   @HttpCode(HttpStatus.OK)
   review(
     @CurrentUser() user: AuthenticatedUser,

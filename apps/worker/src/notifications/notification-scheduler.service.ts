@@ -31,6 +31,7 @@ import type { Queue } from 'bullmq';
 import { and, eq, gte, inArray, isNotNull, isNull, lt, notExists, or, sql, type SQL } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
+import { MoneyRuntimeService } from '../promotion/money-runtime.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -105,6 +106,10 @@ export class NotificationSchedulerService
     // 정체 이벤트의 자동 복구용. promote()는 sourceEventId UNIQUE로 멱등하므로
     // 재호출이 안전하다(파싱 프로세서와 같은 진입점을 쓴다).
     private readonly promotionService: TransactionPromotionService,
+    // ⚠️ 이 서비스는 **큐가 아니라 타이머**로 승격을 다시 몬다. BullMQ 큐만 pause하면
+    // 여기가 그대로 돌아 쓰기 펜스 중에도 금액이 쓰인다(ADR-0027 5단계 위반).
+    // 그래서 같은 플래그를 여기서도 본다.
+    private readonly moneyRuntime: MoneyRuntimeService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -441,6 +446,19 @@ export class NotificationSchedulerService
         .returning({ id: schema.operationalAlerts.id });
       if (!inserted) continue;
       raised += 1;
+
+      // 쓰기 펜스(ADR-0027 5단계) 중에는 **자동 복구를 하지 않는다.**
+      // 경보는 이미 올라갔으므로 정체 사실은 남고, 펜스가 풀린 뒤 다음 tick이 다시
+      // 몬다(`dedupeKey`가 날짜 단위라 같은 날 재경보는 안 나지만 복구 시도는 이
+      // 분기 밖의 다음 정체 판정에서 이어진다). **자동 복구를 그대로 두면 큐를 멈춰도
+      // 금액이 쓰인다** — 큐 pause만으로는 승격이 멈추지 않는다는 뜻이다.
+      if (this.moneyRuntime.isPromotionPaused) {
+        this.logger.warn(
+          { cardSmsEventId: event.id },
+          'stalled card-sms promotion recovery skipped (promotion paused)',
+        );
+        continue;
+      }
 
       // 자동 복구 — 실패해도 tick을 멈추지 않는다(경보는 이미 올라갔다).
       try {

@@ -22,6 +22,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { createZodDto } from 'nestjs-zod';
 
@@ -39,6 +40,7 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../auth/decorators/current-user.decorator';
+import { MoneyWriteFenceGuard } from '../money/money-write-fence.guard';
 import { TransactionService } from './transaction.service';
 
 class TransactionUpdateDto extends createZodDto(transactionUpdateRequestSchema) {}
@@ -150,8 +152,17 @@ export class TransactionController {
     return this.transactionService.listCancellationCandidates(user.userId, id);
   }
 
-  /** PATCH /v1/transactions/:id — update category/merchant/card/member/etc. */
+  /**
+   * PATCH /v1/transactions/:id — update category/merchant/card/member/etc.
+   *
+   * 쓰기 펜스 대상(ADR-0027 5단계 "금액 수정"). 이 핸들러는 금액 외 필드(카테고리·
+   * 가맹점·카드·구성원)도 함께 받으므로 펜스 중에는 **그것들까지 막힌다**. 금액만 골라
+   * 막으려면 본문을 들여다봐야 하는데, 그러면 "어떤 본문이 금액을 건드리는가"라는 판정이
+   * 가드에 복제된다 — 그 판정이 서비스와 갈리는 순간 펜스가 헛돈다. 전환은 몇 분이고
+   * 이 경로들은 사용자가 다시 누르면 되므로, **넓게 막고 짧게 끝내는** 쪽을 택했다.
+   */
   @Patch(':id')
+  @UseGuards(MoneyWriteFenceGuard)
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -170,8 +181,12 @@ export class TransactionController {
     return this.transactionService.remove(user.userId, id);
   }
 
-  /** POST /v1/transactions/:id/link-cancellation — link this cancellation to an approval. */
+  /**
+   * POST /v1/transactions/:id/link-cancellation — link this cancellation to an approval.
+   * 쓰기 펜스 대상(ADR-0027 5단계 "취소 연결") — `cancelledAmount`·`netAmount`·`status`를 바꾼다.
+   */
   @Post(':id/link-cancellation')
+  @UseGuards(MoneyWriteFenceGuard)
   @HttpCode(HttpStatus.OK)
   linkCancellation(
     @CurrentUser() user: AuthenticatedUser,
