@@ -9,6 +9,7 @@ import { FxRateService } from '../promotion/fx-rate.service';
 import { MONEY_REDIS_CLIENT } from '../promotion/money.constants';
 import { MoneyRuntimeService } from '../promotion/money-runtime.service';
 import { MoneyShadowService } from '../promotion/money-shadow.service';
+import { MoneyWriteService } from '../promotion/money-write.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
 import { OutboxDispatcherService } from '../outbox/outbox-dispatcher.service';
 import { WorkerModelServingService } from '../model-serving/model-serving.service';
@@ -97,6 +98,8 @@ import { TestProcessor } from './test.processor';
     FxRateService,
     // ADR-0027 3단계: 승격 결과를 새 금액 계약과 대조해 기록만 한다(쓰기 경로 무변경).
     MoneyShadowService,
+    // ADR-0027 5단계: 승격의 금액 쓰기를 소유하는 enforce 배선.
+    MoneyWriteService,
     // 거래 승격/파싱 완료를 Redis pub/sub로 발행하는 실시간 힌트 퍼블리셔.
     RealtimePublisherService,
     SlackImportProcessor,

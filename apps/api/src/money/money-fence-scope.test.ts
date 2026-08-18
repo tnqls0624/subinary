@@ -13,14 +13,18 @@
  * 나중에 누가 `@UseGuards`를 컨트롤러 클래스에 통째로 올리면 이 테스트가 깨진다.
  */
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const here = dirname(fileURLToPath(import.meta.url));
+/**
+ * 소스 루트(`apps/api/src`). `import.meta.url`을 쓰지 않는 이유는 이 패키지의
+ * tsconfig가 CommonJS로 타입체크하기 때문이다(TS1470). vitest는 저장소 루트가 아니라
+ * 패키지 루트(`apps/api`)에서 돌므로 cwd 기준이 안정적이다.
+ */
+const SRC_ROOT = resolve(process.cwd(), 'src');
 const src = (relative: string): string =>
-  readFileSync(resolve(here, '..', relative), 'utf8');
+  readFileSync(resolve(SRC_ROOT, relative), 'utf8');
 
 const GUARD = 'MoneyWriteFenceGuard';
 

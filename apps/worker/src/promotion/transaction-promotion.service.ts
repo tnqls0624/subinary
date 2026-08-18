@@ -48,6 +48,7 @@ import { createHash } from 'node:crypto';
 import { DB } from '../database/database.module';
 import { FxRateService } from './fx-rate.service';
 import { MoneyShadowService } from './money-shadow.service';
+import { MoneyWriteService } from './money-write.service';
 
 /**
  * 외화 환산 결과. KRW 거래는 fx=null. 외화는 amount(KRW 환산 minor units) +
@@ -140,6 +141,8 @@ export class TransactionPromotionService {
     private readonly fxRate: FxRateService,
     // ADR-0027 롤아웃 3단계: 승격 결과를 새 금액 계약과 대조해 기록만 한다(무변경).
     private readonly moneyShadow: MoneyShadowService,
+    // ADR-0027 5단계: enforce가 켜지면 승격의 금액 쓰기를 이쪽이 소유한다(D-1 해소).
+    private readonly moneyWrite: MoneyWriteService,
     configService: ConfigService,
   ) {
     const nodeEnv = configService.get<AppConfig['app']>('app')?.nodeEnv;
@@ -379,13 +382,59 @@ export class TransactionPromotionService {
       status = isDuplicate ? 'duplicate_suspected' : 'approved';
     }
 
+    const metadata = {
+      householdId: event.householdId,
+      memberId: event.memberId,
+      cardId: link.cardId,
+      sourceEventId: event.id,
+      merchantRaw: event.merchantRaw ?? null,
+      merchantNormalized,
+      categoryId,
+      // card_sms_events/파서에 승인번호가 없어 항상 null(향후 파서 확장 대비).
+      authorizationCode: null,
+      installmentMonths: event.installmentMonths ?? null,
+      visibility: link.visibility,
+      memo: null,
+    };
+
+    /**
+     * ADR-0027 5단계 — **D-1이 여기서 닫힌다.**
+     *
+     * 위 `convertToKrw`는 `getRateToKrw(currency)`로 **오늘** 환율을 받는다(거래일이
+     * 아니다). 그래서 같은 이벤트를 언제 재시도하느냐가 KRW 금액을 바꿨고, 승인과
+     * 취소가 서로 다른 날 환율로 환산돼 전액취소에도 잔액이 남았다.
+     *
+     * enforce가 켜지면 원통화 금액을 그대로 넘기고 **거래일 스냅샷**으로 환산한다.
+     * 스냅샷이 없으면 승격하지 않는다 — 오늘 환율로 대체하는 것이 D-1이었다.
+     * 중복 판정에는 여전히 `converted`를 쓴다(비교 기준 통화를 KRW로 유지).
+     */
+    if (this.moneyWrite.enforced) {
+      const result = await this.moneyWrite.commands.createApproval({
+        metadata,
+        minorUnits: converted.originalAmount ?? amount,
+        currency: converted.originalCurrency ?? converted.currency,
+        occurredAt: event.occurredAt ?? null,
+        receivedAt: event.receivedAt,
+        reviewFlag: status === 'approved' ? null : status,
+      });
+      if (!result.ok) {
+        // 승격 실패는 잡 재시도로 이어진다 — 조용히 틀린 금액을 확정하는 것보다
+        // 반영이 늦는 편이 안전하다는 것이 ADR의 판단이다.
+        this.logger.warn(
+          { cardSmsEventId: event.id, reason: result.reason },
+          'money contract rejected approval promotion',
+        );
+        throw new Error(`money contract rejected approval: ${result.reason}`);
+      }
+      return result.value.alreadyPromoted
+        ? { status: 'already_promoted', transactionId: null }
+        : { status, transactionId: result.value.transactionId };
+    }
+
     const [inserted] = await this.db
       .insert(schema.cardTransactions)
       .values({
-        householdId: event.householdId,
-        memberId: event.memberId,
-        cardId: link.cardId,
-        sourceEventId: event.id,
+        ...metadata,
         transactionType: 'approval',
         status,
         amount,
@@ -395,17 +444,9 @@ export class TransactionPromotionService {
         originalAmount: converted.originalAmount,
         originalCurrency: converted.originalCurrency,
         exchangeRate: converted.exchangeRate,
-        merchantRaw: event.merchantRaw ?? null,
-        merchantNormalized,
-        categoryId,
         approvedAt: event.occurredAt ?? null,
         cancelledAt: null,
-        // card_sms_events/파서에 승인번호가 없어 항상 null(향후 파서 확장 대비).
-        authorizationCode: null,
-        installmentMonths: event.installmentMonths ?? null,
         parentTransactionId: null,
-        visibility: link.visibility,
-        memo: null,
       })
       .onConflictDoNothing({ target: schema.cardTransactions.sourceEventId })
       .returning({ id: schema.cardTransactions.id });
@@ -485,6 +526,55 @@ export class TransactionPromotionService {
   ): Promise<CancellationOutcome> {
     const amount = converted.amount;
     const cancelledAt = event.occurredAt ?? null;
+
+    /**
+     * ADR-0027 5단계 — **D-1과 P0-8이 여기서 닫힌다.**
+     *
+     * 아래 legacy 경로는 취소를 **KRW 환산액**으로 승인과 비교한다. 승인과 취소가
+     * 서로 다른 날 환산되면 같은 외화 전액취소도 잔액이 남았다(USD 100 승인 1,300원
+     * → 전액취소 1,400원 → `130,000 >= 140,000` 실패). 새 계약은 **원통화 잔액**으로
+     * 연결하고 승인 환율로 상계하므로 환율 방향과 무관하게 0이 된다(ADR §4).
+     *
+     * 후보를 못 고르면 `match: 'none' | 'ambiguous'`가 오고, 그때 취소는 연결되지 않은
+     * 채 `pending_review`로 남는다 — legacy와 같은 판단이다.
+     */
+    if (this.moneyWrite.enforced) {
+      const result = await this.moneyWrite.commands.createCancellation({
+        metadata: {
+          householdId: event.householdId,
+          memberId: event.memberId,
+          cardId: link.cardId,
+          sourceEventId: event.id,
+          merchantRaw: event.merchantRaw ?? null,
+          merchantNormalized,
+          categoryId,
+          authorizationCode: null,
+          installmentMonths: event.installmentMonths ?? null,
+          visibility: link.visibility,
+          memo: null,
+        },
+        minorUnits: converted.originalAmount ?? amount,
+        currency: converted.originalCurrency ?? converted.currency,
+        occurredAt: cancelledAt,
+        receivedAt: event.receivedAt,
+      });
+      if (!result.ok) {
+        this.logger.warn(
+          { cardSmsEventId: event.id, reason: result.reason },
+          'money contract rejected cancellation promotion',
+        );
+        throw new Error(`money contract rejected cancellation: ${result.reason}`);
+      }
+      const linked = result.value.parentTransactionId !== null;
+      return {
+        status: linked ? 'approved' : 'pending_review',
+        linked,
+        skipped: result.value.alreadyPromoted,
+        // 재승격이면 legacy와 같이 id를 돌려주지 않는다 — 호출부가 이 값으로 알림·
+        // 카테고리 제안을 enqueue하므로, 이미 처리된 거래에 두 번 보내면 안 된다.
+        transactionId: result.value.alreadyPromoted ? null : result.value.transactionId,
+      };
+    }
 
     return this.db.transaction(async (tx): Promise<CancellationOutcome> => {
       // 취소 레코드 삽입(멱등). 경합/재승격은 onConflictDoNothing으로 흡수한다.

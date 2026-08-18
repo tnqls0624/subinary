@@ -8,6 +8,8 @@
  *     진입점마다 복사되지 않는다** — D-2·D-3이 정확히 복사로 생긴 결함이다.
  *  2. **전환 런타임**(롤아웃 5단계 선행) — 모드 게시와 쓰기 펜스. 막아야 하는 4개 경로가
  *     같은 두 모듈에 있으므로 가드도 같은 자리에서 내보낸다.
+ *  3. **enforce 배선**(롤아웃 5단계) — `MoneyWriteService`. 같은 이유로 여기 둔다:
+ *     금액 쓰기 경로가 늘어나도 fx resolver·모드 판정·거절 매핑이 복사되지 않아야 한다.
  */
 import {
   Inject,
@@ -23,6 +25,7 @@ import type { AppConfig } from '@family/config';
 import { MONEY_REDIS_CLIENT } from './money.constants';
 import { MoneyRuntimeService } from './money-runtime.service';
 import { MoneyShadowService } from './money-shadow.service';
+import { MoneyWriteService } from './money-write.service';
 import { MoneyWriteFenceGuard } from './money-write-fence.guard';
 
 @Module({
@@ -49,9 +52,15 @@ import { MoneyWriteFenceGuard } from './money-write-fence.guard';
     },
     MoneyShadowService,
     MoneyRuntimeService,
+    MoneyWriteService,
     MoneyWriteFenceGuard,
   ],
-  exports: [MoneyShadowService, MoneyRuntimeService, MoneyWriteFenceGuard],
+  exports: [
+    MoneyShadowService,
+    MoneyRuntimeService,
+    MoneyWriteService,
+    MoneyWriteFenceGuard,
+  ],
 })
 export class MoneyModule implements OnModuleDestroy {
   private readonly logger = new Logger(MoneyModule.name);

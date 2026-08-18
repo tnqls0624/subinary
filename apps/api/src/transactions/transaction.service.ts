@@ -68,7 +68,9 @@ import {
 } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import { moneyRejectionToHttp } from '../money/money-rejection';
 import { MoneyShadowService } from '../money/money-shadow.service';
+import { MoneyWriteService } from '../money/money-write.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
   actorCanSeeApproval,
@@ -160,6 +162,8 @@ export class TransactionService {
     // 이 서비스는 취소 산술의 두 번째 사본이다(worker 승격이 첫 번째) — 두 사본이
     // 같은 답을 내는지가 전환 전에 확인해야 할 값이다.
     private readonly moneyShadow: MoneyShadowService,
+    // ADR-0027 5단계: enforce가 켜지면 금액 수정·취소 연결을 이쪽이 소유한다.
+    private readonly moneyWrite: MoneyWriteService,
   ) {}
 
   /* ---------------------------------------------------------------------- */
@@ -654,6 +658,17 @@ export class TransactionService {
     if (input.memo !== undefined) {
       updates.memo = input.memo;
     }
+    /**
+     * ADR-0027 5단계: 금액·거래시각은 enforce가 켜지면 **새 계약이 소유한다.**
+     * 거래시각이 바뀌면 환율 기준일이 바뀌고 그러면 순액도 다시 계산돼야 하는데,
+     * 예전 경로는 `approvedAt`만 갈아끼우고 금액은 그대로 뒀다(D-1). 그래서 둘을
+     * 한 명령으로 묶어 `amendApproval`에 넘긴다 — 부분 반영으로 체인을 깨진 상태에
+     * 두지 않는 것이 ADR §2다.
+     */
+    const moneyFieldsChanged =
+      input.amount !== undefined || input.occurredAt !== undefined;
+    const enforceMoney = this.moneyWrite.enforced && moneyFieldsChanged;
+
     if (input.amount !== undefined) {
       // 금액 수정은 취소 연결이 없는 단순 거래에서만(netAmount 불변식 보호).
       if (current.cancelledAmount !== 0 || current.parentTransactionId !== null) {
@@ -662,11 +677,13 @@ export class TransactionService {
         );
       }
       assertKrwInteger(input.amount);
-      updates.amount = input.amount;
-      // 승인은 net = amount(취소 없음), 취소 행은 net이 항상 0.
-      updates.netAmount = current.transactionType === 'approval' ? input.amount : 0;
+      if (!enforceMoney) {
+        updates.amount = input.amount;
+        // 승인은 net = amount(취소 없음), 취소 행은 net이 항상 0.
+        updates.netAmount = current.transactionType === 'approval' ? input.amount : 0;
+      }
     }
-    if (input.occurredAt !== undefined) {
+    if (input.occurredAt !== undefined && !enforceMoney) {
       const occurred = new Date(input.occurredAt);
       if (current.transactionType === 'approval') {
         updates.approvedAt = occurred;
@@ -675,11 +692,42 @@ export class TransactionService {
       }
     }
 
+    if (enforceMoney) {
+      // 새 계약의 수정 명령은 승인 체인만 다룬다. 취소 행의 금액을 바꾸면 연결된
+      // 승인의 상계도 함께 바뀌어야 하는데 예전 경로는 그것을 하지 않았다 —
+      // 그 조용한 불일치를 이어받지 않고 거부한다.
+      if (current.transactionType !== 'approval') {
+        throw new BadRequestException(
+          '취소 거래의 금액과 거래 시각은 수정할 수 없어요. 연결을 해제한 뒤 다시 등록해 주세요.',
+        );
+      }
+      if (current.originalCurrency !== null) {
+        throw new BadRequestException(
+          '외화 거래의 금액은 앱에서 수정할 수 없어요. 원화 환산은 거래일 환율로 고정돼요.',
+        );
+      }
+    }
+
     // The category change and the (optional) rule upsert are atomic.
     const effectiveMerchant =
       input.merchantNormalized ?? current.merchantNormalized;
 
     await this.db.transaction(async (tx) => {
+      // 금액 명령을 먼저 돌린다 — 잠금 순서(승인→취소)를 이 명령이 소유하므로,
+      // 같은 트랜잭션에서 다른 UPDATE가 앞서면 P0-4에서 고정한 순서가 흐트러진다.
+      if (enforceMoney) {
+        const outcome = await this.moneyWrite.commands.amendApproval(
+          {
+            approvalId: id,
+            ...(input.amount === undefined ? {} : { minorUnits: input.amount }),
+            ...(input.occurredAt === undefined
+              ? {}
+              : { occurredAt: new Date(input.occurredAt) }),
+          },
+          { tx },
+        );
+        if (!outcome.ok) throw moneyRejectionToHttp(outcome.reason);
+      }
       await tx
         .update(schema.cardTransactions)
         .set(updates)
@@ -969,96 +1017,129 @@ export class TransactionService {
      * 잠금 순서는 **승인 → 취소**로 고정한다({@link remove}의 역산 경로도 같다).
      * 반대로 잠그는 경로가 하나라도 생기면 link/delete 교차 시 데드락이 된다.
      */
-    await this.db.transaction(async (tx) => {
-      const [approval] = await tx
-        .select()
-        .from(schema.cardTransactions)
-        .where(eq(schema.cardTransactions.id, input.approvalTransactionId))
-        .for('update')
-        .limit(1);
-      if (!approval) {
-        throw new NotFoundException('transaction not found');
-      }
-      if (approval.householdId !== cancellation.householdId) {
-        throw new BadRequestException(
-          'transactions belong to different households',
-        );
-      }
-      if (approval.transactionType !== 'approval') {
-        throw new BadRequestException('target is not an approval transaction');
-      }
-      /*
-       * 승인 대상에도 공개범위를 건다.
+    if (this.moneyWrite.enforced) {
+      /**
+       * ADR-0027 5단계. 금액 조작(claim → 잔액 검증 → 체인 재계산)은 새 계약이 소유하고,
+       * **권한과 공개범위는 여기 남는다** — 도메인 서비스는 누가 무엇을 볼 수 있는지
+       * 모르고, 알아야 할 이유도 없다.
        *
-       * 이 검사가 없던 동안 저장 경로는 household·승인여부·통화·잔액만 봤고,
-       * 타인의 `private` 승인이라도 UUID만 알면 **연결(= 쓰기)** 이 됐다. 게다가
-       * 응답이 그 승인의 요약을 마스킹 없이 돌려줘 가려졌던 가맹점명까지 드러났다.
-       * 후보 엔드포인트가 타인의 `summary_only` 승인을 (가맹점만 가린 채) 후보로
-       * 주므로 그 id로 곧장 도달할 수 있었다 — 추측이 필요 없는 경로였다.
-       *
-       * 역할 예외를 두지 않는다. `visibilityScope()`도 owner/admin을 봐주지 않아
-       * 목록·상세·집계 어디서도 타인의 `private`은 보이지 않는다. 여기만 열면
-       * "owner는 볼 수 없는 거래를 고칠 수 있다"가 되어 규약이 갈라진다.
-       * (`assertCanMutate`의 권한자 예외는 **취소 행**에 적용된다 — 가족의 취소를
-       * 대신 정리하는 것은 허용하되, 대상 승인은 본인이 볼 수 있는 것이어야 한다.)
+       * 승인 행을 `for('update')`로 잠그지 않는 것이 중요하다. 재연결이면 도메인이
+       * `[이전 부모, 새 부모]`를 **id 오름차순으로** 잠그는데, 여기서 새 부모를 먼저
+       * 잠가 두면 그 순서가 뒤집혀 교착이 된다. 검증은 잠금 없이 읽고, 경합에 민감한
+       * 조건(household·통화·잔액·중복 연결)은 도메인이 잠근 뒤 다시 본다.
        */
-      if (!actorCanSeeApproval(approval, actor.memberId)) {
-        // 존재를 숨긴다. 403을 주면 "그런 승인이 있긴 하다"가 새어 나가고,
-        // 상세 조회(:301 부근)도 같은 이유로 404를 준다.
-        throw new NotFoundException('transaction not found');
-      }
-      // amount는 minor units라 통화가 다르면 뺄셈/비교가 무의미하다(USD 취소를 KRW
-      // 승인에 연결 등). 동일 통화 거래끼리만 연결을 허용한다.
-      if (approval.currency !== cancellation.currency) {
-        throw new BadRequestException('transactions have different currencies');
-      }
+      await this.db.transaction(async (tx) => {
+        const [approval] = await tx
+          .select()
+          .from(schema.cardTransactions)
+          .where(eq(schema.cardTransactions.id, input.approvalTransactionId))
+          .limit(1);
+        if (!approval) {
+          throw new NotFoundException('transaction not found');
+        }
+        // 공개범위는 API의 책임이다. 존재를 숨기는 404 정책도 그대로 유지한다.
+        if (!actorCanSeeApproval(approval, actor.memberId)) {
+          throw new NotFoundException('transaction not found');
+        }
 
-      const now = new Date();
-
-      // 취소 행을 원자적으로 claim한다 — 이미 연결된 취소를 두 번 연결하면 승인 잔액이
-      // 두 번 깎인다. 승인 갱신은 claim이 성공한 뒤에만 한다.
-      const [claimed] = await tx
-        .update(schema.cardTransactions)
-        .set({
-          parentTransactionId: approval.id,
-          status: 'approved',
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(schema.cardTransactions.id, cancellation.id),
-            isNull(schema.cardTransactions.parentTransactionId),
-          ),
-        )
-        .returning({ amount: schema.cardTransactions.amount });
-      if (!claimed) {
-        throw new ConflictException('cancellation is already linked');
-      }
-
-      const remaining = approval.amount - approval.cancelledAmount;
-      if (claimed.amount > remaining) {
-        throw new BadRequestException(
-          'cancellation amount exceeds remaining approved balance',
+        const outcome = await this.moneyWrite.commands.linkCancellation(
+          { cancellationId: cancellation.id, approvalId: approval.id },
+          { tx },
         );
-      }
+        if (!outcome.ok) throw moneyRejectionToHttp(outcome.reason);
+      });
+    } else {
+      await this.db.transaction(async (tx) => {
+        const [approval] = await tx
+          .select()
+          .from(schema.cardTransactions)
+          .where(eq(schema.cardTransactions.id, input.approvalTransactionId))
+          .for('update')
+          .limit(1);
+        if (!approval) {
+          throw new NotFoundException('transaction not found');
+        }
+        if (approval.householdId !== cancellation.householdId) {
+          throw new BadRequestException(
+            'transactions belong to different households',
+          );
+        }
+        if (approval.transactionType !== 'approval') {
+          throw new BadRequestException('target is not an approval transaction');
+        }
+        /*
+         * 승인 대상에도 공개범위를 건다.
+         *
+         * 이 검사가 없던 동안 저장 경로는 household·승인여부·통화·잔액만 봤고,
+         * 타인의 `private` 승인이라도 UUID만 알면 **연결(= 쓰기)** 이 됐다. 게다가
+         * 응답이 그 승인의 요약을 마스킹 없이 돌려줘 가려졌던 가맹점명까지 드러났다.
+         * 후보 엔드포인트가 타인의 `summary_only` 승인을 (가맹점만 가린 채) 후보로
+         * 주므로 그 id로 곧장 도달할 수 있었다 — 추측이 필요 없는 경로였다.
+         *
+         * 역할 예외를 두지 않는다. `visibilityScope()`도 owner/admin을 봐주지 않아
+         * 목록·상세·집계 어디서도 타인의 `private`은 보이지 않는다. 여기만 열면
+         * "owner는 볼 수 없는 거래를 고칠 수 있다"가 되어 규약이 갈라진다.
+         * (`assertCanMutate`의 권한자 예외는 **취소 행**에 적용된다 — 가족의 취소를
+         * 대신 정리하는 것은 허용하되, 대상 승인은 본인이 볼 수 있는 것이어야 한다.)
+         */
+        if (!actorCanSeeApproval(approval, actor.memberId)) {
+          // 존재를 숨긴다. 403을 주면 "그런 승인이 있긴 하다"가 새어 나가고,
+          // 상세 조회(:301 부근)도 같은 이유로 404를 준다.
+          throw new NotFoundException('transaction not found');
+        }
+        // amount는 minor units라 통화가 다르면 뺄셈/비교가 무의미하다(USD 취소를 KRW
+        // 승인에 연결 등). 동일 통화 거래끼리만 연결을 허용한다.
+        if (approval.currency !== cancellation.currency) {
+          throw new BadRequestException('transactions have different currencies');
+        }
 
-      const newCancelled = approval.cancelledAmount + claimed.amount;
-      assertKrwInteger(newCancelled);
-      const newNet = approval.amount - newCancelled;
-      assertKrwInteger(newNet);
-      const newStatus: TxnStatus =
-        newCancelled >= approval.amount ? 'cancelled' : 'partially_cancelled';
+        const now = new Date();
 
-      await tx
-        .update(schema.cardTransactions)
-        .set({
-          cancelledAmount: newCancelled,
-          netAmount: newNet,
-          status: newStatus,
-          updatedAt: now,
-        })
-        .where(eq(schema.cardTransactions.id, approval.id));
-    });
+        // 취소 행을 원자적으로 claim한다 — 이미 연결된 취소를 두 번 연결하면 승인 잔액이
+        // 두 번 깎인다. 승인 갱신은 claim이 성공한 뒤에만 한다.
+        const [claimed] = await tx
+          .update(schema.cardTransactions)
+          .set({
+            parentTransactionId: approval.id,
+            status: 'approved',
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.cardTransactions.id, cancellation.id),
+              isNull(schema.cardTransactions.parentTransactionId),
+            ),
+          )
+          .returning({ amount: schema.cardTransactions.amount });
+        if (!claimed) {
+          throw new ConflictException('cancellation is already linked');
+        }
+
+        const remaining = approval.amount - approval.cancelledAmount;
+        if (claimed.amount > remaining) {
+          throw new BadRequestException(
+            'cancellation amount exceeds remaining approved balance',
+          );
+        }
+
+        const newCancelled = approval.cancelledAmount + claimed.amount;
+        assertKrwInteger(newCancelled);
+        const newNet = approval.amount - newCancelled;
+        assertKrwInteger(newNet);
+        const newStatus: TxnStatus =
+          newCancelled >= approval.amount ? 'cancelled' : 'partially_cancelled';
+
+        await tx
+          .update(schema.cardTransactions)
+          .set({
+            cancelledAmount: newCancelled,
+            netAmount: newNet,
+            status: newStatus,
+            updatedAt: now,
+          })
+          .where(eq(schema.cardTransactions.id, approval.id));
+      });
+    }
 
     const row = await this.loadSummaryRow(input.approvalTransactionId);
     // 취소↔승인 연결을 가족의 다른 열린 화면에 전파(best-effort).

@@ -34,7 +34,9 @@ import { normalizeMerchant } from '@family/shared';
 import { and, eq } from 'drizzle-orm';
 
 import { DB } from '../database/database.constants';
+import { moneyRejectionToHttp } from '../money/money-rejection';
 import { MoneyShadowService } from '../money/money-shadow.service';
+import { MoneyWriteService } from '../money/money-write.service';
 
 /** 검토 확정이 가능한 상태 — 둘 다 아직 거래로 승격되지 않았다. */
 const REVIEWABLE_STATUSES = ['quarantined', 'parse_failed'] as const;
@@ -52,6 +54,8 @@ export class CardSmsReviewService {
     // 이 경로는 D-2의 진원지다 — 취소를 확정해도 승인을 상계하지 않는다. 새 계약이
     // 어느 승인에 붙였을지를 `link_target_differs`로 세기 시작한다.
     private readonly moneyShadow: MoneyShadowService,
+    // ADR-0027 5단계: enforce가 켜지면 사람 검토 확정도 같은 초크포인트를 통과한다(P0-7).
+    private readonly moneyWrite: MoneyWriteService,
   ) {}
 
   /** 사람이 확인한 값으로 이벤트를 확정하고 거래를 만든다. */
@@ -224,42 +228,78 @@ export class CardSmsReviewService {
       const amount = input.amount as number;
       const merchantRaw = input.merchantRaw as string;
       const cancellation = transactionType === 'cancellation';
-      const [txn] = await tx
-        .insert(schema.cardTransactions)
-        .values({
-          householdId: event.householdId,
-          memberId: event.memberId,
-          cardId: input.cardId ?? null,
-          sourceEventId: cardSmsEventId,
-          transactionType,
-          status: cancellation ? 'cancelled' : 'approved',
-          amount,
-          cancelledAmount: 0,
-          // 취소 레코드의 netAmount는 0 규약(승인 쪽 cancelledAmount로 상계).
-          netAmount: cancellation ? 0 : amount,
-          currency,
-          originalAmount: null,
-          originalCurrency: null,
-          exchangeRate: null,
-          merchantRaw,
-          merchantNormalized: normalizeMerchant(merchantRaw),
-          categoryId: input.categoryId ?? null,
-          approvedAt: cancellation ? null : occurredAt,
-          cancelledAt: cancellation ? occurredAt : null,
-          authorizationCode: null,
-          installmentMonths: input.installmentMonths ?? null,
-          parentTransactionId: null,
-          visibility,
-          memo: null,
-        })
-        .onConflictDoNothing({ target: schema.cardTransactions.sourceEventId })
-        .returning({ id: schema.cardTransactions.id });
+      /**
+       * ADR-0027 5단계 — **P0-7이 여기서 닫힌다.**
+       *
+       * 예전 경로는 사람이 확정한 취소도 `parentTransactionId: null`로 넣었다. 취소 행은
+       * `netAmount: 0`으로 만들어지는데 승인의 `cancelledAmount`는 아무도 올려주지
+       * 않으니, 10,000원 승인에 3,000원 취소를 확정해도 순액이 10,000원으로 남았다.
+       * 자동 승격 경로만 상계 규약을 구현하고 나중에 붙은 사람 경로가 그것을 재사용하지
+       * 않은, 로드맵이 말한 그 구조적 결함이다.
+       *
+       * 새 계약의 `createCancellation`은 연결과 상계를 한 명령으로 한다. 연결할 승인을
+       * 찾지 못하면 취소를 `pending_review`로 남기고(ADR §4), 그 사실이 결과에 온다.
+       */
+      const metadata = {
+        householdId: event.householdId,
+        memberId: event.memberId,
+        cardId: input.cardId ?? null,
+        sourceEventId: cardSmsEventId,
+        merchantRaw,
+        merchantNormalized: normalizeMerchant(merchantRaw),
+        categoryId: input.categoryId ?? null,
+        authorizationCode: null,
+        installmentMonths: input.installmentMonths ?? null,
+        visibility,
+        memo: null,
+      };
 
-      if (!txn) {
-        // 경합/재확정 — 이미 이 이벤트로 만들어진 거래가 있다.
-        throw new ConflictException('a transaction already exists for this card-sms event');
+      let transactionId: string;
+      if (this.moneyWrite.enforced) {
+        const command = {
+          metadata,
+          minorUnits: amount,
+          currency,
+          occurredAt,
+          receivedAt: event.receivedAt ?? occurredAt ?? now,
+        };
+        const result = cancellation
+          ? await this.moneyWrite.commands.createCancellation(command, { tx })
+          : await this.moneyWrite.commands.createApproval(command, { tx });
+        if (!result.ok) throw moneyRejectionToHttp(result.reason);
+        if (result.value.alreadyPromoted) {
+          throw new ConflictException('a transaction already exists for this card-sms event');
+        }
+        transactionId = result.value.transactionId;
+      } else {
+        const [txn] = await tx
+          .insert(schema.cardTransactions)
+          .values({
+            ...metadata,
+            transactionType,
+            status: cancellation ? 'cancelled' : 'approved',
+            amount,
+            cancelledAmount: 0,
+            // 취소 레코드의 netAmount는 0 규약(승인 쪽 cancelledAmount로 상계).
+            netAmount: cancellation ? 0 : amount,
+            currency,
+            originalAmount: null,
+            originalCurrency: null,
+            exchangeRate: null,
+            approvedAt: cancellation ? null : occurredAt,
+            cancelledAt: cancellation ? occurredAt : null,
+            parentTransactionId: null,
+          })
+          .onConflictDoNothing({ target: schema.cardTransactions.sourceEventId })
+          .returning({ id: schema.cardTransactions.id });
+
+        if (!txn) {
+          // 경합/재확정 — 이미 이 이벤트로 만들어진 거래가 있다.
+          throw new ConflictException('a transaction already exists for this card-sms event');
+        }
+        transactionId = txn.id;
       }
-      return { cardSmsEventId, parseStatus: 'parsed', transactionId: txn.id };
+      return { cardSmsEventId, parseStatus: 'parsed', transactionId };
     });
 
     // 커밋 뒤에 관측한다 — 검토 라벨·레시피 저장과 한 트랜잭션인 이 경로에서

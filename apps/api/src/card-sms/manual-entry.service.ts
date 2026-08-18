@@ -39,7 +39,9 @@ import { schema, type Db } from '@family/database';
 import { normalizeMerchant } from '@family/shared';
 
 import { DB } from '../database/database.constants';
+import { moneyRejectionToHttp } from '../money/money-rejection';
 import { MoneyShadowService } from '../money/money-shadow.service';
+import { MoneyWriteService } from '../money/money-write.service';
 import { buildSummary } from '../transactions/transaction.service';
 import { CardSmsIngestService } from './card-sms-ingest.service';
 
@@ -57,6 +59,9 @@ export class ManualEntryService {
     // 수동 입력은 D-3의 진원지다 — 입력 통화를 그대로 저장해 외화가 KRW 계약을
     // 우회한다. 그 우회가 몇 건인지 여기서 세기 시작한다.
     private readonly moneyShadow: MoneyShadowService,
+    // ADR-0027 5단계: enforce가 켜지면 금액 쓰기를 이쪽이 소유한다. 꺼져 있으면
+    // 아래 legacy 삽입이 그대로 돈다 — 한쪽만 켜진 중간 상태는 쓰기 펜스가 막는다.
+    private readonly moneyWrite: MoneyWriteService,
   ) {}
 
   /**
@@ -225,34 +230,72 @@ export class ManualEntryService {
         throw new Error('failed to create manual card-sms event');
       }
 
-      const [txn] = await tx
-        .insert(schema.cardTransactions)
-        .values({
-          householdId: input.householdId,
-          memberId,
-          cardId: input.cardId ?? null,
-          sourceEventId: event.id,
-          transactionType: 'approval',
-          status: 'approved',
-          amount: input.amount,
-          cancelledAmount: 0,
-          netAmount: input.amount,
-          currency,
-          originalAmount: null,
-          originalCurrency: null,
-          exchangeRate: null,
-          merchantRaw: input.merchantRaw,
-          merchantNormalized,
-          categoryId: input.categoryId ?? null,
-          approvedAt: occurredAt,
-          cancelledAt: null,
-          authorizationCode: null,
-          installmentMonths: input.installmentMonths ?? null,
-          parentTransactionId: null,
-          visibility,
-          memo: null,
-        })
-        .returning();
+      /**
+       * 금액 쓰기. enforce가 켜지면 새 계약이 소유하고, 그 차이가 D-5의 수정이다 —
+       * 예전 경로는 외화도 minor unit을 그대로 KRW 컬럼에 넣어(`originalAmount: null`)
+       * 대시보드와 가맹점 화면의 금액이 갈렸다. 새 계약은 거래일 스냅샷으로 환산하고,
+       * 스냅샷이 없으면 **저장하지 않는다**(422). 조용히 틀린 값보다 반영을 미룬다.
+       */
+      let txn: typeof schema.cardTransactions.$inferSelect | undefined;
+      if (this.moneyWrite.enforced) {
+        const result = await this.moneyWrite.commands.createApproval(
+          {
+            metadata: {
+              householdId: input.householdId,
+              memberId,
+              cardId: input.cardId ?? null,
+              sourceEventId: event.id,
+              merchantRaw: input.merchantRaw,
+              merchantNormalized,
+              categoryId: input.categoryId ?? null,
+              authorizationCode: null,
+              installmentMonths: input.installmentMonths ?? null,
+              visibility,
+              memo: null,
+            },
+            minorUnits: input.amount,
+            currency,
+            occurredAt,
+            receivedAt: now,
+          },
+          { tx },
+        );
+        if (!result.ok) throw moneyRejectionToHttp(result.reason);
+        [txn] = await tx
+          .select()
+          .from(schema.cardTransactions)
+          .where(eq(schema.cardTransactions.id, result.value.transactionId))
+          .limit(1);
+      } else {
+        [txn] = await tx
+          .insert(schema.cardTransactions)
+          .values({
+            householdId: input.householdId,
+            memberId,
+            cardId: input.cardId ?? null,
+            sourceEventId: event.id,
+            transactionType: 'approval',
+            status: 'approved',
+            amount: input.amount,
+            cancelledAmount: 0,
+            netAmount: input.amount,
+            currency,
+            originalAmount: null,
+            originalCurrency: null,
+            exchangeRate: null,
+            merchantRaw: input.merchantRaw,
+            merchantNormalized,
+            categoryId: input.categoryId ?? null,
+            approvedAt: occurredAt,
+            cancelledAt: null,
+            authorizationCode: null,
+            installmentMonths: input.installmentMonths ?? null,
+            parentTransactionId: null,
+            visibility,
+            memo: null,
+          })
+          .returning();
+      }
       if (!txn) {
         throw new Error('failed to create manual transaction');
       }

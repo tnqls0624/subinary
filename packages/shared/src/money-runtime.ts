@@ -36,11 +36,14 @@
  *   **현재 운영 동작이자 기본값이다.**
  * - `v2`: enforce. 새 계약이 금액 쓰기의 유일한 초크포인트가 된다.
  *
- * ⚠️ **`v2`의 enforce 배선은 아직 없다.** `TransactionMoneyService`는 export만 돼 있고
- * 어떤 쓰기 경로도 그것을 호출하지 않는다(2026-08 기준). 이 모듈이 `v2`를 **값으로**
- * 받아들이는 이유는 5단계 리허설과 전환 절차를 지금 만들 수 있게 하기 위해서지, 지금
- * 켜면 enforce된다는 뜻이 아니다. 그래서 두 앱은 `v2`로 부팅할 때 **경고를 남긴다**
- * ({@link moneyModeBootWarning}) — 켠 사람이 "켰다고 믿는" 상태가 가장 위험하다.
+ * ✅ **enforce 배선 완료(2026-08-18).** 금액 쓰기 6개 경로가 모두 `MoneyWriteService`를
+ * 통해 `TransactionMoneyService`를 부른다 — API 4곳(수동 입력·사람 검토·거래 수정·취소
+ * 연결), worker 2곳(승인 승격·취소 승격). `v2`로 부팅하면 실제로 enforce된다.
+ *
+ * ⚠️ **여전히 두 앱을 함께 바꿔야 한다.** 한쪽만 `v2`면 같은 가구의 거래가 두 계약으로
+ * 갈려 쓰이고, 그 상태는 사후에 어느 쪽이 맞는지 구분할 수 없다. ADR 롤아웃 5단계가
+ * 쓰기 펜스를 요구하는 이유이며, 모드 불일치는 {@link verifyMoneyModeAgreement}가
+ * 잡는다.
  */
 export const MONEY_CONTRACT_MODES = ['legacy', 'shadow', 'v2'] as const;
 export type MoneyContractMode = (typeof MONEY_CONTRACT_MODES)[number];
@@ -60,16 +63,18 @@ export function parseMoneyContractMode(
 }
 
 /**
- * `v2`로 부팅할 때 남길 경고(그 외 모드는 `null`).
+ * 부팅 시 남길 경고(없으면 `null`).
  *
- * enforce 배선이 생기면 이 함수를 지우는 것이 그 작업의 체크리스트 항목이다.
+ * enforce 배선이 없던 동안 이 함수는 "`v2`를 켜도 실제로는 안 켜진다"를 알렸다. 배선이
+ * 생긴 뒤로는 반대 방향이 위험해졌다 — **`v2`는 이제 진짜로 금액 쓰기를 바꾼다.**
+ * 그래서 경고는 "켜졌다는 사실"과 그 전제(두 앱 동시 전환·쓰기 펜스)를 상기시킨다.
  */
 export function moneyModeBootWarning(mode: MoneyContractMode): string | null {
   if (mode !== 'v2') return null;
   return (
-    'MONEY_CONTRACT_MODE=v2 이지만 enforce 경로가 아직 배선되지 않았습니다 — ' +
-    '금액 쓰기는 여전히 기존 경로(shadow와 동일)로 동작합니다. ' +
-    'ADR-0027 5단계 전환을 실제로 완료하려면 TransactionMoneyService 배선이 먼저 필요합니다.'
+    'MONEY_CONTRACT_MODE=v2 — 금액 쓰기가 새 계약(TransactionMoneyService)으로 enforce됩니다. ' +
+    'API와 worker가 **모두** v2인지 확인하십시오. 한쪽만 v2인 동안 사용자 쓰기가 흐르면 ' +
+    '두 계약의 거래가 섞이고 사후에 구분할 수 없습니다(ADR-0027 롤아웃 5단계).'
   );
 }
 

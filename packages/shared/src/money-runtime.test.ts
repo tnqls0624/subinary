@@ -44,13 +44,14 @@ describe('parseMoneyContractMode — 잘못된 설정을 조용히 기본값으�
   });
 });
 
-describe('moneyModeBootWarning — v2가 아직 배선되지 않았음을 숨기지 않는다', () => {
+describe('moneyModeBootWarning — v2가 무엇을 바꾸는지 숨기지 않는다', () => {
   it('v2로 부팅하면 경고가 있다', () => {
     const warning = moneyModeBootWarning('v2');
     expect(warning).not.toBeNull();
-    // "켰다고 믿는" 상태가 가장 위험하다 — 문구가 그 사실을 말해야 한다.
+    // 배선 전에는 "켜도 안 켜진다"가 위험이었다. 배선(2026-08-18) 뒤로는 반대다 —
+    // v2는 실제로 금액 쓰기를 바꾸고, **두 앱을 함께** 바꾸지 않으면 계약이 갈린다.
     expect(warning).toContain('enforce');
-    expect(warning).toContain('배선');
+    expect(warning).toContain('worker');
   });
 
   it('legacy·shadow는 경고가 없다', () => {
