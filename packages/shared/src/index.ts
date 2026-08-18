@@ -145,5 +145,15 @@ export type {
   NotificationChannelMeta,
   NotificationDispatchJob,
 } from './notifications.js';
+export {
+  forecastRecurring,
+  RECURRING_WINDOW_DAYS,
+  RECURRING_STOPPED_GRACE_RATIO,
+} from './recurring-forecast.js';
+export type {
+  RecurringForecast,
+  RecurringForecastInput,
+  RecurringPhase,
+} from './recurring-forecast.js';
 export { nowUtc, toSeoulString } from './time.js';
 export type { Visibility, Sensitivity, WorkspaceKind } from './types.js';

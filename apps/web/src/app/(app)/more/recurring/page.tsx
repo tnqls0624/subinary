@@ -6,11 +6,16 @@
  *   1. 반복으로 보이는 결제 후보를 보여준다
  *   2. 사용자가 "정기 결제 맞음 / 아님"을 확정한다
  *
- * ⛔ **의도적으로 없는 것**: 다음 결제 예상일 · 이번 달 정기 지출 총액 · 예정 알림 ·
+ * ✅ **2026-08-18 추가 — 날짜 레이어**: 확정된 series에 다음 결제 예상일을 붙였다.
+ * 예상일은 `last_seen_at`·`interval_days`의 순수 함수라 금액 계약과 무관하다
+ * (`@family/shared`의 `forecastRecurring`). 월 주기는 일(day-of-month)을 앵커로 쓰고,
+ * 창(±N일)과 함께 말한다 — 카드 결제일은 주말·영업일로 밀리므로 단일 날짜는 반드시 틀린다.
+ *
+ * ⛔ **여전히 없는 것 — 금액 레이어**: 이번 달 정기 지출 **총액** · 예정 알림의 금액 ·
  * 해지 종료 처리 · 카드 교체 CTA. 금액 계약(ADR-0027)이 아직 enforce 전이라
  * `net_amount`가 확정이 아니고, 그 위에서 "다음 달 12,900원이 나갑니다"를 띄우면
- * 틀린 예고를 하는 것이다. 로드맵 5-1절도 "S4는 후보 표시와 사용자 확정까지"로 정했다.
- * 여기에 금액 기반 표면을 얹으려면 enforce와 과거 수리, 전량 재계산이 먼저다.
+ * 틀린 예고를 하는 것이다. 여기에 금액 기반 표면을 얹으려면 enforce와 과거 수리,
+ * 전량 재계산이 먼저다(`docs/concept-upcoming-spend-2026-08.md` §2).
  *
  * 그래서 화면은 금액을 **관측된 사실**로만 말한다("최근 3회 13,500원"). 예측하지 않는다.
  * ------------------------------------------------------------------------- */
@@ -64,6 +69,31 @@ function cadenceText(item: RecurringSeriesItem): string {
     : `약 ${item.intervalDays}일마다 · ${item.occurrenceCount}회 관측`;
 }
 
+/**
+ * 다음 결제 예상을 사람 말로. **금액은 넣지 않는다** — 날짜만 확정적으로 말할 수 있다.
+ *
+ * 창(±N일)을 문구에 넣는 이유: "8월 24일"이라고 못 박으면 하루만 밀려도 틀린 예고가 된다.
+ * "쯤"과 폭을 함께 말하면 밀림이 예고의 실패가 아니라 예고의 일부가 된다.
+ */
+function forecastText(item: RecurringSeriesItem): string | null {
+  if (!item.nextExpectedAt || item.nextExpectedPhase === null) return null;
+  const when = formatDate(item.nextExpectedAt);
+  const pm =
+    item.nextExpectedWindowDays && item.nextExpectedWindowDays > 0
+      ? ` (±${item.nextExpectedWindowDays}일)`
+      : "";
+  switch (item.nextExpectedPhase) {
+    case "due":
+      return `${when}쯤 결제 예정이에요${pm}`;
+    case "overdue":
+      return item.stoppedCandidate
+        ? `${when}쯤 나갈 차례였는데 ${item.overdueDays}일째 안 들어왔어요`
+        : `${when}쯤 예정이었어요 · 아직 안 들어왔어요`;
+    default:
+      return `다음 ${when}쯤${pm}`;
+  }
+}
+
 /** 재검토 사유를 사람 말로. 무엇이 바뀌었고 왜 다시 묻는지 말해야 한다. */
 function needsReviewText(item: RecurringSeriesItem): string | null {
   switch (item.needsReviewReason) {
@@ -89,6 +119,7 @@ function SeriesRow({
   onDecide: (decision: "confirmed" | "rejected") => void;
 }) {
   const review = needsReviewText(item);
+  const forecast = forecastText(item);
   const declineHint = declineReasonHint(
     item.recentDeclineReason as CardSmsDeclineReason | null,
   );
@@ -105,6 +136,17 @@ function SeriesRow({
             <span className="text-muted-foreground text-[13px]">
               {cadenceText(item)}
             </span>
+            {forecast ? (
+              <span
+                className={
+                  item.nextExpectedPhase === "overdue"
+                    ? "text-warning-strong text-[13px]"
+                    : "text-[13px] font-medium"
+                }
+              >
+                {forecast}
+              </span>
+            ) : null}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <Money amount={item.amount} currency={item.currency} />

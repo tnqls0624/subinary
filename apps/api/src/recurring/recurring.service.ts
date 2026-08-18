@@ -49,6 +49,7 @@ import {
 } from '@family/database';
 import {
   buildMerchantAliasIndex,
+  forecastRecurring,
   regroupByCanonicalMerchant,
   resolveCanonicalMerchant,
 } from '@family/shared';
@@ -132,8 +133,23 @@ export class RecurringService {
       );
 
     const declines = await this.recentDeclines(householdId);
+    // 한 응답 안에서는 같은 `now`로 판정한다 — 항목마다 시각이 달라지면 목록 안에서
+    // 같은 주기의 두 series가 서로 다른 국면을 말한다.
+    const now = new Date();
     const items: RecurringSeriesItem[] = rows.map((r) => {
       const linked = declines.get(`${r.merchantCanonical}`);
+      // 예상일은 **확정된 series에만** 붙인다. 후보에 붙이면 예상 자체가 확정처럼 읽힌다.
+      const forecast =
+        r.status === 'confirmed'
+          ? forecastRecurring(
+              {
+                lastSeenAt: r.lastSeenAt,
+                intervalDays: r.intervalDays,
+                cadence: r.cadence,
+              },
+              now,
+            )
+          : null;
       return {
         id: r.id,
         merchant: r.redacted ? REDACTED_MERCHANT_LABEL : r.merchantCanonical,
@@ -151,6 +167,11 @@ export class RecurringService {
           (r.needsReviewReason as RecurringNeedsReviewReason | null) ?? null,
         mine: r.memberId === actorMemberId,
         moneyContractVersion: r.moneyContractVersion,
+        nextExpectedAt: forecast?.nextExpectedAt ?? null,
+        nextExpectedWindowDays: forecast?.windowDays ?? null,
+        nextExpectedPhase: forecast?.phase ?? null,
+        overdueDays: forecast?.overdueDays ?? 0,
+        stoppedCandidate: forecast?.stoppedCandidate ?? false,
         // 이름을 가린 항목에는 거절 사유도 붙이지 않는다 — 사유가 곧 가맹점 힌트다.
         recentDeclineReason: r.redacted ? null : (linked?.reason ?? null),
         recentDeclineAttempts: r.redacted ? 0 : (linked?.attempts ?? 0),

@@ -64,6 +64,22 @@ export const recurringSeriesItemSchema = z.object({
    * 전 데이터 위에 서 있다는 뜻이므로 화면이 그 사실을 숨기지 않아야 한다.
    */
   moneyContractVersion: z.number().int(),
+  /**
+   * 다음 결제 예상 시점(ISO). **`confirmed`인 series에만** 붙는다 — 아직 정기인지
+   * 확정되지 않은 후보에 예상일을 말하면 그 자체가 확정처럼 읽힌다.
+   *
+   * ⛔ 금액 예고는 여기 없다. ADR-0027 enforce 전까지 `net_amount`가 확정이 아니므로
+   * 날짜만 말한다(`docs/concept-upcoming-spend-2026-08.md` D2).
+   */
+  nextExpectedAt: z.string().nullable(),
+  /** 예상일의 불확실 폭(일). "8월 24일쯤(±2일)"의 그 폭. */
+  nextExpectedWindowDays: z.number().int().nullable(),
+  /** 지금 어느 국면인가 — 창 이전/창 안/창을 넘김. */
+  nextExpectedPhase: z.enum(['upcoming', 'due', 'overdue']).nullable(),
+  /** `overdue`일 때 창을 넘긴 일수. */
+  overdueDays: z.number().int(),
+  /** 유예까지 넘겨 "해지하셨나요?"를 물어야 하는 상태. */
+  stoppedCandidate: z.boolean(),
   /** 최근 반복 거절이 붙어 있으면 그 사유 코드. 없으면 null. */
   recentDeclineReason: z.string().nullable(),
   /** 최근 반복 거절 시도 횟수(0이면 없음). */
