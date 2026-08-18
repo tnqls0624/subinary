@@ -45,6 +45,12 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, '..');
 const PROBE_PATH = resolve(scriptDirectory, 'lib/money-gate-probe.mjs');
+/**
+ * 4단계 재생 프로브. shadow는 "배포 이후 새로 쓰인 거래"만 담아서, 안 쓰는 경로와
+ * 오래된 거래는 표본에 영원히 들어오지 않는다 — 기다려서 해소되는 종류가 아니다.
+ * 재생은 같은 관찰기를 기존 행 전체에 돌려 그 공백을 **측정**으로 바꾼다.
+ */
+const REPLAY_PROBE_PATH = resolve(scriptDirectory, 'lib/money-replay-probe.mjs');
 
 /** 프로브는 api 컨테이너에서만 돈다(node + dist가 거기 있다). 기준선 스크립트와 동일. */
 const API_CONTAINER = process.env.GATE_API_CONTAINER || 'family-memory-ai-api-1';
@@ -69,6 +75,7 @@ const ALL_SHADOW_PATHS = [
 const args = new Set(process.argv.slice(2));
 const wantJson = args.has('--json');
 const skipFixture = args.has('--skip-fixture');
+const skipReplay = args.has('--skip-replay');
 
 /* -------------------------------------------------------------------------- */
 /* 판정 프리미티브                                                            */
@@ -79,7 +86,10 @@ const results = [];
 /**
  * @param {string} id ADR 조건 식별자
  * @param {string} title 조건 문구(ADR 원문에 맞춘다)
- * @param {'PASS'|'FAIL'|'UNVERIFIED'} status
+ * @param {'PASS'|'FAIL'|'UNVERIFIED'|'N/A'} status
+ *   `N/A`는 **UNVERIFIED와 다르다.** "확인하지 못했다"가 아니라 "그 성격의 행이 운영에
+ *   0건임을 확인했다"는 뜻이다 — enforce가 바꿀 기존 결과가 존재하지 않는다. 미래에
+ *   그 경로가 처음 쓰일 때의 정확성은 게이트가 아니라 도메인 단위 테스트가 담보한다.
  * @param {string} detail 근거 — 숫자를 반드시 포함한다
  * @param {string} [why] UNVERIFIED/FAIL일 때 무엇이 있어야 판정 가능한지
  */
@@ -121,6 +131,25 @@ function runProbe() {
   return JSON.parse(trimmed);
 }
 
+/** 4단계 재생. 실패해도 게이트를 죽이지 않고 `null`을 돌려준다(그 경우 3단계 판정만 남는다). */
+function runReplayProbe() {
+  try {
+    const stdout = execFileSync(
+      'docker',
+      ['exec', '-i', API_CONTAINER, 'node', '--input-type=module', '-'],
+      {
+        input: readFileSync(REPLAY_PROBE_PATH, 'utf8'),
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
+    const trimmed = stdout.trim();
+    return trimmed.startsWith('{') ? JSON.parse(trimmed) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * D-4 negative fixture는 저장소 안 vitest 스위트다(`action-amount.shadow.test.ts`).
  * DB가 아니라 코드 픽스처라 컨테이너가 아닌 호스트에서 돌린다. 스위트가 없거나
@@ -155,7 +184,7 @@ function runFixtureSuite() {
 /* 조건 판정 — ADR 롤아웃 3단계                                               */
 /* -------------------------------------------------------------------------- */
 
-function judgeStage3(probe, fixture) {
+function judgeStage3(probe, fixture, replay) {
   const { shadow, corpus } = probe;
 
   /* G1. live shadow 최소 7일 -------------------------------------------- */
@@ -190,20 +219,58 @@ function judgeStage3(probe, fixture) {
     );
   }
 
-  /* G2b. 관측 커버리지 — ADR 본문에는 없지만 G3~G4의 전제다 ------------- */
+  /* G2b. 경로 커버리지 — ADR 본문에는 없지만 G3~G4의 전제 ---------------- */
   {
     const missingPaths = ALL_SHADOW_PATHS.filter((path) => !(shadow.byPath[path] > 0));
-    const status = missingPaths.length === 0 ? 'PASS' : 'UNVERIFIED';
-    record(
-      'G2b',
-      '쓰기 경로 6개 전부 관측 (G3·G4의 전제)',
-      status,
-      `관측된 경로 ${ALL_SHADOW_PATHS.length - missingPaths.length}/6` +
-        (missingPaths.length ? ` · 미관측: ${missingPaths.join(', ')}` : ''),
-      missingPaths.length
-        ? '미관측 경로의 "delta 0"은 측정이 아니라 표본 없음입니다.'
-        : undefined,
-    );
+
+    if (missingPaths.length === 0) {
+      record('G2b', '쓰기 경로 6개 전부 관측 (G3·G4의 전제)', 'PASS', '관측된 경로 6/6');
+    } else if (!replay) {
+      record(
+        'G2b',
+        '쓰기 경로 6개 전부 관측 (G3·G4의 전제)',
+        'UNVERIFIED',
+        `관측된 경로 ${ALL_SHADOW_PATHS.length - missingPaths.length}/6 · 미관측: ${missingPaths.join(', ')}`,
+        '미관측 경로의 "delta 0"은 측정이 아니라 표본 없음입니다. 4단계 재생(`replay-money-contract.mjs`)이 이 공백을 메웁니다.',
+      );
+    } else {
+      /**
+       * 재생이 돌았다면 미관측 경로를 두 갈래로 가른다.
+       *
+       *  - 재생 대상이 **있는** 경로: 기존 행이 새 계약과 일치하는지 실제로 쟀다.
+       *    실사용 관측은 아니지만 "표본 없음"은 아니다.
+       *  - 재생 대상도 **0건**인 경로: 그 성격의 행이 운영에 존재하지 않는다.
+       *    enforce가 바꿀 기존 결과가 없으므로 `N/A`다 — 모르는 것이 아니라 없는 것이다.
+       *    그 경로가 처음 쓰일 때의 정확성은 도메인 단위 테스트가 담보한다.
+       */
+      const replayed = missingPaths.filter((path) => (replay.byPath?.[path] ?? 0) > 0);
+      const absent = missingPaths.filter((path) => (replay.byPath?.[path] ?? 0) === 0);
+      const replayClean = replay.unrecorded === 0 && replay.nonzeroDelta === 0;
+
+      const detail =
+        `실사용 관측 ${ALL_SHADOW_PATHS.length - missingPaths.length}/6` +
+        (replayed.length ? ` · 재생으로 검증 ${replayed.length}개(${replayed.join(', ')})` : '') +
+        (absent.length ? ` · 해당 행 0건 ${absent.length}개(${absent.join(', ')})` : '');
+
+      if (!replayClean) {
+        record(
+          'G2b',
+          '쓰기 경로 커버리지 (실사용 관측 + 4단계 재생)',
+          'FAIL',
+          `${detail} · 재생 미기록 ${replay.unrecorded}건 · 재생 delta≠0 ${replay.nonzeroDelta}건`,
+        );
+      } else if (replayed.length > 0) {
+        record('G2b', '쓰기 경로 커버리지 (실사용 관측 + 4단계 재생)', 'PASS', detail);
+      } else {
+        record(
+          'G2b',
+          '쓰기 경로 커버리지 (실사용 관측 + 4단계 재생)',
+          'N/A',
+          detail,
+          '남은 경로는 운영에 해당 행이 0건이라 enforce가 바꿀 기존 결과가 없습니다.',
+        );
+      }
+    }
   }
 
   /* G3. 기존 정상 KRW 결과의 금액 delta 0건 ----------------------------- */
@@ -242,7 +309,22 @@ function judgeStage3(probe, fixture) {
      */
     const fxDelta = shadow.byVerdict.fx_amount_delta ?? 0;
     const planFailed = shadow.byVerdict.plan_failed ?? 0;
-    if ((shadow.foreignRows ?? 0) === 0) {
+    const liveForeign = shadow.foreignRows ?? 0;
+    // 재생은 오래된 외화 거래까지 포함한다 — shadow 창 밖이라 실사용 관측에 안 잡히는 것들.
+    const replayForeign = replay?.foreign ?? 0;
+    const replayFxDelta = replay?.byVerdict?.fx_amount_delta ?? 0;
+    const replayPlanFailed = replay?.byVerdict?.plan_failed ?? 0;
+    const fxMissing = replay?.failureReasons?.fx_snapshot_missing ?? 0;
+
+    if (liveForeign === 0 && replayForeign === 0) {
+      record(
+        'G4',
+        '설명되지 않은 외화 delta 0건',
+        'N/A',
+        `외화 거래가 운영에 0건 (실사용 관측 0 · 재생 0)`,
+        '외화 거래 자체가 없으므로 enforce가 바꿀 외화 금액이 없습니다.',
+      );
+    } else if (liveForeign === 0 && !replay) {
       record(
         'G4',
         '설명되지 않은 외화 delta 0건',
@@ -251,14 +333,52 @@ function judgeStage3(probe, fixture) {
         '외화 거래가 shadow 창 안에서 한 건도 발생하지 않아 판정 근거가 없습니다.',
       );
     } else {
-      const explainable = probe.fx.snapshots.total > 0;
-      const pass = fxDelta === 0 && planFailed === 0;
+      /**
+       * 스냅샷이 없으면 계획기는 외화를 `fx_snapshot_missing`으로 거절한다. 그 상태의
+       * "delta 0"은 차이가 없다는 뜻이 아니라 **계산을 못 했다**는 뜻이므로 PASS가 아니다.
+       * 해소 도구: `scripts/fixate-legacy-fx-snapshots.mjs`.
+       */
+      const totalDelta = fxDelta + replayFxDelta;
+      const totalFailed = planFailed + replayPlanFailed;
+      const pass = totalDelta === 0 && totalFailed === 0;
       record(
         'G4',
         '설명되지 않은 외화 delta 0건',
         pass ? 'PASS' : 'FAIL',
-        `외화 표본 ${shadow.foreignRows}건 · fx_amount_delta ${fxDelta}건 · plan_failed ${planFailed}건` +
-          (explainable ? '' : ' · 스냅샷 0개(설명 근거 없음)'),
+        `외화 표본 ${liveForeign + replayForeign}건(실사용 ${liveForeign} · 재생 ${replayForeign})` +
+          ` · fx_amount_delta ${totalDelta}건 · plan_failed ${totalFailed}건` +
+          ` · 스냅샷 ${probe.fx.snapshots.total}개`,
+        pass
+          ? undefined
+          : fxMissing > 0
+            ? `계획 실패 ${fxMissing}건의 사유가 fx_snapshot_missing입니다 — 스냅샷을 고정하면 해소됩니다(scripts/fixate-legacy-fx-snapshots.mjs).`
+            : '외화 금액이 새 계약과 갈립니다. 전환하면 사용자가 보는 금액이 바뀝니다.',
+      );
+    }
+  }
+
+  /* G8. 기존 거래 전수 재생 — 4단계 dry-run 게이트 ----------------------- */
+  {
+    if (!replay) {
+      record(
+        'G8',
+        '기존 거래 전수 재생 (4단계 dry-run 게이트)',
+        'UNVERIFIED',
+        '재생을 돌리지 못했습니다.',
+        'node scripts/replay-money-contract.mjs 로 단독 실행해 원인을 확인하십시오.',
+      );
+    } else {
+      const pass = replay.unrecorded === 0 && replay.nonzeroDelta === 0;
+      const verdicts = Object.entries(replay.byVerdict ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k} ${v}`)
+        .join(' · ');
+      record(
+        'G8',
+        '기존 거래 전수 재생 (4단계 dry-run 게이트)',
+        pass ? 'PASS' : 'FAIL',
+        `대상 ${replay.totalRows}건 · 기록 ${replay.recorded}건 · 미기록 ${replay.unrecorded}건 · 순액 delta≠0 ${replay.nonzeroDelta}건 · ${verdicts}`,
+        pass ? undefined : '재생에서 갈리는 건이 있으면 전환 시 그 금액이 바뀝니다.',
       );
     }
   }
@@ -352,7 +472,7 @@ function judgeStage3(probe, fixture) {
 /* 4단계 사전 검토 — 판정이 아니라 관측치(게이트에 합산하지 않는다)             */
 /* -------------------------------------------------------------------------- */
 
-function renderStage4(probe) {
+function renderStage4(probe, replay) {
   const { fx, repair } = probe;
   const lines = [];
   lines.push('');
@@ -373,6 +493,12 @@ function renderStage4(probe) {
     `  그중 shadow가 실제로 판정해 본 것 ${repair.shadowObservedTransactions}행` +
       ` · 판정 근거 없는 v1 ${repair.unobservedV1Rows}행`,
   );
+  if (replay) {
+    // 재생은 "판정 근거 없는 v1"을 0으로 만든다 — 그게 4단계의 목적이다.
+    lines.push(
+      `  4단계 재생: ${replay.recorded}/${replay.totalRows}행 판정 · 순액 delta≠0 ${replay.nonzeroDelta}행`,
+    );
+  }
   return lines;
 }
 
@@ -380,8 +506,8 @@ function renderStage4(probe) {
 /* 출력                                                                       */
 /* -------------------------------------------------------------------------- */
 
-function render(probe, fixture) {
-  const icon = { PASS: '✓', FAIL: '✗', UNVERIFIED: '?' };
+function render(probe, fixture, replay) {
+  const icon = { PASS: '✓', FAIL: '✗', UNVERIFIED: '?', 'N/A': '—' };
   const lines = [];
   lines.push('');
   lines.push('ADR-0027 전환 게이트 — 롤아웃 3단계 조건');
@@ -395,19 +521,26 @@ function render(probe, fixture) {
 
   const failed = results.filter((r) => r.status === 'FAIL');
   const unverified = results.filter((r) => r.status === 'UNVERIFIED');
+  const notApplicable = results.filter((r) => r.status === 'N/A');
+  // N/A는 UNVERIFIED가 아니다 — "해당 행이 0건임을 확인했다"는 측정 결과다(record() 주석).
   const verdict =
     failed.length === 0 && unverified.length === 0 ? 'READY' : 'NOT READY';
 
+  const passed =
+    results.length - failed.length - unverified.length - notApplicable.length;
   lines.push(
-    `판정: ${verdict}  (PASS ${results.length - failed.length - unverified.length} · ` +
-      `FAIL ${failed.length} · UNVERIFIED ${unverified.length})`,
+    `판정: ${verdict}  (PASS ${passed} · FAIL ${failed.length} · ` +
+      `UNVERIFIED ${unverified.length} · N/A ${notApplicable.length})`,
   );
+  if (notApplicable.length) {
+    lines.push(`  N/A: ${notApplicable.map((r) => r.id).join(', ')} — 해당 데이터가 0건이라 전환이 바꿀 기존 결과가 없습니다.`);
+  }
   if (failed.length) lines.push(`  FAIL: ${failed.map((r) => r.id).join(', ')}`);
   if (unverified.length) {
     lines.push(`  UNVERIFIED: ${unverified.map((r) => r.id).join(', ')}`);
     lines.push('  ⚠ UNVERIFIED는 통과가 아닙니다 — 확인하지 못한 조건입니다.');
   }
-  lines.push(...renderStage4(probe));
+  lines.push(...renderStage4(probe, replay));
   lines.push('');
   lines.push(`읽기 전용 가드: SQLSTATE ${probe.guard.sqlstate} 확인됨`);
   lines.push('');
@@ -428,13 +561,14 @@ try {
 }
 
 const fixture = skipFixture ? { ran: false, ok: false } : runFixtureSuite();
-judgeStage3(probe, fixture);
-const rendered = render(probe, fixture);
+const replay = skipReplay ? null : runReplayProbe();
+judgeStage3(probe, fixture, replay);
+const rendered = render(probe, fixture, replay);
 
 if (wantJson) {
   process.stdout.write(
     `${JSON.stringify(
-      { verdict: rendered.verdict, conditions: results, probe, fixture: { ...fixture, raw: undefined } },
+      { verdict: rendered.verdict, conditions: results, probe, replay, fixture: { ...fixture, raw: undefined } },
       null,
       2,
     )}\n`,
