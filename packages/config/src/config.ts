@@ -320,8 +320,11 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       corsOrigin: env.CORS_ORIGIN,
     },
     money: {
-      contractMode: env.MONEY_CONTRACT_MODE,
-      fenceDefaultTtlSec: env.MONEY_FENCE_DEFAULT_TTL_SEC,
+      // `env_file`의 `KEY=`(빈 문자열)는 **미설정**이다. 정규화하지 않으면 빈 값이
+      // enum 검증에 걸려 두 서비스가 **부팅을 거부**한다 — 기본값이 inert여야 하는
+      // 스위치가 스스로 장애를 만드는 셈이다(이 저장소가 `optionalEnvValue`를 두는 이유).
+      contractMode: optionalEnvValue(env.MONEY_CONTRACT_MODE),
+      fenceDefaultTtlSec: optionalEnvValue(env.MONEY_FENCE_DEFAULT_TTL_SEC),
     },
     notifications: {
       fcmProjectId: optionalEnvValue(env.FCM_PROJECT_ID),

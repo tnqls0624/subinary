@@ -57,6 +57,22 @@ x-app-build: &app-build
 
 # 로그 회전: 기본 json-file 드라이버에 상한을 둔다. 미설정 시 무제한 증가로 CrashLoop 원인 로그가
 # 밀려 사라지거나 디스크를 채운다. 상시 서비스에 적용한다(daemon 측 저장이라 read_only 컨테이너에도 안전).
+# ADR-0027 5단계 — 금액 계약 모드.
+#
+# **하나의 anchor를 api·worker가 함께 받는다.** 서비스마다 따로 적으면 한쪽만 고치는
+# 실수가 조용히 통과하고, 그러면 "한 경로는 legacy, 한 경로는 v2"인 거래가 만들어진다 —
+# ADR-0027 5단계가 명시적으로 금지한 상태다. 값이 한 군데에만 있으면 그 실수가 불가능하다.
+#
+# ⚠️ 기본값은 `shadow` = 현재 운영 동작. 전환은 `MONEY_CONTRACT_MODE=v2`로 **두 서비스를
+# 함께** 재시작하는 것이고, 그 전에 쓰기 펜스가 켜져 있어야 한다
+# (docs/operations/money-contract-cutover.md).
+#
+# ⚠️ `environment:`는 `env_file:`보다 우선한다. 즉 .env/.env.production에 같은 키가 있어도
+# 이 anchor가 이긴다 — 두 서비스가 갈릴 경로를 하나 더 막아 둔 것이다.
+x-money-contract-environment: &money-contract-environment
+  MONEY_CONTRACT_MODE: ${MONEY_CONTRACT_MODE:-shadow}
+  MONEY_FENCE_DEFAULT_TTL_SEC: ${MONEY_FENCE_DEFAULT_TTL_SEC:-900}
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -324,6 +340,8 @@ services:
       - .env               # 기존 시크릿(DB/JWT/스토리지/AI) 상속
       - .env.production     # prod override(도메인·NODE_ENV·터널 토큰)
     environment:
+      # worker와 **같은 anchor**에서 받는다(ADR-0027 5단계). 아래 worker와 대칭이어야 한다.
+      <<: *money-contract-environment
       NODE_ENV: production
     # 포트 미공개: caddy가 내부망으로 프록시
     depends_on:
@@ -352,6 +370,8 @@ services:
       - .env               # 기존 시크릿(DB/JWT/스토리지/AI) 상속
       - .env.production     # prod override(도메인·NODE_ENV·터널 토큰)
     environment:
+      # api와 **같은 anchor**에서 받는다(ADR-0027 5단계). 위 api와 대칭이어야 한다.
+      <<: *money-contract-environment
       NODE_ENV: production
     depends_on:
       postgres:

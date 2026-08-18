@@ -12,6 +12,18 @@
 
 name: family-memory-ai
 
+# ADR-0027 5단계 — 금액 계약 모드.
+#
+# **하나의 anchor를 api·worker가 함께 받는다.** 서비스마다 따로 적으면 한쪽만 고치는
+# 실수가 조용히 통과하고, 그러면 "한 경로는 legacy, 한 경로는 v2"인 거래가 만들어진다 —
+# ADR-0027 5단계가 명시적으로 금지한 상태다.
+#
+# 기본값 `shadow` = 현재 동작. 전환 리허설은 격리 스택에서만 한다
+# (docs/operations/money-contract-cutover.md).
+x-money-contract-environment: &money-contract-environment
+  MONEY_CONTRACT_MODE: ${MONEY_CONTRACT_MODE:-shadow}
+  MONEY_FENCE_DEFAULT_TTL_SEC: ${MONEY_FENCE_DEFAULT_TTL_SEC:-900}
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -111,6 +123,9 @@ services:
     init: true
     stop_grace_period: 3s
     env_file: .env
+    environment:
+      # worker와 **같은 anchor**에서 받는다(ADR-0027 5단계).
+      <<: *money-contract-environment
     ports:
       - "3001:3001"
     volumes:
@@ -143,6 +158,9 @@ services:
     init: true
     stop_grace_period: 3s
     env_file: .env
+    environment:
+      # api와 **같은 anchor**에서 받는다(ADR-0027 5단계).
+      <<: *money-contract-environment
     ports:
       - "3002:3002"
     volumes:
