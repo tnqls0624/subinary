@@ -42,3 +42,6 @@ Thumbs.db
 *.tsbuildinfo
 .claude/scheduled_tasks.lock
 .gstack/
+
+# 배포 로그(로컬 진단용)
+.deploy-logs/

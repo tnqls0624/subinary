@@ -70,10 +70,31 @@ Cloudflare Zero Trust 대시보드 → **Networks → Tunnels → Create tunnel*
 ## 3. 전환(cutover)
 
 ```bash
-# 이미지 빌드, 저장소/버킷 준비, migration, 운영 서비스 기동과 검증을 한 번에 수행
-sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh
+# 권장 — 로그를 파일로 남기고 종료 코드를 보존하며 검증 요약을 뽑는다
+sh scripts/ops/deploy.sh
 
 # 이미지가 이미 검증된 동일 빌드라면 재빌드 없이 복구·검증
+sh scripts/ops/deploy.sh --skip-build
+```
+
+`deploy.sh`는 아래 bootstrap을 감싼 래퍼다. bootstrap을 직접 불러도 되지만, **그 경우
+출력을 파이프로 넘기지 말 것**:
+
+```bash
+# ⛔ 이렇게 하지 마십시오 — 실패가 성공으로 보입니다
+sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh 2>&1 | tail -50
+```
+
+POSIX sh에는 `pipefail`이 없어 파이프라인의 종료 코드는 **마지막 명령**(`tail`)의 것이
+되고, `tail`은 입력이 무엇이든 0으로 끝난다. 2026-08-20에 이 함정으로 디스크 부족으로
+**시작조차 못 한 배포가 "exit code 0"으로 보고**됐다 — bootstrap은 `exit 1`을 정확히
+냈고 잘못은 호출 방식에 있었다. 로그 마지막 줄을 눈으로 읽어야만 알 수 있는 상태를
+사람의 주의력에 맡기지 않기 위해 `deploy.sh`를 만들었다.
+
+원본 bootstrap을 직접 쓰려면:
+
+```bash
+sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh
 sh scripts/ops/bootstrap-ai-pipeline-infrastructure.sh --skip-build
 ```
 
