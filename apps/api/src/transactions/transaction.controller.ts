@@ -73,6 +73,7 @@ export class TransactionController {
     @Query('minAmount') minAmount?: string,
     @Query('maxAmount') maxAmount?: string,
     @Query('q') q?: string,
+    @Query('excluded') excluded?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ): Promise<TransactionListResponse> {
@@ -88,6 +89,7 @@ export class TransactionController {
       minAmount,
       maxAmount,
       q,
+      excluded,
       limit,
       cursor,
     });

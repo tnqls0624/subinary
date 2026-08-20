@@ -136,6 +136,14 @@ export type {
 } from './merchant-classifier.js';
 export { createMerchantCategoryTargetId } from './merchant-label.js';
 export {
+  TRUNCATION_MIN_PREFIX_LENGTH,
+  findTruncationCandidates,
+} from './merchant-truncation.js';
+export type {
+  TruncationCandidateGroup,
+  TruncationCandidateInput,
+} from './merchant-truncation.js';
+export {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_CHANNEL_META,
   notificationDeepLink,

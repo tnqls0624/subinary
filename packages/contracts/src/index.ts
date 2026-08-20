@@ -373,6 +373,7 @@ export type {
 
 export {
   analyticsPeriodSchema,
+  analyticsExclusionSchema,
   analyticsMetaSchema,
   monthlyAnalyticsSchema,
   categoryBreakdownSchema,
@@ -383,6 +384,7 @@ export {
 } from './analytics.js';
 export type {
   AnalyticsPeriod,
+  AnalyticsExclusion,
   AnalyticsMeta,
   MonthlyAnalytics,
   CategoryBreakdown,

@@ -190,6 +190,18 @@ export class CardSmsQueryService {
           eq(schema.cardSmsEvents.householdId, householdId),
           eq(schema.cardSmsEvents.transactionType, 'declined'),
           gt(schema.cardSmsEvents.createdAt, since),
+          // 금액 없는 `declined`는 결제 실패가 아니다 — 사람이 검토 화면에서 "카드
+          // 문자 아님"을 처리할 결과값이 없어 `declined`를 탈출구로 쓴 흔적이다
+          // (`card-sms-review.service.ts`의 확정 경로가 `parse_status`를 덮어쓴다).
+          //
+          // 실측(2026-08-20): 그렇게 처리된 3건('2', MacroDroid 변수 미치환
+          // `{v=msg}`, 토스 모임금고 안내)이 `merchant`·`amount` 모두 NULL이라
+          // 버킷 키 `'|'`로 뭉쳐 **"확인 안 된 가맹점 · 금액 미확인 · 3번 거절"**
+          // 이라는 빨간 경고 한 줄로 상시 떠 있었다. 실패한 결제가 아니다.
+          //
+          // 금액을 요구하는 것이 최소 조건이다: 금액이 없으면 사용자에게 무엇이
+          // 실패했는지 말할 수 없고, 재시도 묶음(`(가맹점, 금액)`)도 만들 수 없다.
+          isNotNull(schema.cardSmsEvents.amount),
         ),
       )
       .orderBy(asc(schema.cardSmsEvents.createdAt));

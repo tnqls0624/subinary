@@ -247,3 +247,42 @@ describe('거절 알림 jobId (발행 실패로 조용히 사라지지 않게)',
     expect(src).toContain('releaseDedupe');
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* 유령 결제 실패 — 금액 없는 `declined`가 빨간 경고로 뜨던 것                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 실측(2026-08-20): `/declines`에 **"확인 안 된 가맹점 · 금액 미확인 · 3번 거절"**
+ * 이라는 빨간 경고 한 줄이 상시 떠 있었다. 실패한 결제가 아니다.
+ *
+ * 정체는 사람이 검토 화면에서 치운 쓰레기 문자 3통이었다 — `'2'`, MacroDroid 변수가
+ * 치환되지 않은 `'{v=msg}'`, 토스 모임금고 안내. 파서는 세 건 모두 `parse_failed`로
+ * 보고했고(`parseable()`이 amount+currency를 요구한다), `parse_status='parsed'` ·
+ * `confidence=100` · `amount=NULL`은 **사람 확정**의 서명이다. 검토 화면에 "카드 문자
+ * 아님"을 처리할 결과값이 없어 `declined`가 유일한 탈출구였던 것이다.
+ *
+ * 그 결과 세 건이 버킷 키 `` `${merchant ?? ''}|${amount ?? ''}` `` = `'|'`로 뭉쳐
+ * 한 묶음 3회가 됐다. 여기서 고정하는 것은 **읽는 쪽이 금액을 요구한다**는 것이다:
+ * 금액이 없으면 무엇이 실패했는지 말할 수 없고 재시도 묶음도 만들 수 없다.
+ *
+ * 근본 원인(검토 결과값 추가)은 별건이다. 그것이 들어와도 이 조건은 남아야 한다 —
+ * 과거에 그렇게 처리된 행이 DB에 남아 있기 때문이다.
+ */
+describe('유령 결제 실패 (금액 없는 declined는 결제 실패가 아니다)', () => {
+  it('listDeclines가 금액 있는 행만 읽는다', () => {
+    const src = read('src/card-sms/card-sms-query.service.ts');
+    const start = src.indexOf('async listDeclines(');
+    expect(start).toBeGreaterThan(-1);
+    // 이 서비스의 다음 메서드 경계까지가 listDeclines의 본문이다.
+    const body = src.slice(start, src.indexOf('async dismissDecline('));
+    expect(body).toContain('isNotNull(schema.cardSmsEvents.amount)');
+  });
+
+  it('금액 없는 행끼리 한 묶음으로 뭉치는 키 규칙은 그대로다', () => {
+    // 필터는 읽는 쪽에 있고, 묶음 키는 바뀌지 않았다. 키를 손대면 금액이 있는
+    // 정상 거절의 묶음이 함께 갈라진다 — 그래서 필터로 막는 쪽을 골랐다.
+    const src = read('src/card-sms/card-sms-query.service.ts');
+    expect(src).toContain("`${merchant ?? ''}|${e.amount ?? ''}`");
+  });
+});

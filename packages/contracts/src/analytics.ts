@@ -13,17 +13,45 @@ export const analyticsPeriodSchema = z.object({
 export type AnalyticsPeriod = z.infer<typeof analyticsPeriodSchema>;
 
 /**
+ * 총액에서 **빠진** 한 덩어리. `count`는 건수, `net`은 그 행들의 `netAmount` 합(KRW)이다.
+ *
+ * 화면이 "왜 이 숫자인가"를 말할 수 있게 하려고 존재한다. 실측(2026-07): 표시 총액
+ * 752,721원 옆에서 사용자가 직접 뺀 140,281원(18.6%)이 아무 문구 없이 사라져 있었다.
+ */
+export const analyticsExclusionSchema = z.object({
+  count: z.number().int(),
+  net: z.number().int(),
+});
+export type AnalyticsExclusion = z.infer<typeof analyticsExclusionSchema>;
+
+/**
  * Metadata attached to every analytics response (Phase 5 §1.2).
  * `cancellationApplied` is always `true` — nets already reflect cancellations.
  * `includedMemberIds` lists the members whose amounts were counted (self ∪
  * `household` ∪ `summary_only`); `excludedByPermission` counts other members'
  * `private` rows omitted from the aggregate.
+ *
+ * 제외 공시 3종은 **서로 겹치지 않는다** — 한 행은 최대 한 버킷에만 든다.
+ * 그래서 `표시 총액 + excludedManual.net + excludedTransfer.net`이 "이 기간에 승인된
+ * 원화 지출의 전부"가 된다(권한 제외분은 금액을 노출하지 않으므로 건수만 센다).
+ *
+ * - `excludedByPermission` — 타인의 `private` 행. **건수만.** 금액을 주면 공개범위가
+ *   무의미해진다.
+ * - `excludedManual` — 사용자가 직접 뺀 행(`excludedAt IS NOT NULL`). 자산 이동이든
+ *   아니든 여기로 온다(뺀 행위가 먼저다).
+ * - `excludedTransfer` — 빼지 **않았는데** 자산 이동이라 지출이 아닌 행. 즉 사용자가
+ *   손대지 않은 것만.
+ *
+ * 세 값 모두 **집계와 같은 공개범위·통화 조건**을 통과한 뒤 세어진다. 그렇지 않으면
+ * 공시 자체가 타인의 `private` 금액을 알려주는 우회로가 된다.
  */
 export const analyticsMetaSchema = z.object({
   period: analyticsPeriodSchema,
   cancellationApplied: z.literal(true),
   includedMemberIds: z.array(z.string()),
   excludedByPermission: z.number().int(),
+  excludedManual: analyticsExclusionSchema,
+  excludedTransfer: analyticsExclusionSchema,
 });
 export type AnalyticsMeta = z.infer<typeof analyticsMetaSchema>;
 

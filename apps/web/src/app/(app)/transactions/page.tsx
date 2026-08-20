@@ -282,6 +282,19 @@ function TransactionsView() {
   /** 검색 입력값(즉시 반영) — 실제 쿼리는 아래 디바운스된 `q`를 쓴다. */
   const [qInput, setQInput] = useState<string>(() => initial("q"));
   const [q, setQ] = useState<string>(qInput);
+  /**
+   * 합계에서 빼놓은 거래만 보기. 대시보드 공시 문구의 '빼놓은 거래 보기'가
+   * `?excluded=only`로 여기로 들어온다.
+   *
+   * 필터 Select에 넣지 않고 URL 전용 + 해제 칩으로 둔 이유: 평소 목록은 제외분을
+   * **함께** 보여주고 배지로 구분하는 것이 기본 동작이다(그게 옳다). 여기에 상시
+   * 노출되는 3상 Select를 더하면 "제외 포함/제외만/제외 없음" 중 어디에 있는지를
+   * 사용자가 늘 확인해야 한다. 이 필터는 특정 질문("내가 뭘 빼놨지")에 답하는
+   * 일회성 진입이므로 들어온 사실만 분명히 보여주고 한 번에 풀 수 있게 한다.
+   */
+  const [excludedOnly, setExcludedOnly] = useState<boolean>(
+    () => searchParams.get("excluded") === "only",
+  );
   /** 인라인 카테고리 변경 시 merchant_category_rules로 저장할지(applyRule). */
   const [applyRule, setApplyRule] = useState(false);
 
@@ -302,6 +315,7 @@ function TransactionsView() {
     setStatus("");
     setQInput("");
     setQ("");
+    setExcludedOnly(false);
   };
 
   const hasActiveFilter =
@@ -311,6 +325,7 @@ function TransactionsView() {
     type !== "" ||
     status !== "" ||
     q !== "" ||
+    excludedOnly ||
     month !== currentMonth();
 
   // 타이핑마다 요청하면 한 단어에 대여섯 번 쿼리가 나간다 → 300ms 디바운스.
@@ -330,12 +345,23 @@ function TransactionsView() {
     if (type) params.set("type", type);
     if (status) params.set("status", status);
     if (q) params.set("q", q);
+    if (excludedOnly) params.set("excluded", "only");
     const qs = params.toString();
     // replace: 필터를 다섯 번 바꿨다고 뒤로가기를 다섯 번 눌러야 하면 안 된다.
     router.replace(qs ? `/transactions?${qs}` : "/transactions", {
       scroll: false,
     });
-  }, [month, memberId, cardId, categoryId, type, status, q, router]);
+  }, [
+    month,
+    memberId,
+    cardId,
+    categoryId,
+    type,
+    status,
+    q,
+    excludedOnly,
+    router,
+  ]);
 
   // --- 참조 목록(필터/표시용) ---
   const membersQuery = useHouseholdMembers();
@@ -419,11 +445,12 @@ function TransactionsView() {
       type: type || undefined,
       status: status || undefined,
       q: q || undefined,
+      excluded: excludedOnly ? ("only" as const) : undefined,
       from,
       to,
       limit: PAGE_SIZE,
     }),
-    [memberId, cardId, categoryId, type, status, q, from, to],
+    [memberId, cardId, categoryId, type, status, q, excludedOnly, from, to],
   );
   const listQuery = useInfiniteTransactions(filters);
 
@@ -872,6 +899,26 @@ function TransactionsView() {
           className="bg-destructive/10 text-destructive rounded-lg px-4 py-3 text-sm"
         >
           {actionError}
+        </div>
+      ) : null}
+
+      {/*
+        '빼놓은 거래만' 상태를 눈에 보이게 한다. 이 필터는 Select에 없고 URL로만
+        들어오므로, 표시가 없으면 사용자는 필터가 걸린 줄 모르고 "거래가 사라졌다"로
+        읽는다. 해제는 한 번에 되어야 한다.
+      */}
+      {excludedOnly ? (
+        <div className="border-warning/40 bg-warning/10 flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
+          <p className="text-warning-strong text-sm">
+            합계에서 빼놓은 거래만 보고 있어요
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setExcludedOnly(false)}
+          >
+            전체 보기
+          </Button>
         </div>
       ) : null}
 
@@ -1369,6 +1416,27 @@ function TransactionDetailDialog({
                   </span>
                 ) : null}
               </span>
+              {/*
+                할부는 **승인월에 전액** 계상된다. `installmentMonths`는 보관만 되고
+                집계·예산·정기지출 어디에서도 월 분할에 쓰이지 않는다
+                (`transaction-money.service.ts`의 metadata pass-through).
+
+                실측(2026-07): 표시 총액 752,721원 중 198,290원(26.3%)이 3개월 할부
+                전액이었다. 그 사실을 말하지 않으면 카드 명세서와 대조할 때 어느 달도
+                맞지 않고, 사용자는 앱이 틀렸다고 판단한다. 실제 월 분할은 금액 계약
+                (ADR-0027)을 건드리므로 별건이고, 여기서는 **정직하게 말하는 것**만 한다.
+              */}
+              {txn.installmentMonths && txn.installmentMonths > 1 ? (
+                <span className="text-muted-foreground text-[13px]">
+                  이 달 합계에는 전액{" "}
+                  {formatMoney(txn.netAmount, txn.currency)}이 들어가 있어요 (월{" "}
+                  {formatMoney(
+                    Math.round(txn.netAmount / txn.installmentMonths),
+                    txn.currency,
+                  )}
+                  씩 {txn.installmentMonths}개월).
+                </span>
+              ) : null}
             </>
           )}
         </div>

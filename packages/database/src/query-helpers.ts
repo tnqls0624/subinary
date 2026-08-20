@@ -40,6 +40,26 @@ export function notTransferCategory(): SQL {
 }
 
 /**
+ * {@link notTransferCategory}의 **정확한 여집합** — 자산 이동 카테고리 거래만.
+ *
+ * 용도는 하나다: 총액에서 자산 이동으로 빠진 금액을 **공시**하는 것. 지출 집계에
+ * 쓰면 안 된다(그건 위 함수가 빼는 대상이다).
+ *
+ * 여집합을 여기에 함께 두는 이유: `is_transfer = true` 비교를 호출부에서 직접 쓰면
+ * `categoryId IS NULL`(미분류)의 취급이 두 함수 사이에서 갈릴 수 있다. 같은
+ * `EXISTS` 형태로 짝지어 두면 "미분류는 어느 쪽에도 들지 않는다"가 구조로 보장되고,
+ * 두 카운트의 합이 모집단을 넘지 않는다.
+ */
+export function transferCategory(): SQL {
+  return sql`exists (
+    select 1
+    from expense_categories ec
+    where ec.id = ${cardTransactions.categoryId}
+      and ec.is_transfer
+  )`;
+}
+
+/**
  * 지출 집계의 기간 창 `[from, to)` — **승인시각 기준이되, 미파싱은 생성시각으로 구제**.
  *
  * 왜 헬퍼인가: 같은 달의 총액을 묻는 경로가 세 개(analytics/monthly ·

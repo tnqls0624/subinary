@@ -401,6 +401,39 @@ function DashboardView() {
     (recentQuery.data?.items.length ?? 0) === 0;
 
   const monthly = monthlyQuery.data;
+
+  /**
+   * 총액에서 빠진 것들의 공시 문구. 0인 버킷은 줄을 만들지 않는다 —
+   * "0건 제외했어요"는 정보가 아니라 소음이다.
+   */
+  const excludedNotes = useMemo(() => {
+    if (!monthly) return [];
+    const { excludedByPermission, excludedManual, excludedTransfer } =
+      monthly.meta;
+    const notes: { key: string; text: string }[] = [];
+    if (excludedManual.count > 0) {
+      notes.push({
+        key: "manual",
+        // 금액을 함께 말한다. 건수만으로는 "18.6%가 빠졌다"를 알 수 없다.
+        text: `직접 빼놓은 ${excludedManual.count}건 ${formatWon(excludedManual.net)}은 합계에 넣지 않았어요.`,
+      });
+    }
+    if (excludedTransfer.count > 0) {
+      notes.push({
+        key: "transfer",
+        text: `자산 이동 ${excludedTransfer.count}건 ${formatWon(excludedTransfer.net)}은 쓴 돈이 아니라 옮긴 돈이라 빼놨어요.`,
+      });
+    }
+    if (excludedByPermission > 0) {
+      // 금액 없이 건수만 — 공개범위의 요점이다.
+      notes.push({
+        key: "permission",
+        text: `공개범위 설정으로 ${excludedByPermission}건은 합계에서 제외했어요.`,
+      });
+    }
+    return notes;
+  }, [monthly]);
+
   // 비교 대상 호칭: 이번 달이면 '지난달', 과거월이면 그 달의 직전 달을 명시한다.
   const prevLabel = isCurrentMonth
     ? "지난달"
@@ -513,11 +546,29 @@ function DashboardView() {
                 </div>
               </dl>
 
-              {monthly.meta.excludedByPermission > 0 ? (
-                <p className="text-muted-foreground text-xs">
-                  공개범위 설정으로 {monthly.meta.excludedByPermission}건은
-                  합계에서 제외했어요.
-                </p>
+              {/*
+                총액에서 빠진 것을 전부 말한다. 이전에는 `excludedByPermission`만
+                공시했고, 사용자가 직접 뺀 금액과 자산 이동은 문구 없이 사라졌다 —
+                실측(2026-07) 표시 총액 752,721원 옆에서 140,281원(18.6%)이 조용히
+                빠져 있었다. 세 버킷은 서로 겹치지 않으므로(계약 주석 참조) 나열해도
+                이중 계상이 아니다.
+
+                권한 제외분만 금액을 말하지 않는다 — 그걸 말하면 공개범위가 무의미해진다.
+              */}
+              {excludedNotes.length > 0 ? (
+                <div className="text-muted-foreground space-y-1 text-xs">
+                  {excludedNotes.map((note) => (
+                    <p key={note.key}>{note.text}</p>
+                  ))}
+                  {monthly.meta.excludedManual.count > 0 ? (
+                    <Link
+                      href={`/transactions?month=${month}&excluded=only`}
+                      className="text-primary inline-block underline-offset-2 hover:underline"
+                    >
+                      빼놓은 거래 보기
+                    </Link>
+                  ) : null}
+                </div>
               ) : null}
             </>
           ) : null}

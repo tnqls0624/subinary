@@ -354,6 +354,8 @@ export interface TransactionListParams {
   maxAmount?: number;
   /** 가맹점·메모 부분 일치 검색어. */
   q?: string;
+  /** 합계에서 빼놓은 거래만 — `'only'`만 서버가 인정한다. */
+  excluded?: "only";
   limit?: number;
   cursor?: string;
 }

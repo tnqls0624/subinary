@@ -27,9 +27,19 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 
 import type {
+  AnalyticsExclusion,
   CardBreakdown,
   CategoryBreakdown,
   MemberBreakdown,
@@ -43,6 +53,7 @@ import {
   notTransferCategory,
   redactedMerchantLabel,
   spendPeriodWindow,
+  transferCategory,
   visibilityScope,
 } from '@family/database';
 import { assertKrwInteger, DEFAULT_TIMEZONE } from '@family/shared';
@@ -577,6 +588,21 @@ export class AnalyticsService {
         ),
       );
 
+    const [manual, transfer] = await Promise.all([
+      // 사용자가 직접 뺀 행. `excludedAt`이 먼저이므로 자산 이동 여부는 보지 않는다.
+      this.sumExclusion([
+        ...this.exclusionBaseConditions(householdId, actorMemberId, period),
+        isNotNull(schema.cardTransactions.excludedAt),
+      ]),
+      // 빼지 **않았는데** 자산 이동이라 지출이 아닌 행. 위 버킷과 겹치지 않게
+      // `excludedAt IS NULL`을 함께 건다 — 겹치면 공시 합계가 총액을 넘는다.
+      this.sumExclusion([
+        ...this.exclusionBaseConditions(householdId, actorMemberId, period),
+        isNull(schema.cardTransactions.excludedAt),
+        transferCategory(),
+      ]),
+    ]);
+
     return {
       period: {
         from: period.from.toISOString(),
@@ -586,7 +612,46 @@ export class AnalyticsService {
       cancellationApplied: true,
       includedMemberIds: memberRows.map((r) => r.memberId),
       excludedByPermission: toInt(excluded?.count),
+      excludedManual: manual,
+      excludedTransfer: transfer,
     };
+  }
+
+  /**
+   * 제외 공시의 공통 모집단 — 집계와 **같은** 가구·유형·통화·공개범위·기간 조건.
+   *
+   * `approvalConditions()`를 재사용하지 않는 이유: 그쪽은 `excludedAt IS NULL`과
+   * `notTransferCategory()`를 이미 박아 두었고, 공시는 정확히 그 두 조건에 **걸린**
+   * 행을 세는 것이다. 대신 나머지 조건(특히 `visibilityScope`와 `currency='KRW'`)은
+   * 반드시 같아야 한다 — 공개범위를 빼면 공시가 타인의 `private` 금액을 알려주는
+   * 우회로가 되고, 통화를 빼면 외화 minor units가 원화에 섞여 합계가 무의미해진다.
+   */
+  private exclusionBaseConditions(
+    householdId: string,
+    actorMemberId: string,
+    period: ResolvedPeriod,
+  ): SQL[] {
+    return [
+      eq(schema.cardTransactions.householdId, householdId),
+      eq(schema.cardTransactions.transactionType, 'approval'),
+      eq(schema.cardTransactions.currency, 'KRW'),
+      visibilityScope(actorMemberId),
+      spendPeriodWindow(period.from, period.to),
+    ];
+  }
+
+  /** 제외 한 덩어리의 건수와 순액 합. */
+  private async sumExclusion(conds: SQL[]): Promise<AnalyticsExclusion> {
+    const [agg] = await this.db
+      .select({
+        count: sql<string>`count(*)`,
+        net: sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`,
+      })
+      .from(schema.cardTransactions)
+      .where(and(...conds));
+    const net = toInt(agg?.net);
+    assertKrwInteger(net);
+    return { count: toInt(agg?.count), net };
   }
 
   /* ---------------------------------------------------------------------- */

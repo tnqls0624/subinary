@@ -130,6 +130,18 @@ export interface TransactionListQuery {
   maxAmount?: string;
   /** 가맹점·메모 부분 일치 검색어. 공백만이면 무시한다. */
   q?: string;
+  /**
+   * 합계에서 빼놓은 거래만 보기 — `'only'`만 인정한다.
+   *
+   * 왜 필요한가: 사용자가 뺀 거래는 총액에서 사라지는데 목록에서 그 행만 모아 볼
+   * 방법이 없었다. 월을 넘겨가며 '제외됨' 배지를 눈으로 찾는 것이 유일한 경로였다
+   * (실측 2026-07: 7건 140,281원). 대시보드 공시 문구의 '빼놓은 거래 보기'가 여기로 온다.
+   *
+   * `'all'`/`'none'` 같은 3상 값을 두지 않는 이유: 기본값이 이미 "제외분 포함"이고
+   * (목록은 배지로 구분해 함께 보여준다) 굳이 반대 방향 필터를 만들면 화면의 기본
+   * 동작과 어긋난 상태가 URL에 남는다.
+   */
+  excluded?: string;
   limit?: string;
   cursor?: string;
 }
@@ -255,6 +267,14 @@ export class TransactionService {
     const search = this.parseSearch(query.q);
     if (search) {
       conditions.push(this.searchScope(search, actor.memberId));
+    }
+    // 빼놓은 거래만 보기. 알 수 없는 값은 400으로 튕긴다 — 조용히 무시하면
+    // 사용자는 필터가 걸린 줄 알고 전체 목록을 '제외분'으로 오독한다.
+    if (query.excluded !== undefined && query.excluded !== '') {
+      if (query.excluded !== 'only') {
+        throw new BadRequestException("excluded must be 'only'");
+      }
+      conditions.push(isNotNull(schema.cardTransactions.excludedAt));
     }
     if (keyset) {
       const after = or(

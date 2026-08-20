@@ -12,9 +12,20 @@
  * 장보기 1 / 식비 5로 갈려 있었다).
  *
  * 체크박스 프리미티브가 없어 선택은 행 토글(테두리 강조 + 체크 아이콘)로 표현한다.
+ *
+ * ## 제안 블록 (2026-08-21)
+ *
+ * 도구는 잘 동작했는데 거의 쓰이지 않았다 — 실측 별칭 4행 vs 사람이 확정한 카테고리
+ * 규칙 85행. 원인은 도구가 아니라 **발견**이었다: 85개 이름이 목록으로 늘어서 있으면
+ * `세븐일레븐중구E`와 `세븐일레븐중구ENA센터`가 같은 가게라는 걸 사람이 못 본다.
+ *
+ * 그래서 카드사가 잘라 보낸 이름(엄격한 접두 관계)을 화면이 찾아 위에 올린다.
+ * **묶지는 않는다** — 이 저장소의 규약은 "묶음은 사용자 확정의 결과"이고, 제안은
+ * 기존 대표 선택 다이얼로그를 그대로 열 뿐이다. 음차(`GS25`↔`지에스25`)와 지점·브랜드
+ * 병합은 일부러 제안하지 않는다(사람만 아는 판단 — `findTruncationCandidates` 주석).
  * ------------------------------------------------------------------------- */
-import { Check, Link2Off, Store } from "lucide-react";
-import { useState } from "react";
+import { Check, Link2Off, Sparkles, Store } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -47,6 +58,7 @@ import {
   useMerchantList,
 } from "@/lib/queries";
 import type { MerchantSummary } from "@family/contracts";
+import { findTruncationCandidates } from "@family/shared";
 
 export default function MerchantsPage() {
   const { data, isLoading, isError } = useMerchantList();
@@ -70,6 +82,22 @@ export default function MerchantsPage() {
       else next.add(name);
       return next;
     });
+  };
+
+  /**
+   * 카드사 절단으로 보이는 이름 묶음. 목록 데이터만으로 계산하므로 새 API가 없다.
+   * 이미 묶인 별칭 행은 함수가 걸러낸다.
+   */
+  const suggestions = useMemo(() => findTruncationCandidates(items), [items]);
+
+  /**
+   * 제안을 그대로 받아 **대표 선택 다이얼로그를 연다**(바로 저장하지 않는다).
+   * 사용자가 대표를 바꿀 수도 있고, 무엇보다 확정은 사람이 해야 한다.
+   */
+  const applySuggestion = (group: (typeof suggestions)[number]) => {
+    setSelected(new Set([group.canonical, ...group.aliases]));
+    setCanonical(group.canonical);
+    setPickOpen(true);
   };
 
   const openPicker = () => {
@@ -152,6 +180,49 @@ export default function MerchantsPage() {
         </Card>
       ) : (
         <>
+          {suggestions.length > 0 ? (
+            <Card className="border-primary/30 bg-primary/5 space-y-3 p-4">
+              <div className="flex items-start gap-2">
+                <Sparkles className="text-primary mt-0.5 size-4 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">
+                    잘려서 들어온 이름이 {suggestions.length}묶음 있어요
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    카드 문자가 가맹점 이름을 길이 제한에서 자른 것으로 보여요.
+                    묶으면 지출 순위와 카테고리가 하나로 모여요.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {suggestions.map((g) => (
+                  <div
+                    key={g.canonical}
+                    className="bg-card flex items-center gap-3 rounded-xl px-3 py-2.5"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {g.canonical}
+                      </span>
+                      <span className="text-muted-foreground mt-0.5 block truncate text-xs">
+                        {g.aliases.join(" · ")} → 합치면 {g.transactionCount}건{" "}
+                        {formatWon(g.netTotal)}
+                      </span>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="tint"
+                      className="shrink-0"
+                      onClick={() => applySuggestion(g)}
+                    >
+                      묶기
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : null}
+
           <Card className="divide-border divide-y overflow-hidden p-0">
             {selectable.map((m) => {
               const isSelected = selected.has(m.name);
