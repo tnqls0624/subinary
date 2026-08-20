@@ -735,8 +735,16 @@ export class FinanceAiService {
           const breakdown = await this.analytics.members(userId, householdId, {
             month,
           });
+          // `memberId === null`은 '공용' 버킷이다(공용 카드 결제). member 스코프 예산은
+          // 특정 구성원을 대상으로 하므로 공용 지출은 어느 사람의 사용률도 아니다 —
+          // 넣으면 `scopeRefId ?? ''` 조회가 우연히 빈 문자열 키와 맞아 엉뚱한 값을 준다.
           memberNets = new Map(
-            breakdown.items.map((item) => [item.memberId, item.net]),
+            breakdown.items
+              .filter(
+                (item): item is typeof item & { memberId: string } =>
+                  item.memberId !== null,
+              )
+              .map((item) => [item.memberId, item.net]),
           );
         }
         spent = memberNets.get(budget.scopeRefId ?? '') ?? 0;

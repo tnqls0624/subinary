@@ -202,11 +202,27 @@ async function bootstrap(): Promise<void> {
     // 프리플라이트 Access-Control-Allow-Methods에 전체 메서드를 명시한다.
     // 미지정 시 기본값이 좁아 DELETE/PATCH/PUT 요청이 preflight에서 차단된다.
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    /**
+     * ⚠️ 이 목록은 **컨트롤러가 `@Headers()`로 요구하는 헤더를 전부 담아야 한다.**
+     *
+     * 빠지면 same-origin 브라우저(운영 웹)에서는 멀쩡하고 **cross-origin에서만**
+     * 조용히 죽는다 — Capacitor 앱의 origin은 `capacitor://localhost`라 preflight를
+     * 타고, `Access-Control-Allow-Headers`에 없는 헤더를 붙인 요청은 WebView가
+     * 본 요청을 보내지도 않고 취소한다. 서버 로그에는 아무것도 남지 않는다.
+     *
+     * 2026-08-20에 `Idempotency-Key`가 빠져 예산 "다음 달 계획 복사"가 **폰에서만**
+     * 실패했다. 그 헤더를 필수로 요구하는 호출부가 앱 전체에서 하나뿐이라, 다른 기능은
+     * 전부 정상이고 그 하나만 "잠시 후 다시 시도"를 무한 반복했다.
+     *
+     * `cors-headers.test.ts`가 이 목록과 `@Headers()` 사용처를 소스에서 대조한다.
+     */
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'X-Client-Platform',
       'X-Refresh-Token',
+      // POST /v1/budgets/copy가 계약상 필수로 요구한다(budget.controller.ts).
+      'Idempotency-Key',
     ],
   });
 

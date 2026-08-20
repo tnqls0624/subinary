@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -261,6 +262,12 @@ export default function CardsPage() {
   const [editVisibility, setEditVisibility] =
     useState<CardVisibility>("household");
   const [editOwnerMemberId, setEditOwnerMemberId] = useState("");
+  /**
+   * 공용(공동사용) 표시. 켜면 구성원별 지출에서 이 카드의 결제가 사람이 아니라 '공용'으로
+   * 묶인다 — 카드 문자에 누가 그었는지가 없어서, 소유자 한 명에게 전부 몰아주는 것보다
+   * 귀속을 보류하는 편이 사실에 가깝다. 금액을 지분으로 쪼개지는 않는다.
+   */
+  const [editIsShared, setEditIsShared] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
   // 상태 전환(비활성/재활성) 확인.
@@ -349,6 +356,7 @@ export default function CardsPage() {
     setEditAlias(card.alias);
     setEditVisibility(card.visibility);
     setEditOwnerMemberId(card.ownerMemberId);
+    setEditIsShared(card.isShared);
     setEditError(null);
   }
 
@@ -360,6 +368,12 @@ export default function CardsPage() {
       setEditError("카드 별칭을 입력해 주세요.");
       return;
     }
+    // '나만 보기 + 공용'은 서버가 400으로 거절한다. 왕복 전에 여기서 먼저 막아 준다 —
+    // "같이 쓰는데 나만 본다"는 모순이고, 그 조합에서는 집계가 사람마다 달라진다.
+    if (editIsShared && editVisibility === "private") {
+      setEditError("나만 보기 카드는 공용으로 표시할 수 없어요.");
+      return;
+    }
     updateMutation.mutate({
       id: editing.id,
       body: {
@@ -367,6 +381,7 @@ export default function CardsPage() {
         visibility: editVisibility,
         // 소유자 변경 시 서버가 검증하고, 목록/폼 아이콘 색이 새 소유자 색으로 바뀐다.
         ownerMemberId: editOwnerMemberId || undefined,
+        isShared: editIsShared,
       },
     });
   }
@@ -705,6 +720,27 @@ export default function CardsPage() {
               </Select>
               <p className="text-muted-foreground text-[13px]">
                 공개 범위 변경은 앞으로 들어올 거래에만 적용돼요.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="edit-is-shared">함께 쓰는 카드</Label>
+                <Switch
+                  id="edit-is-shared"
+                  checked={editIsShared}
+                  onCheckedChange={setEditIsShared}
+                  disabled={editVisibility === "private"}
+                />
+              </div>
+              {/*
+                공개 범위와 달리 이 설정은 **과거까지 함께** 바뀐다. 거래를 고치지 않고
+                집계가 카드 플래그를 읽기 때문이다 — 그래서 켜고 끄는 것으로 되돌린다.
+                사용자가 "앞으로만 적용되겠지"라고 오해하지 않게 그 차이를 적는다.
+              */}
+              <p className="text-muted-foreground text-[13px]">
+                {editVisibility === "private"
+                  ? "나만 보기 카드는 함께 쓰는 카드로 표시할 수 없어요."
+                  : "구성원별 지출에서 이 카드 결제를 '공용'으로 묶어요. 지난 달 기록에도 바로 적용되고, 끄면 되돌아가요."}
               </p>
             </div>
             {editError ? (

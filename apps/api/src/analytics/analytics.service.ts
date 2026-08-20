@@ -250,10 +250,25 @@ export class AnalyticsService {
     );
 
     const netExpr = sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`;
+    /**
+     * 공용으로 표시한 카드의 결제는 사람이 아니라 **'공용'** 으로 묶는다.
+     *
+     * 카드 문자에는 누가 그었는지가 없다. 거래의 `member_id`는 문자를 전달한 폰의
+     * 주인이고, 한 카드의 문자는 한 대에만 오므로 공동사용 카드는 지출이 한 사람에게
+     * 전부 몰린다(실측 76% vs 24%). 그 왜곡을 지분 분할로 덮지 않고 — 50/50은 실측이
+     * 아니라 가정이다 — 귀속을 **보류한 상태 그대로** 보여준다.
+     *
+     * 거래 행은 건드리지 않는다. 이 CASE가 조인 시점에 판정하므로 사용자가 카드에
+     * 공용 표시를 켜면 **과거 집계까지 함께** 바뀌고, 끄면 그대로 돌아온다.
+     */
+    const bucketId = sql<
+      string | null
+    >`case when ${schema.paymentCards.isShared} then null else ${schema.cardTransactions.memberId} end`;
+    const bucketName = sql<string>`case when ${schema.paymentCards.isShared} then '공용' else ${schema.users.name} end`;
     const rows = await this.db
       .select({
-        memberId: schema.cardTransactions.memberId,
-        name: schema.users.name,
+        memberId: bucketId,
+        name: bucketName,
         net: netExpr,
         count: sql<string>`count(*)`,
       })
@@ -266,8 +281,14 @@ export class AnalyticsService {
         schema.users,
         eq(schema.householdMembers.userId, schema.users.id),
       )
+      // 카드 미연결 거래도 남아야 하므로 left join이다. 미연결은 `isShared`가 NULL이고
+      // `case when NULL then` 은 else 가지를 타므로 종전대로 구성원에 귀속된다.
+      .leftJoin(
+        schema.paymentCards,
+        eq(schema.paymentCards.id, schema.cardTransactions.cardId),
+      )
       .where(and(...conds))
-      .groupBy(schema.cardTransactions.memberId, schema.users.name)
+      .groupBy(bucketId, bucketName)
       .orderBy(desc(netExpr));
 
     const total = await this.sumNet(conds);

@@ -76,7 +76,12 @@ export const memberBreakdownSchema = z.object({
   meta: analyticsMetaSchema,
   items: z.array(
     z.object({
-      memberId: z.string(),
+      /**
+       * 구성원 id. **`null`이면 '공용'** 버킷이다 — 공용으로 표시한 카드의 결제는
+       * 사람에게 귀속시키지 않는다. 카드 문자에 누가 썼는지가 없으므로 소유자에게
+       * 전부 몰아주는 것보다 "공용"이 사실에 가깝다(금액은 쪼개지 않는다).
+       */
+      memberId: z.string().nullable(),
       name: z.string(),
       net: z.number().int(),
       ratio: z.number(),

@@ -232,12 +232,17 @@ function DashboardView() {
       (membersQuery.data?.items ?? [])
         .slice(0, BREAKDOWN_TOP_N)
         .map((m) => ({
-          key: m.memberId,
+          // memberId가 null이면 '공용' 버킷이다(공용 표시한 카드의 결제). 사람이 아니라
+          // 귀속을 보류한 묶음이므로 딥링크를 걸지 않는다 — memberId 필터로는 그 집합을
+          // 다시 만들 수 없고, 필터 없는 목록으로 보내면 누른 행과 무관한 화면이 된다.
+          key: m.memberId ?? "__shared__",
           label: m.name,
           value: m.net,
           ratio: m.ratio,
           meta: `${m.count}건`,
-          href: transactionsHref({ month, memberId: m.memberId }),
+          ...(m.memberId === null
+            ? {}
+            : { href: transactionsHref({ month, memberId: m.memberId }) }),
         })),
     [membersQuery.data, month],
   );
@@ -306,7 +311,11 @@ function DashboardView() {
   // 최근 거래 리스트의 구성원명 매핑(analytics.members 결과 재활용).
   const memberNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const m of membersQuery.data?.items ?? []) map.set(m.memberId, m.name);
+    // '공용'(memberId null)은 사람 이름 매핑에 넣지 않는다 — 이 맵은 거래 행의
+    // memberId로 이름을 찾는 용도이고, 거래의 member_id는 언제나 실제 구성원이다.
+    for (const m of membersQuery.data?.items ?? []) {
+      if (m.memberId !== null) map.set(m.memberId, m.name);
+    }
     return map;
   }, [membersQuery.data]);
 

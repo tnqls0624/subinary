@@ -896,3 +896,53 @@ describe('0055 — 카테고리 소급 재분류 되돌리기 원장', () => {
     }
   });
 });
+
+describe('0056 — 공용(공동사용) 카드 표시', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(resolve(drizzleDir, '0056_shared_card.sql'), 'utf8');
+  const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
+
+  it('가산적이다 — 기존 컬럼을 지우거나 데이터를 고치지 않는다', () => {
+    for (const forbidden of ['DROP TABLE', 'DROP COLUMN', 'DELETE FROM', 'TRUNCATE', 'UPDATE']) {
+      assert.ok(
+        !new RegExp(`^\\s*${forbidden}\\b`, 'im').test(sqlBody),
+        `파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('is_shared는 NOT NULL DEFAULT false다', () => {
+    // 기존 카드는 전부 공용이 아니다 — 사용자가 켜기 전까지 동작이 바뀌면 안 된다.
+    assert.match(
+      sqlBody,
+      /ADD COLUMN IF NOT EXISTS "is_shared" boolean DEFAULT false NOT NULL/i,
+      'is_shared 컬럼 정의가 기대와 다르다',
+    );
+    assert.ok(
+      schemaText.includes("isShared: boolean('is_shared').notNull().default(false)"),
+      'schema.ts의 isShared 선언이 없거나 다르다',
+    );
+  });
+
+  it('거래 테이블을 건드리지 않는다', () => {
+    // 이 기능의 소급은 집계가 조인 시점에 플래그를 읽어서 성립한다. 거래를 UPDATE하면
+    // 되돌리기가 플래그를 끄는 것으로 끝나지 않게 된다.
+    assert.ok(
+      !/card_transactions/i.test(sqlBody),
+      '0056이 card_transactions를 참조한다',
+    );
+  });
+
+  it('집계가 쓰는 인덱스를 만든다', () => {
+    assert.match(sqlBody, /CREATE INDEX IF NOT EXISTS "payment_cards_household_shared_idx"/);
+  });
+
+  it('집계 서비스가 이 컬럼을 읽는다', () => {
+    // 컬럼만 만들고 아무도 읽지 않으면 사용자가 토글을 켜도 숫자가 그대로다.
+    const analytics = readFileSync(
+      resolve(here, '../../../apps/api/src/analytics/analytics.service.ts'),
+      'utf8',
+    );
+    assert.ok(analytics.includes('paymentCards.isShared'), '집계가 isShared를 읽지 않는다');
+  });
+});

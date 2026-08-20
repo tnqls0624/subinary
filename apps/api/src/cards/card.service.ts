@@ -76,6 +76,7 @@ function toCardSummary(card: schema.PaymentCard): CardSummary {
     alias: card.alias,
     maskedNumber: card.maskedNumber,
     visibility: card.visibility,
+    isShared: card.isShared,
     status: card.status,
     createdAt: card.createdAt.toISOString(),
   };
@@ -340,10 +341,27 @@ export class CardService {
     const patch: {
       alias?: string;
       visibility?: schema.PaymentCard['visibility'];
+      isShared?: boolean;
       status?: schema.PaymentCard['status'];
       ownerMemberId?: string;
       updatedAt: Date;
     } = { updatedAt: new Date() };
+    if (input.isShared !== undefined) {
+      /**
+       * 공용 표시는 **거래를 건드리지 않는다.** 구성원별 집계가 조인 시점에 이 플래그를
+       * 읽으므로 켜는 순간 과거까지 함께 '공용'으로 묶이고, 끄면 그대로 돌아온다.
+       * UPDATE가 없는 설계가 소급을 가장 안전하게 만든다.
+       *
+       * `private`과는 함께 성립하지 않는다 — "같이 쓰는데 나만 본다"는 모순이고, 집계가
+       * 공용으로 묶은 금액을 정작 다른 사용자는 볼 수 없어 합계가 사람마다 달라진다.
+       */
+      if (input.isShared && (input.visibility ?? card.visibility) === 'private') {
+        throw new BadRequestException(
+          '나만 보기 카드는 공용으로 표시할 수 없어요. 공개 범위를 먼저 바꿔 주세요.',
+        );
+      }
+      patch.isShared = input.isShared;
+    }
     if (input.alias !== undefined) {
       patch.alias = input.alias;
     }

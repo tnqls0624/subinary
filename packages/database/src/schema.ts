@@ -974,6 +974,23 @@ export const paymentCards = pgTable(
     maskedNumber: text('masked_number'),
     cardFingerprint: text('card_fingerprint'),
     visibility: cardVisibility('visibility').notNull().default('household'),
+    /**
+     * 여러 구성원이 **함께 쓰는** 카드인가.
+     *
+     * 카드 승인 문자에는 "누가 그었는지"가 없다(실측: 마스킹 이름 토큰은 발급사마다
+     * 상수이고 카드번호 뒤 4자리도 전부 NULL). 그래서 거래의 `member_id`는 문자를
+     * 전달한 **폰의 주인**이 되고, 한 카드의 문자가 한 대에만 오므로 공동사용 카드는
+     * 지출이 한 사람에게 전부 몰린다(실측 76% vs 24%).
+     *
+     * 이 플래그는 그 왜곡을 **없는 정보를 지어내지 않고** 다룬다. 금액을 지분으로
+     * 쪼개지 않는다 — 50/50은 계산 결과가 아니라 가정이고, 그것을 실측 금액 옆에 같은
+     * 서식으로 놓으면 이 저장소가 지키는 습관("표본 없음을 0으로 쓰지 않는다")과
+     * 정면으로 어긋난다. 대신 구성원별 집계에서 **'공용' 버킷**으로 묶는다.
+     *
+     * 거래 행은 건드리지 않는다. 집계가 조인 시점에 이 플래그를 읽으므로 켜는 순간
+     * 과거까지 일관되게 바뀌고, 되돌리기는 플래그를 끄는 것으로 끝난다.
+     */
+    isShared: boolean('is_shared').notNull().default(false),
     status: cardStatus('status').notNull().default('active'),
     createdBy: uuid('created_by')
       .notNull()

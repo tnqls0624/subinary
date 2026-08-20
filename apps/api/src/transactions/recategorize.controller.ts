@@ -30,7 +30,10 @@ import { RecategorizeService } from './recategorize.service';
 
 class RecategorizeDto extends createZodDto(recategorizeRequestSchema) {}
 
-@Controller('v1/transactions/recategorize')
+// 글로벌 prefix가 `v1`을 붙인다(`main.ts`의 setGlobalPrefix). 여기에 `v1`을 또 쓰면
+// 실제 경로가 `/v1/v1/...`이 되어 클라이언트가 부르는 주소와 어긋난다 — 2026-08-20에
+// 그렇게 배포해 규칙 목록이 통째로 404였다. 다른 컨트롤러도 전부 prefix 없이 선언한다.
+@Controller('transactions/recategorize')
 export class RecategorizeController {
   constructor(private readonly service: RecategorizeService) {}
 

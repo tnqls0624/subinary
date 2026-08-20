@@ -365,8 +365,21 @@ function TransactionsView() {
     for (const c of cards) map.set(c.id, c.ownerMemberId);
     return map;
   }, [cards]);
-  const attributedMemberId = (txn: TransactionSummary) =>
-    (txn.cardId ? cardOwnerById.get(txn.cardId) : undefined) ?? txn.memberId;
+  /**
+   * 공용으로 표시한 카드는 사람 이름을 붙이지 않는다.
+   *
+   * 그 외에는 **카드 소유자보다 거래의 구성원을 우선**한다. 서버 집계(`analytics/members`)가
+   * `card_transactions.member_id`를 정본으로 쓰므로, 화면이 카드 소유자를 우선하면 통계와
+   * 목록이 서로 다른 사람을 말한다 — 지금은 두 값이 우연히 같아 모순이 보이지 않지만,
+   * 거래의 구성원을 재지정할 수 있게 되는 순간 "바꿨는데 안 바뀐다"가 된다.
+   */
+  const sharedCardIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of cards) if (c.isShared) set.add(c.id);
+    return set;
+  }, [cards]);
+  const attributedMemberId = (txn: TransactionSummary): string | null =>
+    txn.cardId && sharedCardIds.has(txn.cardId) ? null : txn.memberId;
 
   const cardById = useMemo(() => {
     const map = new Map<string, { alias: string; issuer: string }>();
@@ -655,8 +668,21 @@ function TransactionsView() {
   };
 
   // 색과 동일하게 카드 소유자 기준 이름(미연결이면 거래 귀속 구성원).
-  const memberNameOf = (txn: TransactionSummary): string =>
-    memberNameById.get(attributedMemberId(txn)) ?? "구성원";
+  /**
+   * 아이콘 색. 공용 카드는 사람 색을 쓰지 않는다 — 색이 곧 "누구"를 뜻하므로, 귀속을
+   * 보류한 거래에 특정 색을 주면 화면이 이름(공용)과 다른 답을 말한다.
+   */
+  const sharedIconClass = (txn: TransactionSummary): string => {
+    const id = attributedMemberId(txn);
+    if (id === null) return "bg-muted text-muted-foreground";
+    return memberColorClass(id, memberColorById.get(id));
+  };
+
+  const memberNameOf = (txn: TransactionSummary): string => {
+    const id = attributedMemberId(txn);
+    if (id === null) return "공용";
+    return memberNameById.get(id) ?? "구성원";
+  };
 
   const subtitleOf = (txn: TransactionSummary): string => {
     const parts = [
@@ -928,10 +954,7 @@ function TransactionsView() {
                           iconClassName={
                             txn.masked || excluded
                               ? "bg-muted text-muted-foreground"
-                              : memberColorClass(
-                                  attributedMemberId(txn),
-                                  memberColorById.get(attributedMemberId(txn)),
-                                )
+                              : sharedIconClass(txn)
                           }
                           title={
                             txn.masked ? (

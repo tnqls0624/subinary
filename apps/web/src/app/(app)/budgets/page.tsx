@@ -107,22 +107,57 @@ async function copyBudgetPlan(
     "idempotency-key": idempotencyKey,
   };
   if (accessToken) headers.authorization = `Bearer ${accessToken}`;
-  const response = await fetch(`${API_BASE_URL}/v1/budgets/copy`, {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    headers,
-    body: JSON.stringify(body),
-  });
-  const responseBody: unknown = await response.json().catch(() => undefined);
-  if (!response.ok) {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/v1/budgets/copy`, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch {
+    /**
+     * fetch 자체가 거부된 경우다. 네이티브 앱에서 이 요청은 cross-origin이므로
+     * preflight를 타는데, 서버 `allowedHeaders`에 `Idempotency-Key`가 없으면 WebView가
+     * **본 요청을 보내지도 않고** 취소한다 — 서버 로그에는 아무것도 남지 않는다.
+     * 2026-08-20에 폰에서만 이 기능이 죽은 이유이고, 그때는 이 실패가 status 없는
+     * TypeError라 `ApiError`도 아니어서 아래 status 분기에 닿지도 못했다.
+     */
     throw new ApiError(
-      response.status,
-      "다음 달 계획을 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
-      responseBody
+      0,
+      "서버에 연결하지 못했어요. 앱을 최신으로 업데이트한 뒤 다시 시도해 주세요.",
+      undefined
     );
   }
+  const responseBody: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    throw new ApiError(response.status, copyFailureMessage(response.status), responseBody);
+  }
   return budgetCopyResponseSchema.parse(responseBody);
+}
+
+/**
+ * 실패 사유를 사람 말로 가른다.
+ *
+ * 전부 "잠시 후 다시 시도해 주세요"로 수렴시켜 두었더니, **재시도가 절대 성공하지 않는
+ * 상태에서도 재시도를 권하는** 안내가 나왔다(409는 이미 계획이 있다는 뜻이다). 2026-08-20에
+ * 사용자가 원인을 짚지 못한 것도 그래서였다 — 화면 문구가 서버가 말한 것을 지우고 있었다.
+ */
+function copyFailureMessage(status: number): string {
+  switch (status) {
+    case 404:
+      return "복사할 계획이 없어요. 이번 달 예산을 먼저 만들어 주세요.";
+    case 409:
+      // 재시도는 영원히 성공하지 않는다. 다음 행동을 알려줘야 한다.
+      return "다음 달에 이미 계획이 있어요. 그 달로 이동해 확인해 주세요.";
+    case 400:
+      return "요청이 올바르지 않아요. 앱을 최신으로 업데이트한 뒤 다시 시도해 주세요.";
+    case 401:
+      return "로그인이 필요해요.";
+    default:
+      return "다음 달 계획을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
+  }
 }
 
 const SCOPE_OPTIONS: ReadonlyArray<Option> = (

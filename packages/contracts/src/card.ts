@@ -40,6 +40,8 @@ export const cardUpdateRequestSchema = z.object({
   // 소유자 재지정. 같은 household의 활성 구성원이어야 한다(서버 검증). 아이콘 색이
   // 새 소유자 색으로 바뀐다.
   ownerMemberId: z.string().uuid().optional(),
+  /** 공용 카드 표시 토글. */
+  isShared: z.boolean().optional(),
 });
 export type CardUpdateRequest = z.infer<typeof cardUpdateRequestSchema>;
 
@@ -54,6 +56,11 @@ export const cardSummarySchema = z.object({
   alias: z.string(),
   maskedNumber: z.string().nullable(),
   visibility: cardVisibilitySchema,
+  /**
+   * 여러 구성원이 함께 쓰는 카드. 켜면 구성원별 지출에서 이 카드의 결제가 사람이 아니라
+   * **'공용'** 으로 묶인다(금액을 지분으로 쪼개지는 않는다 — 문자에 누가 썼는지가 없다).
+   */
+  isShared: z.boolean(),
   status: cardStatusSchema,
   createdAt: z.string(),
 });
