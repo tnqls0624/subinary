@@ -14,5 +14,6 @@ export * from './observability.js';
 export * from './parser-quality.js';
 export * from './model-alias.js';
 export * from './model-traffic.js';
+export * from './merchant-rule-revocation.js';
 export * from './training-run.js';
 export type { Sql } from 'postgres';

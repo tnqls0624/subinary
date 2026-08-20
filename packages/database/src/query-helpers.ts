@@ -127,3 +127,28 @@ export function redactedMerchantLabel(
     else ${cardTransactions.merchantNormalized}
   end`;
 }
+
+/**
+ * 일괄 재분류가 **쓸 수 있는** 행의 범위.
+ *
+ * 읽기 스코프({@link visibilityScope})보다 좁다. 이유는 `summary_only`의 의미에 있다 —
+ * 그 공개범위는 "얼마 썼는지는 합계에 넣되 **어디서 썼는지는 감춘다**"이다. 그런데
+ * 가맹점 이름을 키로 남의 행을 UPDATE하면, 결과 건수만으로 "그 사람이 그 가맹점을
+ * 썼다"가 드러난다. 감췄던 이름-존재 결합이 쓰기를 통해 되살아나는 것이다.
+ *
+ * 그래서 대상은 **내 거래 ∪ (권한자인 경우) 타인의 `household` 거래**로 한정한다.
+ * 권한자에게도 타인 `summary_only`는 열지 않는다 — 목록·상세·집계 어디서도 owner를
+ * 봐주지 않는 규약과 같은 선이다(`visibilityScope` 주석 참조).
+ *
+ * ⚠️ 이 조건은 {@link visibilityScope}를 **대체하지 않는다.** 둘 다 WHERE에 넣어야
+ * 한다 — 이건 쓰기 상한이고 저건 하드 플로어다.
+ */
+export function mutableByActor(actorMemberId: string, privileged: boolean): SQL {
+  if (!privileged) {
+    return eq(cardTransactions.memberId, actorMemberId) as SQL;
+  }
+  return or(
+    eq(cardTransactions.memberId, actorMemberId),
+    eq(cardTransactions.visibility, 'household'),
+  ) as SQL;
+}

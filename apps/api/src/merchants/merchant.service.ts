@@ -12,7 +12,13 @@
  * - 등록은 과거 데이터도 백필한다 — "같은 가게"라고 했으면 지난 분석도 합쳐져야
  *   사용자 기대에 맞는다. 원문(`merchant_raw`)은 건드리지 않으므로 되돌릴 수 있다.
  */
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   redactedMerchantLabel,
   schema,
@@ -29,6 +35,11 @@ import type {
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { DB } from '../database/database.constants';
+import {
+  applyMerchantRuleMerge,
+  planMerchantRuleMerge,
+  type MerchantRuleSource,
+} from './merchant-rule-merge';
 
 /** 별칭 등록/해제는 가구 전체 집계를 바꾸므로 관리 권한을 요구한다. */
 const ADMIN_ROLES = ['owner', 'admin'] as const;
@@ -237,16 +248,28 @@ export class MerchantService {
         )
         .returning({ id: schema.cardTransactions.id });
 
-      // 5. 카테고리 규칙 병합. 대표에 규칙이 없으면 별칭 규칙 하나를 대표로 승격한다.
-      //    우선순위는 `human_confirmed`(사용자 확정) → 최근 갱신 순이다. 시각만 보면
-      //    나중에 생긴 자동 학습(`model_prediction`)이 사람의 확정을 덮어버린다
-      //    (실측: 자동 `팀오투 -> 기타`가 사용자 확정 `-> 여행`보다 최신이었다).
+      /**
+       * 5. 카테고리 규칙 병합 — 판단은 `planMerchantRuleMerge`가 한다(P1-17).
+       *
+       * 종전 코드는 대표에 규칙이 **있으면** 승격을 건너뛰고 별칭 규칙을 통째로
+       * DELETE했다. 그래서 대표에 `model_prediction`이 있고 별칭에 사람이 확정한
+       * 규칙이 있으면 **사람의 확정이 사라지고 모델 추측이 남았다.** 게다가 승격은
+       * `merchant_pattern` rename으로 했는데, targetId가 패턴 해시라 rename은
+       * `feedback_events` 계보를 끊어 데이터셋 빌드를 영구히 깨뜨린다.
+       *
+       * 계획을 순수 함수로 뽑은 이유는 이 판단이 틀렸을 때 드러나는 시점이 몇 달 뒤
+       * (학습이 깨질 때)라서다 — DB 없이 전 분기를 테스트로 고정해야 회귀를 막는다.
+       */
       const patterns = [canonical, ...allAliases];
       const rules = await tx
         .select({
           id: schema.merchantCategoryRules.id,
-          pattern: schema.merchantCategoryRules.merchantPattern,
+          merchantPattern: schema.merchantCategoryRules.merchantPattern,
+          categoryId: schema.merchantCategoryRules.categoryId,
           source: schema.merchantCategoryRules.source,
+          predictionTraceId: schema.merchantCategoryRules.predictionTraceId,
+          confirmedAt: schema.merchantCategoryRules.confirmedAt,
+          createdBy: schema.merchantCategoryRules.createdBy,
           updatedAt: schema.merchantCategoryRules.updatedAt,
         })
         .from(schema.merchantCategoryRules)
@@ -255,30 +278,50 @@ export class MerchantService {
             eq(schema.merchantCategoryRules.householdId, householdId),
             inArray(schema.merchantCategoryRules.merchantPattern, patterns),
           ),
-        )
-        .orderBy(desc(schema.merchantCategoryRules.updatedAt));
+        );
 
-      const canonicalRule = rules.find((r) => r.pattern === canonical);
-      if (!canonicalRule) {
-        const promote =
-          rules.find((r) => r.source === 'human_confirmed') ?? rules[0];
-        if (promote) {
-          // UNIQUE(householdId, merchantPattern) 충돌 없음 — 대표 패턴 규칙이 없음을 확인했다.
-          await tx
-            .update(schema.merchantCategoryRules)
-            .set({ merchantPattern: canonical, updatedAt: new Date() })
-            .where(eq(schema.merchantCategoryRules.id, promote.id));
-        }
+      // 스냅샷이 참조하는 규칙은 지울 수 없다(FK가 ON DELETE no action — 지우면
+      // 23503으로 별칭 등록 트랜잭션 전체가 롤백된다).
+      const ruleIds = rules.map((rule) => rule.id);
+      const referencedRows = ruleIds.length
+        ? await tx
+            .selectDistinct({
+              ruleId: schema.datasetSnapshotItems.merchantCategoryRuleId,
+            })
+            .from(schema.datasetSnapshotItems)
+            .where(
+              inArray(schema.datasetSnapshotItems.merchantCategoryRuleId, ruleIds),
+            )
+        : [];
+
+      const plan = planMerchantRuleMerge({
+        canonical,
+        rules: rules.map((rule) => ({
+          ...rule,
+          source: rule.source as MerchantRuleSource,
+        })),
+        snapshotReferencedRuleIds: new Set(
+          referencedRows
+            .map((row) => row.ruleId)
+            .filter((id): id is string => id !== null),
+        ),
+      });
+
+      if (plan.conflict) {
+        // 사람이 서로 다른 카테고리로 확정한 규칙이 둘 이상이다. 시스템이 임의로
+        // 고르면 그 판단이 틀렸을 때 되돌릴 근거가 남지 않는다(ADR-0029 merged 원칙).
+        throw new ConflictException(
+          '묶으려는 가맹점들에 서로 다른 카테고리가 확정돼 있어요. 먼저 하나로 정리해 주세요.',
+        );
       }
-      const removed = await tx
-        .delete(schema.merchantCategoryRules)
-        .where(
-          and(
-            eq(schema.merchantCategoryRules.householdId, householdId),
-            inArray(schema.merchantCategoryRules.merchantPattern, allAliases),
-          ),
-        )
-        .returning({ id: schema.merchantCategoryRules.id });
+
+      const { rulesRemoved } = await applyMerchantRuleMerge(tx, {
+        householdId,
+        canonical,
+        actorUserId: userId,
+        plan,
+        now: new Date(),
+      });
 
       return {
         canonical,
@@ -289,7 +332,7 @@ export class MerchantService {
           createdAt: c.createdAt.toISOString(),
         })),
         transactionsUpdated: updated.length,
-        rulesMerged: removed.length,
+        rulesMerged: rulesRemoved,
       };
     });
   }

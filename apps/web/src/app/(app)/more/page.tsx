@@ -31,6 +31,7 @@ import {
   Smartphone,
   Store,
   Tags,
+  Wand2,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -97,6 +98,12 @@ const GROUPS: ReadonlyArray<MoreGroup> = [
         icon: Repeat,
         title: "정기 지출",
         description: "매달 빠져나가는 결제를 찾아 확인해요",
+      },
+      {
+        href: "/more/category-rules",
+        icon: Wand2,
+        title: "카테고리 규칙",
+        description: "자동으로 붙는 카테고리를 확인하고 과거에도 적용해요",
       },
     ],
   },

@@ -53,7 +53,7 @@ import type {
   TransactionUpdateRequest,
 } from '@family/contracts';
 import {
-  revokeTrainingRuns,
+  revokeMerchantRuleLineage,
   schema,
   type Db,
   notTransferCategory,
@@ -809,98 +809,21 @@ export class TransactionService {
           occurredAt: now,
         });
 
-        // 이미 Gold snapshot에 포함된 규칙의 label이 바뀌면 과거 artifact는
-        // immutable하게 보존하되 평가 근거로는 즉시 revoke한다.
+        /**
+         * 이미 Gold snapshot에 포함된 규칙의 label이 바뀌면 과거 artifact는
+         * immutable하게 보존하되 평가 근거로는 즉시 revoke한다.
+         *
+         * 연쇄 자체는 `@family/database`의 공용 구현을 부른다 — 같은 5단계가
+         * `learning-dataset.service.ts`에도 있고, 소급 일괄 재분류가 세 번째 사본을
+         * 만들면 그중 하나가 단계를 빠뜨린 채 조용히 남는다.
+         */
         if (previousRule && previousRule.categoryId !== input.categoryId) {
-          const snapshotRows = await tx
-            .select({ id: schema.datasetSnapshotItems.datasetSnapshotId })
-            .from(schema.datasetSnapshotItems)
-            .where(
-              eq(
-                schema.datasetSnapshotItems.merchantCategoryRuleId,
-                previousRule.id,
-              ),
-            );
-          const snapshotIds = [
-            ...new Set(snapshotRows.map((snapshot) => snapshot.id)),
-          ];
-          if (snapshotIds.length > 0) {
-            const revokedSnapshots = await tx
-              .update(schema.datasetSnapshots)
-              .set({
-                status: 'revoked',
-                revokedAt: now,
-                revocationReason: 'merchant_category_rule_changed',
-                updatedAt: now,
-              })
-              .where(
-                and(
-                  inArray(schema.datasetSnapshots.id, snapshotIds),
-                  ne(schema.datasetSnapshots.status, 'revoked'),
-                ),
-              )
-              .returning({ id: schema.datasetSnapshots.id });
-            if (revokedSnapshots.length > 0) {
-              await revokeTrainingRuns(
-                tx,
-                revokedSnapshots.map((snapshot) => snapshot.id),
-                'merchant_category_rule_changed',
-                now,
-              );
-              const revokedEvaluations = await tx
-                .update(schema.evaluationRuns)
-                .set({
-                  status: 'revoked',
-                  revokedAt: now,
-                  revocationReason: 'merchant_category_rule_changed',
-                })
-                .where(
-                  and(
-                    inArray(
-                      schema.evaluationRuns.datasetSnapshotId,
-                      revokedSnapshots.map((snapshot) => snapshot.id),
-                    ),
-                    ne(schema.evaluationRuns.status, 'revoked'),
-                  ),
-                )
-                .returning({ id: schema.evaluationRuns.id });
-              if (revokedEvaluations.length > 0) {
-                const suspendedAliases = await tx
-                  .update(schema.modelAliases)
-                  .set({
-                    suspendedAt: now,
-                    suspensionReason: 'evaluation_revoked',
-                    updatedAt: now,
-                  })
-                  .where(
-                    inArray(
-                      schema.modelAliases.evaluationRunId,
-                      revokedEvaluations.map((evaluation) => evaluation.id),
-                    ),
-                  )
-                  .returning({ id: schema.modelAliases.id });
-                if (suspendedAliases.length > 0) {
-                  await tx
-                    .update(schema.modelCanaryRuns)
-                    .set({
-                      status: 'superseded',
-                      decisionReason: 'evaluation_revoked',
-                      lastEvaluatedAt: now,
-                      updatedAt: now,
-                    })
-                    .where(
-                      and(
-                        inArray(
-                          schema.modelCanaryRuns.modelAliasId,
-                          suspendedAliases.map((alias) => alias.id),
-                        ),
-                        eq(schema.modelCanaryRuns.status, 'monitoring'),
-                      ),
-                    );
-                }
-              }
-            }
-          }
+          await revokeMerchantRuleLineage(
+            tx,
+            [previousRule.id],
+            'merchant_category_rule_changed',
+            now,
+          );
         }
       }
     });

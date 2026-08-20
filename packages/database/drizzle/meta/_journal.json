@@ -386,6 +386,13 @@
       "when": 1786108448626,
       "tag": "0054_slack_import_status",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1786108449626,
+      "tag": "0055_category_recategorize",
+      "breakpoints": true
     }
   ]
 }

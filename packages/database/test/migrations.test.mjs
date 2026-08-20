@@ -718,3 +718,181 @@ describe('0054 — Slack import 상태', () => {
     assert.match(workerText, /schema\.slackImports/);
   });
 });
+
+describe('0055 — 카테고리 소급 재분류 되돌리기 원장', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0055_category_recategorize.sql'),
+    'utf8',
+  );
+  /**
+   * 주석을 걷어낸 본문.
+   *
+   * 이 마이그레이션은 "왜 그렇게 하지 않았는가"를 주석에 길게 적는다 — 배치에
+   * `from_category_id`를 두지 않는 이유가 그 예다. 주석까지 함께 검사하면 **설명 문구가
+   * 위반으로 잡힌다**(실제로 그렇게 오탐했다).
+   */
+  const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
+  /**
+   * 컬럼 정의만 담은 DDL 블록. nullable 여부는 여기서만 판정한다 — CHECK 제약 본문에
+   * 나오는 `"reverted_at" IS NOT NULL`은 컬럼 제약이 아니라 **완전성 검사식**이므로,
+   * 파일 전체를 훑으면 그것을 NOT NULL 선언으로 오독한다.
+   */
+  const ddlOf = (table) => {
+    const match = sqlBody.match(
+      new RegExp(`CREATE TABLE IF NOT EXISTS "${table}"\\s*\\(([\\s\\S]*?)\\n\\);`),
+    );
+    assert.ok(match, `${table} DDL을 찾지 못했다`);
+    return match[1];
+  };
+
+  it('가산적이다 — 기존 테이블을 바꾸거나 지우지 않는다', () => {
+    // 이 마이그레이션이 기존 데이터를 만지면 롤백이 "테이블 드롭"으로 끝나지 않는다.
+    assert.ok(
+      !/ALTER TABLE "(?!category_recategorize_(batches|items)")/.test(sqlText),
+      '새 테이블 이외의 테이블을 ALTER 한다',
+    );
+    // 문장 **시작** 위치만 본다 — FK 절의 `ON UPDATE no action`은 파괴적 구문이 아니다.
+    for (const forbidden of [
+      'DROP TABLE',
+      'DROP COLUMN',
+      'DROP CONSTRAINT',
+      'DELETE FROM',
+      'TRUNCATE',
+      'UPDATE',
+    ]) {
+      assert.ok(
+        !new RegExp(`^\\s*${forbidden}\\b`, 'im').test(sqlText),
+        `0055에 파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('journal에 0055가 파일명과 같은 tag로 등록돼 있다', () => {
+    // 손으로 쓴 마이그레이션은 drizzle-kit가 journal을 대신 만들어 주지 않는다.
+    // 여기서 놓치면 배포에서 **조용히 적용되지 않는다.**
+    const entry = journal.entries.find(
+      (e) => e.tag === '0055_category_recategorize',
+    );
+    assert.ok(entry, 'journal에 0055 항목이 없다');
+    assert.equal(entry.idx, 55);
+    assert.equal(entry.breakpoints, true, 'breakpoints가 false면 문장이 뭉친다');
+  });
+
+  it('문장 사이에 statement-breakpoint가 있다', () => {
+    // breakpoint가 없으면 마이그레이터가 여러 DDL을 한 문장으로 보내 실패한다.
+    const breakpoints = sqlText.match(/^--> statement-breakpoint$/gm) ?? [];
+    assert.ok(
+      breakpoints.length >= 10,
+      `statement-breakpoint가 ${breakpoints.length}개뿐이다`,
+    );
+  });
+
+  it('배치에 단일 from 카테고리 컬럼을 두지 않는다 (거래마다 이전 값이 다르다)', () => {
+    // 대상 거래들의 현재 카테고리가 제각각(일부 NULL)이라 단일 from은 거짓 가정이고,
+    // 그 값으로 되돌리면 원래 없던 분류를 만들어 낸다. 이전 값은 items에 행별로 남는다.
+    for (const forbidden of ['from_category_id', 'fromCategoryId']) {
+      assert.ok(
+        !sqlBody.includes(forbidden),
+        `0055에 단일 from 컬럼이 있다: ${forbidden}`,
+      );
+    }
+    assert.match(
+      sqlText,
+      /CREATE TABLE IF NOT EXISTS "category_recategorize_items"[\s\S]*?"previous_category_id" uuid,/,
+      'items의 previous_category_id가 없거나 NOT NULL이다',
+    );
+  });
+
+  it('previous_category_id는 nullable이다 — 미분류였던 거래로 되돌려야 한다', () => {
+    // "미분류였다"는 정상값이다. NOT NULL이면 되돌리기가 없던 카테고리를 만들어 낸다.
+    assert.ok(
+      !/"previous_category_id" uuid NOT NULL/i.test(sqlText),
+      'previous_category_id가 NOT NULL이다',
+    );
+    assert.ok(
+      schemaText.includes("previousCategoryId: uuid('previous_category_id')"),
+      'schema.ts에 previousCategoryId 선언이 없다',
+    );
+    assert.ok(
+      !/previousCategoryId: uuid\('previous_category_id'\)[\s\S]{0,120}?\.notNull\(\)/.test(
+        schemaText,
+      ),
+      'schema.ts의 previousCategoryId가 notNull이다',
+    );
+  });
+
+  it('되돌리기 3종은 nullable이고 셋이 함께 채워진다 (아직 안 됨 ≠ 0건)', () => {
+    const batchesDdl = ddlOf('category_recategorize_batches');
+    for (const column of ['reverted_at', 'reverted_by', 'reverted_count']) {
+      assert.ok(
+        !new RegExp(`"${column}"[^,\\n]*NOT NULL`, 'i').test(batchesDdl),
+        `${column}이 NOT NULL이다 — "아직 되돌리지 않음"을 표현할 수 없다`,
+      );
+    }
+    // NULL 함정: `>= 0`만 쓰면 건수가 NULL일 때 CHECK가 통과해 반쪽 행이 들어온다.
+    assert.match(
+      sqlText,
+      /"category_recategorize_batches_revert_completeness_check"[\s\S]*?"reverted_count" IS NOT NULL/,
+    );
+    assert.ok(
+      schemaText.includes(
+        "'category_recategorize_batches_revert_completeness_check'",
+      ),
+      'schema.ts에 되돌리기 정합 CHECK가 없다',
+    );
+  });
+
+  it('자유 텍스트 PII 컬럼을 만들지 않는다', () => {
+    // 감사 원장은 사용자 화면까지 간다. 원문·메모 자리를 애초에 두지 않는다.
+    for (const forbidden of ['memo', 'note', 'raw_text', 'reason', 'comment']) {
+      assert.ok(!sqlText.includes(`"${forbidden}"`), `${forbidden} 컬럼이 있다`);
+    }
+  });
+
+  it('한 배치에서 한 거래는 한 번만 기록된다 (복합 PK)', () => {
+    // 중복 행이 생기면 되돌릴 값이 둘이 되어 어느 쪽으로 되돌리는지가 비결정적이 된다.
+    assert.match(
+      sqlText,
+      /"category_recategorize_items_batch_id_transaction_id_pk"[\s\S]*?PRIMARY KEY\("batch_id","transaction_id"\)/,
+    );
+    assert.ok(
+      schemaText.includes(
+        "name: 'category_recategorize_items_batch_id_transaction_id_pk'",
+      ),
+      'schema.ts의 복합 PK 이름이 SQL과 다르다',
+    );
+  });
+
+  it('식별자 이름이 Postgres 한도(63바이트) 안이다', () => {
+    // 넘으면 PG가 **조용히 잘라** 문서상의 이름과 실제 이름이 어긋난다.
+    const names = sqlText.match(/"category_recategorize_[a-z0-9_]+"/g) ?? [];
+    assert.ok(names.length > 0, '이름을 하나도 찾지 못했다');
+    for (const quoted of new Set(names)) {
+      const name = quoted.slice(1, -1);
+      assert.ok(
+        Buffer.byteLength(name, 'utf8') <= 63,
+        `${name}이 63바이트를 넘는다 (${name.length})`,
+      );
+    }
+  });
+
+  it('Drizzle 선언과 마이그레이션의 테이블·인덱스·제약 이름이 같다', () => {
+    for (const name of [
+      'category_recategorize_batches_household_applied_at_idx',
+      'category_recategorize_items_transaction_id_idx',
+      'category_recategorize_batches_applied_count_check',
+      'category_recategorize_batches_revert_completeness_check',
+      'category_recategorize_items_batch_id_transaction_id_pk',
+    ]) {
+      assert.ok(sqlText.includes(`"${name}"`), `0055에 ${name}이 없다`);
+      assert.ok(schemaText.includes(`'${name}'`), `schema.ts에 ${name}이 없다`);
+    }
+    for (const fragment of [
+      "export const categoryRecategorizeBatches = pgTable(\n  'category_recategorize_batches',",
+      "export const categoryRecategorizeItems = pgTable(\n  'category_recategorize_items',",
+    ]) {
+      assert.ok(schemaText.includes(fragment), `schema.ts에 ${fragment}가 없다`);
+    }
+  });
+});

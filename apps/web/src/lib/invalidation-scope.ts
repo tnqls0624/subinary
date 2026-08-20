@@ -27,4 +27,11 @@ export const TRANSACTION_SCOPE_KEYS: ReadonlyArray<ReadonlyArray<string>> = [
   ["merchants"],
   // 카드: 처음 보는 카드번호로 문자가 오면 서버가 카드 행을 만든다.
   ["cards"],
+  // 정기 지출: 새 거래가 판별 근거를 바꾼다(다음 예상일도 함께 흔들린다).
+  ["recurring-series"],
+  // 소급 재분류 이력: 되돌리기 목록이 적용·되돌림 직후 바로 맞아야 한다.
+  ["recategorize-batches"],
+  // 미리보기: 거래가 늘거나 분류가 바뀌면 "몇 건 바뀝니다"의 답이 달라진다.
+  // 이 값이 낡으면 사용자가 동의한 숫자와 서버가 세는 숫자가 갈려 409가 난다.
+  ["recategorize-preview"],
 ];

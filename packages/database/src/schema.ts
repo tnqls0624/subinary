@@ -23,6 +23,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -1133,6 +1134,120 @@ export const merchantAliases = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* categoryRecategorizeBatches · categoryRecategorizeItems                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 카테고리 **소급 재분류**의 되돌리기 원장 — "사용자가 재분류를 한 번 눌렀다"는 사건.
+ *
+ * `merchantCategoryRules`는 앞으로의 분류만 학습하고 과거 거래를 소급하지 않는다.
+ * 반면 소급 재분류는 클릭 한 번으로 과거 수백 건의 `cardTransactions.categoryId`를
+ * 덮어쓰는데, 덮어쓰기 전 값은 UPDATE와 함께 사라져 **잘못 눌러도 되돌릴 수 없다.**
+ * 이 표는 그 옛 값을 붙잡아 두기 위해 존재한다.
+ *
+ * ⚠️ **from(이전 카테고리)을 여기에 단일 컬럼으로 두지 않는다.** 한 배치의 대상 거래들이
+ * 같은 카테고리라는 보장이 없다 — 일부는 식비, 일부는 장보기, 일부는 미분류(NULL)가
+ * 섞여 있고, 애초에 그 뒤죽박죽이 사용자가 일괄 재분류를 누르는 이유다. 단일 from을
+ * 적으면 되돌릴 때 전부 그 값으로 되돌아가 **원래 없던 분류를 만들어 낸다.** 이전 값은
+ * {@link categoryRecategorizeItems}에 거래별로 남기고, 여기에는 대상 전체가 실제로
+ * 공유하는 사실인 `toCategoryId`만 둔다.
+ *
+ * `revertedAt`/`revertedBy`/`revertedCount`는 셋이 함께 채워진다(DB CHECK). NULL은
+ * "아직 되돌리지 않음"이고, `revertedCount = 0`("되돌렸으나 실제로 바뀐 건 0건")과는
+ * 다른 사실이다.
+ */
+export const categoryRecategorizeBatches = pgTable(
+  'category_recategorize_batches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /** 적용 시점의 canonical 가맹점명. 표시·감사용이며 **신원이 아니다.** */
+    merchantCanonical: text('merchant_canonical').notNull(),
+    toCategoryId: uuid('to_category_id')
+      .notNull()
+      .references(() => expenseCategories.id),
+    /**
+     * 적용 시점에 실제로 바뀐 거래 수. items 행 수로 대체하지 않는 이유: items는 거래가
+     * 삭제되면 함께 사라지므로(cascade) "그때 몇 건을 바꿨나"라는 **과거의 사실**까지
+     * 조용히 줄어든다. 감사 기록이 현재 상태를 따라다니면 안 된다.
+     */
+    appliedCount: integer('applied_count').notNull(),
+    appliedBy: uuid('applied_by')
+      .notNull()
+      .references(() => users.id),
+    appliedAt: timestamp('applied_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revertedAt: timestamp('reverted_at', { withTimezone: true }),
+    revertedBy: uuid('reverted_by').references(() => users.id),
+    /** 되돌리기로 실제 되돌린 건수. NULL = 아직 되돌리지 않음(≠ 0건). */
+    revertedCount: integer('reverted_count'),
+  },
+  (table) => [
+    // 화면이 묻는 것은 "이 가족이 최근에 무엇을 일괄 재분류했나"다(되돌리기 목록).
+    index('category_recategorize_batches_household_applied_at_idx').on(
+      table.householdId,
+      table.appliedAt.desc(),
+    ),
+    check(
+      'category_recategorize_batches_applied_count_check',
+      sql`${table.appliedCount} >= 0`,
+    ),
+    // 반쯤 채워진 행(시각은 있는데 건수가 NULL)은 "되돌렸는가?"에 답할 수 없다.
+    // `is not null`을 일일이 적는 이유: CHECK는 NULL을 통과시킨다. `>= 0`만 쓰면
+    // 건수가 NULL일 때 그 가지가 FALSE가 아니라 NULL이 되어 반쪽 행이 그대로 들어온다.
+    check(
+      'category_recategorize_batches_revert_completeness_check',
+      sql`(${table.revertedAt} is null and ${table.revertedBy} is null and ${table.revertedCount} is null) or (${table.revertedAt} is not null and ${table.revertedBy} is not null and ${table.revertedCount} is not null and ${table.revertedCount} >= 0)`,
+    ),
+  ],
+);
+
+/**
+ * 배치가 바꾼 거래와 그 거래의 **이전 카테고리**. 되돌리기의 실제 재료다.
+ *
+ * PK가 `(batchId, transactionId)` 복합키인 이유: 한 배치에서 한 거래는 한 번만 기록돼야
+ * 한다. 중복 행이 생기면 되돌릴 값이 둘이 되어 어느 쪽으로 되돌리는지가 비결정적이 된다.
+ * 재시도·중복 요청도 이 PK가 그대로 막고, 선두 컬럼 덕에 "이 배치의 항목 전부" 조회가
+ * 공짜로 따라온다.
+ *
+ * 거래·배치가 지워지면 항목도 함께 사라진다(cascade). no action으로 두면 이 원장이
+ * 거래 삭제를 영구히 막아 사용자에게는 "왜 삭제가 안 되지"로 보인다.
+ */
+export const categoryRecategorizeItems = pgTable(
+  'category_recategorize_items',
+  {
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => categoryRecategorizeBatches.id, {
+        onDelete: 'cascade',
+      }),
+    transactionId: uuid('transaction_id')
+      .notNull()
+      .references(() => cardTransactions.id, { onDelete: 'cascade' }),
+    /**
+     * 덮어쓰기 **직전** 값. NULL이 정상값이다 — 미분류 거래를 분류하는 것이 일괄
+     * 재분류의 가장 흔한 경우고, 되돌리면 다시 미분류(NULL)로 돌아가야 한다.
+     */
+    previousCategoryId: uuid('previous_category_id').references(
+      () => expenseCategories.id,
+    ),
+  },
+  (table) => [
+    primaryKey({
+      name: 'category_recategorize_items_batch_id_transaction_id_pk',
+      columns: [table.batchId, table.transactionId],
+    }),
+    // 역방향 조회: "이 거래는 어느 배치가 건드렸나"(거래 상세의 출처 설명, 배치 간 덮어쓰기 판별).
+    index('category_recategorize_items_transaction_id_idx').on(
+      table.transactionId,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* cardSmsDeclineDismissals                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -1553,6 +1668,15 @@ export type TransactionMoneyRepairLogEntry =
   typeof transactionMoneyRepairLog.$inferSelect;
 export type NewTransactionMoneyRepairLogEntry =
   typeof transactionMoneyRepairLog.$inferInsert;
+
+export type CategoryRecategorizeBatch =
+  typeof categoryRecategorizeBatches.$inferSelect;
+export type NewCategoryRecategorizeBatch =
+  typeof categoryRecategorizeBatches.$inferInsert;
+export type CategoryRecategorizeItem =
+  typeof categoryRecategorizeItems.$inferSelect;
+export type NewCategoryRecategorizeItem =
+  typeof categoryRecategorizeItems.$inferInsert;
 
 /* ========================================================================== */
 /* Phase 5 — 예산 (Phase 5 Build Spec §2)                                      */

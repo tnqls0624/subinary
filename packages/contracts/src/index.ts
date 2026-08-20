@@ -561,3 +561,26 @@ export type {
   RecurringRecomputeRequest,
   RecurringRecomputeResponse,
 } from './recurring.js';
+
+export {
+  recategorizeMonthSchema,
+  recategorizePreviewSchema,
+  recategorizeRequestSchema,
+  recategorizeResponseSchema,
+  recategorizeBatchSchema,
+  recategorizeBatchListSchema,
+  recategorizeRevertResponseSchema,
+  categoryRuleSchema,
+  categoryRuleListSchema,
+} from './recategorize.js';
+export type {
+  RecategorizeMonth,
+  RecategorizePreview,
+  RecategorizeRequest,
+  RecategorizeResponse,
+  RecategorizeBatch,
+  RecategorizeBatchList,
+  RecategorizeRevertResponse,
+  CategoryRule,
+  CategoryRuleList,
+} from './recategorize.js';
