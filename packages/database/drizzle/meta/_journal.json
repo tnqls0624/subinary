@@ -400,6 +400,13 @@
       "when": 1786108450626,
       "tag": "0056_shared_card",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788447600000,
+      "tag": "0057_validate_money_contract_v2",
+      "breakpoints": true
     }
   ]
 }
