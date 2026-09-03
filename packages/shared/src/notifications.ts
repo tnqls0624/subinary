@@ -15,6 +15,20 @@ export const NOTIFICATION_CHANNELS = {
   summary: 'summary',
   /** 결제가 반복 거절됨 — 사용자가 결제수단/한도를 손대야 하는 사건. */
   decline: 'decline',
+  /**
+   * 확정된 정기 결제가 곧 나간다 — 예고(금액 레이어 S3).
+   *
+   * `reminder`와 나눈 이유: 저기는 "이미 일어난 일 중 확인이 필요한 것"이고 여기는
+   * "아직 일어나지 않은 일"이다. 성격이 달라 따로 끌 수 있어야 한다
+   * (`docs/concept-upcoming-spend-2026-08.md` §5 "알림 피로").
+   *
+   * ⚠️ **끌 수 있는 범위는 Android뿐이다.** 채널 생성은 `native.ts`의
+   * `platform === 'android'` 분기 안에 있고, 앱 내 알림 선호는 kind별이 아니다
+   * (`pushEnabled`·`minAmount`·무음시간만). iOS에서는 앱 전체를 끄는 것뿐이므로,
+   * 이 분리의 실효는 Android 시스템 설정과 **알림함에서의 구분**이다. kind별 선호를
+   * 만들 때 이 kind가 그 기반이 된다.
+   */
+  upcoming: 'upcoming',
 } as const;
 
 export type NotificationKind = keyof typeof NOTIFICATION_CHANNELS;
@@ -36,6 +50,11 @@ export const NOTIFICATION_CHANNEL_META: readonly NotificationChannelMeta[] = [
     id: NOTIFICATION_CHANNELS.decline,
     name: '결제 실패',
     description: '반복 거절된 결제 알림',
+  },
+  {
+    id: NOTIFICATION_CHANNELS.upcoming,
+    name: '정기 결제 예고',
+    description: '내일 나갈 정기 결제 안내',
   },
 ];
 
@@ -105,6 +124,26 @@ export type NotificationDispatchJob =
        */
       month?: string;
       sentTokenIds?: string[];
+    }
+  | {
+      /**
+       * 내일 나갈 정기 결제 예고. **하루 전 1회, 묶어서** 보낸다(기획 D5) —
+       * 구독 8개면 개별 알림은 폭탄이다.
+       */
+      kind: 'upcoming';
+      householdId: string;
+      userId: string;
+      /** 내일 예정된 확정 series 건수. */
+      count: number;
+      /**
+       * 금액을 예고할 수 있는 것들의 합(KRW minor units). **`null`이면 금액을 말하지
+       * 않는다** — 근거에 v1이 섞였거나 전부 외화인 경우다(기획 D2). 0과 구분해야
+       * 한다: 0원은 "0원 나간다"는 뜻이고 null은 "얼마인지 모른다"는 뜻이다.
+       */
+      totalAmount: number | null;
+      /** 금액을 세지 못해 합계에서 빠진 건수. 0이 아니면 문구가 그 사실을 말한다. */
+      excludedCount: number;
+      sentTokenIds?: string[];
     };
 
 /** kind → 알림 탭 시 이동할 앱 내 딥링크 경로. */
@@ -122,5 +161,10 @@ export function notificationDeepLink(job: NotificationDispatchJob): string {
       return job.month
         ? `/dashboard?month=${encodeURIComponent(job.month)}`
         : '/dashboard';
+    case 'upcoming':
+      // 목록으로 보낸다 — 예고를 받은 사람이 다음에 하는 일은 "무엇이 나가는지 확인"이다.
+      // 필터를 붙이지 않는다: P1-20("리마인더 딥링크가 이번 달 필터에 걸려 대상이 안
+      // 보인다")이 그렇게 생겼다.
+      return '/more/recurring';
   }
 }

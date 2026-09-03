@@ -77,11 +77,27 @@
 > 합계를 그 예산과 비교하면 된다. 카테고리 예산을 쓰는 가구에서 아무 말도 못 하는
 > 반쪽 기능이 되므로, 카테고리 부착을 함께 결정할 때 하는 편이 낫다고 판단해 남겼다.
 
-### S3. 예정 알림 (S)
+### S3. 예정 알림 (S) — ✅ 2026-09-03
 
-- 스케줄러에 하루 1회 tick 추가(`notification-scheduler.service.ts` 패턴), `kind: 'reminder'` 재사용
-- dedupeKey = `upcoming:{userId}:{date}`
-- **DoD**: 같은 날 재실행해도 1건, 딥링크가 `/more/recurring`로 정확히 감
+- ✅ 스케줄러 tick 추가(`runUpcomingRecurring`, KST 20시 이후 그날 첫 tick)
+- ✅ dedupeKey = `upcoming:{userId}:{date}` — **발송일**(오늘) 기준
+- ✅ **DoD**: 같은 날 재실행해도 1건(`claimDedupe`), 딥링크 `/more/recurring`
+
+> **기획과 다르게 간 것 — `kind: 'reminder'` 재사용이 아니라 새 kind `upcoming`.**
+>
+> `reminder` 채널은 "확인 리마인더 · 확인이 필요한 거래 알림"이다. 예고를 거기 묶으면
+> 사용자가 그 채널을 끌 때 **성격이 다른 두 알림이 함께 꺼진다** — §5가 대응책으로 적은
+> "사용자가 끌 수 있게"와 어긋난다. 알림함에서도 구분되지 않는다.
+>
+> 대가는 계약 변경(kind 5종 → 6종)이다. P0-1(발송 kind가 계약보다 앞서 알림함이 크래시)의
+> 재발 위험이 있지만, 그때 넣은 `kindMeta()` 폴백이 이미 웹에 있어 계약이 앞서 나가도
+> 화면이 죽지 않는다. dispatch에는 `never` 할당으로 exhaustive check를 넣어 **다음 kind가
+> 추가될 때 컴파일에서 막히게** 했다 — 예전에는 마지막 `return`이 암묵적으로 summary를
+> 가정해서, 새 kind가 조용히 잘못된 문구로 발송될 구조였다.
+>
+> ⚠️ **끌 수 있는 범위는 Android뿐이다.** 채널 생성은 `native.ts`의 android 분기에 있고
+> 앱 내 알림 선호는 kind별이 아니다(`pushEnabled`·`minAmount`·무음시간만). iOS에서는 앱
+> 전체를 끄는 것뿐이므로, 이 분리의 실효는 Android 시스템 설정과 알림함 구분이다.
 
 ### S4. 해지 감지 (M)
 

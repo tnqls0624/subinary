@@ -74,6 +74,9 @@ export const notificationKindSchema = z.enum([
   'reminder',
   'summary',
   'decline',
+  // 정기 결제 예고(금액 레이어 S3). `reminder`와 나눈 이유는 @family/shared의
+  // NOTIFICATION_CHANNELS 주석 참조 — 사용자가 따로 끌 수 있어야 한다.
+  'upcoming',
 ]);
 export type NotificationKind = z.infer<typeof notificationKindSchema>;
 

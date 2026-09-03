@@ -9,11 +9,12 @@
 import {
   AlertTriangle,
   Bell,
+  CalendarClock,
   ChartColumn,
   CircleAlert,
   CircleCheck,
   CreditCard,
-  type LucideIcon,
+type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -40,6 +41,8 @@ const KIND_META: Record<NotificationKind, KindMeta> = {
   reminder: { icon: CircleCheck, className: "bg-accent text-accent-foreground" },
   summary: { icon: ChartColumn, className: "bg-primary/15 text-primary" },
   decline: { icon: AlertTriangle, className: "bg-destructive/10 text-destructive" },
+  // 예고는 경고가 아니다 — 아직 아무 일도 일어나지 않았으므로 중립 톤을 쓴다.
+  upcoming: { icon: CalendarClock, className: "bg-accent text-accent-foreground" },
 };
 
 /** 계약에 없는 kind용 중립 메타. */

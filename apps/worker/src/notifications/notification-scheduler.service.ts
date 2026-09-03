@@ -28,11 +28,12 @@ import {
   type NotificationDispatchJob,
 } from '@family/shared';
 import type { Queue } from 'bullmq';
-import { and, eq, gte, inArray, isNotNull, isNull, lt, notExists, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, notExists, or, sql, type SQL } from 'drizzle-orm';
 
 import { DB } from '../database/database.module';
 import { MoneyRuntimeService } from '../promotion/money-runtime.service';
 import { TransactionPromotionService } from '../promotion/transaction-promotion.service';
+import { groupUpcomingByUser, tomorrowKstWindow } from './upcoming-window';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const TICK_MS = 60_000;
@@ -41,6 +42,14 @@ const REMINDER_HOUR = 20;
 /** 주간 요약: 일요일(0) 이 시각(KST) 이후 1회. */
 const SUMMARY_HOUR = 20;
 const SUMMARY_DOW = 0;
+/**
+ * 정기 결제 예고 발송 하한 시각(KST). 리마인더와 같은 20시.
+ *
+ * 저녁에 보내는 이유: "내일 나간다"는 정보로 오늘 밤에 할 수 있는 일이 있다(카드 잔액
+ * 확인, 해지). 아침에 보내면 이미 결제가 끝난 뒤일 수 있다 — 카드 정기결제는 새벽에
+ * 도는 경우가 많다.
+ */
+const UPCOMING_HOUR = 20;
 
 /**
  * 수집 공백 경보 임계(시간). 카드 문자는 **재전송이 없다** — 자동화(MacroDroid/단축어)가
@@ -135,6 +144,9 @@ export class NotificationSchedulerService
       if (hour >= REMINDER_HOUR) {
         await this.runReminders(seoulDateStr(seoul));
       }
+      if (hour >= UPCOMING_HOUR) {
+        await this.runUpcomingRecurring(seoul);
+      }
       if (dow === SUMMARY_DOW && hour >= SUMMARY_HOUR) {
         await this.runWeeklySummary(seoul);
       }
@@ -195,6 +207,85 @@ export class NotificationSchedulerService
           householdId: row.householdId,
           userId: row.userId,
           count,
+        },
+        key,
+      );
+      enqueued += 1;
+    }
+    return enqueued;
+  }
+
+  /**
+   * **내일** 예정된 확정 정기 결제를 소유자별로 묶어 1회 예고한다 (금액 레이어 S3).
+   *
+   * ## 왜 묶는가 (기획 D5)
+   *
+   * 구독 8개면 개별 알림은 폭탄이다. 하루 전 1회, 한 건으로 보낸다 —
+   * "내일 3건 34,200원 빠져요".
+   *
+   * ## 창을 KST 날짜로 자르는 이유
+   *
+   * "내일"은 사용자의 달력 날짜다. UTC로 자르면 KST 09시 이전 결제가 전날로 밀려
+   * 예고가 하루 어긋난다. 실제로 매일 9시 반복 알림 루프가 그 경계에서 생겼다
+   * (`family-memory-ai-stall-alert-loop`). 그래서 KST 00:00~23:59:59.999를
+   * UTC instant로 환산해 비교한다.
+   *
+   * ## 무엇을 말하지 않는가
+   *
+   * `confirmed`가 아닌 series는 대상이 아니다 — 미확정 후보의 오탐을 예고하면 그 자체가
+   * 확정 사실처럼 전달된다. 금액은 예고 가능한 것만 합산하고(기획 D2), 빠진 건수를
+   * payload에 실어 문구가 그 사실을 말하게 한다.
+   *
+   * 수신자는 **series 소유자 1인**이다. 거절 알림처럼 전원에게 보내지 않는다 —
+   * 예고는 조치를 요구하지 않는 정보이고, 남의 구독 예고가 매일 오면 그건 소음이다.
+   */
+  async runUpcomingRecurring(seoul: Date): Promise<number> {
+    // 창 계산은 순수 함수가 소유한다 — 하루 어긋나면 "내일 나가요"가 거짓이 되는
+    // 계산이라 DB 없이 검증돼야 한다(`upcoming-window.ts`).
+    const window = tomorrowKstWindow(seoul);
+    // dedupe는 **발송일**(오늘) 기준이다. 대상일(내일)로 잡으면 자정을 넘긴 뒤 같은
+    // 대상일에 대해 두 번째 발송이 열린다.
+    const dateStr = seoulDateStr(seoul);
+
+    const rows = await this.db
+      .select({
+        userId: schema.householdMembers.userId,
+        householdId: schema.recurringSeries.householdId,
+        amountMedian: schema.recurringSeries.amountMedian,
+        currency: schema.recurringSeries.currency,
+        moneyContractVersion: schema.recurringSeries.moneyContractVersion,
+      })
+      .from(schema.recurringSeries)
+      .innerJoin(
+        schema.householdMembers,
+        eq(schema.householdMembers.id, schema.recurringSeries.memberId),
+      )
+      .where(
+        and(
+          eq(schema.recurringSeries.status, 'confirmed'),
+          isNotNull(schema.recurringSeries.nextExpectedAt),
+          gte(schema.recurringSeries.nextExpectedAt, window.start),
+          lte(schema.recurringSeries.nextExpectedAt, window.end),
+          eq(schema.householdMembers.status, 'active'),
+        ),
+      );
+
+    // 묶기와 금액 판정도 같은 순수 모듈이 소유한다 — 여기서 다시 세면 "0원"과
+    // "모른다"의 구분이 두 곳으로 갈라진다.
+    const byUser = groupUpcomingByUser(rows);
+
+    let enqueued = 0;
+    for (const [userId, bucket] of byUser) {
+      const key = `upcoming:${userId}:${dateStr}`;
+      if (!(await this.claimDedupe(key))) continue;
+      await this.enqueue(
+        {
+          kind: 'upcoming',
+          householdId: bucket.householdId,
+          userId,
+          count: bucket.count,
+          totalAmount: bucket.totalAmount,
+          excludedCount: bucket.excludedCount,
         },
         key,
       );

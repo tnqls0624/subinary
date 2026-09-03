@@ -275,7 +275,7 @@ export class NotificationDispatchProcessor extends WorkerHost {
       };
     }
 
-    // reminder / summary — 지정 사용자 1인 대상.
+    // reminder / upcoming / summary — 지정 사용자 1인 대상.
     if (data.kind === 'reminder') {
       return {
         candidateUserIds: [data.userId],
@@ -284,12 +284,33 @@ export class NotificationDispatchProcessor extends WorkerHost {
         composeFor: () => composeReminder(data.count),
       };
     }
-    return {
-      candidateUserIds: [data.userId],
-      channelId: NOTIFICATION_CHANNELS.summary,
-      deepLink,
-      composeFor: () => composeSummary(data.totalNet, data.txnCount, data.periodLabel),
-    };
+    if (data.kind === 'upcoming') {
+      return {
+        candidateUserIds: [data.userId],
+        channelId: NOTIFICATION_CHANNELS.upcoming,
+        deepLink,
+        composeFor: () =>
+          composeUpcoming(data.count, data.totalAmount, data.excludedCount),
+      };
+    }
+    if (data.kind === 'summary') {
+      return {
+        candidateUserIds: [data.userId],
+        channelId: NOTIFICATION_CHANNELS.summary,
+        deepLink,
+        composeFor: () =>
+          composeSummary(data.totalNet, data.txnCount, data.periodLabel),
+      };
+    }
+
+    // 여기까지 오면 kind가 새로 생겼는데 분기를 안 넣은 것이다. 예전에는 마지막
+    // `return`이 암묵적으로 summary를 가정했고, 그러면 새 kind가 **조용히 잘못된
+    // 문구로 발송된다** — P0-1(계약 5종 vs 발송 4종)이 그런 모양이었다. never 할당이
+    // 컴파일에서 막는다.
+    const exhaustive: never = data;
+    throw new Error(
+      `unhandled notification kind: ${(exhaustive as { kind?: string }).kind ?? 'unknown'}`,
+    );
   }
 
   /** household 활성 구성원의 고유 userId 목록. */
@@ -537,6 +558,34 @@ function composeReminder(count: number): { title: string; body: string } {
     title: '확인이 필요한 거래',
     body: `확인이 필요한 거래가 ${count}건 있어요`,
   };
+}
+
+/**
+ * 정기 결제 예고 문구 (기획 D5 — 하루 전 1회, 묶어서).
+ *
+ * 금액을 **모를 때와 0원일 때를 구분한다.** `totalAmount === null`이면 근거에 v1이
+ * 섞였거나 전부 외화라 금액을 말할 수 없는 것이고, 그때 "0원 나가요"라고 하면 거짓이다.
+ * 건수만 말한다.
+ *
+ * 빠진 건수도 숨기지 않는다 — 3건 중 1건만 금액을 아는데 "34,200원 빠져요"라고 하면
+ * 사용자는 그게 전부라고 읽는다.
+ */
+function composeUpcoming(
+  count: number,
+  totalAmount: number | null,
+  excludedCount: number,
+): { title: string; body: string } {
+  const title = '내일 나갈 정기 결제';
+  if (totalAmount === null) {
+    return { title, body: `내일 정기 결제 ${count}건이 예정돼 있어요` };
+  }
+  const counted = count - excludedCount;
+  const body =
+    excludedCount > 0
+      ? `내일 ${count}건 예정 · ${counted}건 ${formatMoney(totalAmount, 'KRW')}` +
+        ` (${excludedCount}건은 금액 미확인)`
+      : `내일 ${count}건 ${formatMoney(totalAmount, 'KRW')} 빠져요`;
+  return { title, body };
 }
 
 /** 주간 소비 요약 문구. totalNet은 KRW 전용 집계(scheduler에서 통화 필터). */

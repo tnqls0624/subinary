@@ -111,10 +111,12 @@ export function isRecurringRadarEnabled(
  *   VALIDATE) `net_amount`가 확정됐다. `GET /v1/recurring/upcoming`이 담당하고,
  *   근거에 v1이 섞인 series는 항목마다 `amountForecastable: false`로 합계에서 빠진다.
  *
+ * - ~~알림 발송~~ — 2026-09-03(S3). **확정 series만** 대상이라 미확정 후보의 오탐이
+ *   전달되지 않는다. 하루 전 1회, 사용자별로 묶어 보낸다(기획 D5). 새 kind
+ *   `upcoming`을 쓴다 — `reminder`에 묶으면 확인 리마인더를 끌 때 예고도 꺼진다.
+ *
  * ## 남은 것과 이유
  *
- * - **알림 발송** — 미확정 후보의 오탐이 사용자에게 확정 사실처럼 전달된다. 기획 D5가
- *   "하루 전 1회, 묶어서"를 요구하므로 스케줄러 tick과 dedupe가 함께 필요하다(S3).
  * - **해지 종료 처리** — 기획 D4: "묻는다, 끄지 않는다." 자동으로 `status`를 바꾸면
  *   사용자 모르게 이번 달 예상 총액이 줄어든다(S4).
  * - **카드 교체 CTA** — 기획 §6이 폐기했다. 앱 밖 행동이고 링크조차 카드사별로 달라
@@ -123,7 +125,4 @@ export function isRecurringRadarEnabled(
  * 여기에 기능을 추가하려면 해당 슬라이스의 DoD를 먼저 통과시켜라
  * (`docs/concept-upcoming-spend-2026-08.md` §4).
  */
-export const RECURRING_DEFERRED_SURFACES = [
-  'notifications',
-  'cancellation_cta',
-] as const;
+export const RECURRING_DEFERRED_SURFACES = ['cancellation_cta'] as const;
