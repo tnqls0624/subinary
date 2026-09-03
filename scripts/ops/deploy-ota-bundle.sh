@@ -80,9 +80,20 @@ echo "[ota] sha256: $checksum"
 # --- 3. 운영 볼륨에 배치 -------------------------------------------------------
 # api 컨테이너는 볼륨을 **읽기 전용**으로 잡는다. 그래서 쓰기는 같은 볼륨을 rw로 붙인
 # 일회성 컨테이너로 한다 — 앱 프로세스가 번들을 갈아끼울 수 없게 유지하는 것이 요점이다.
-echo "[ota] 운영 볼륨에 배치"
+#
+# 볼륨 이름을 하드코딩하지 않고 **api가 실제로 마운트한 것**을 읽는다. compose는
+# 프로젝트명을 접두하므로(`family-memory-ai_ota-bundles`) 이름을 적어 두면 빈 볼륨을
+# 새로 만들어 거기 넣고, api는 다른 볼륨을 읽어 "없음"을 답한다 — 원인을 알기 어려운
+# 실패다. 프로젝트명이 바뀌어도 이 방식은 따라간다.
+volume_name="$(docker inspect "$api_container" \
+  --format '{{range .Mounts}}{{if eq .Destination "/srv/ota"}}{{.Name}}{{end}}{{end}}' 2>/dev/null || true)"
+if [ -z "$volume_name" ]; then
+  echo "[ota] ✗ api 컨테이너에 /srv/ota 마운트가 없습니다 — compose 배포가 먼저입니다." >&2
+  exit 1
+fi
+echo "[ota] 운영 볼륨에 배치: $volume_name"
 docker run --rm \
-  -v ota-bundles:/srv/ota \
+  -v "$volume_name":/srv/ota \
   -v "$work_dir":/staging:ro \
   --entrypoint sh \
   alpine:3 -c "
