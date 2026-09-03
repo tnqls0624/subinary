@@ -131,8 +131,8 @@
 | P1-3 | 부트스트랩 중 네트워크 오류를 "미인증"으로 처리해 조용히 강제 로그아웃된다 | 프론트 | `apps/web/src/lib/auth-context.tsx:288-291` · `apps/web/src/app/(app)/layout.tsx:222` | M | 🔧 진행 중 |
 | P1-4 | 서버 영문 에러가 그대로 노출된다 (`invalid credentials` 등) | 디자인 | `apps/api/src/auth/auth.service.ts:178` → `apps/web/src/lib/api-client.ts:117-128` → `apps/web/src/app/(auth)/login/page.tsx:103` | S | 🔧 진행 중 (에러 한국어화) |
 | P1-5 | `/categories` 조회 실패 시 "카테고리 없음"이라는 거짓 정보를 보여준다 | 프론트 | `apps/web/src/app/(app)/categories/page.tsx:409-417` (`isError` 분기 없음) | S | 🔧 진행 중 |
-| P1-6 | 파싱 실패 문자가 3일 뒤 앱에서 영영 사라진다 | 디자인 | `apps/web/src/app/(app)/dashboard/page.tsx:107`,`:328-343` (다른 진입점 0개) | S | ⬜ |
-| P1-7 | 현재월 예산 수정이 과거월 계획을 소급 변경한다 (D-3) | PO | `apps/api/src/budgets/budget.service.ts:106`,`:190` · `packages/database/src/schema.ts:1146` | M | ⬜ |
+| P1-6 | 파싱 실패 문자가 3일 뒤 앱에서 영영 사라진다 | 디자인 | `apps/web/src/app/(app)/dashboard/page.tsx:107`,`:328-343` (다른 진입점 0개) | S | ✅ `/todo`가 **기간 제한 없이** 전 기간 백로그를 보여준다(`(app)/todo/page.tsx:9-13`). 홈의 3일 창은 그대로 두고 진입점을 하나 더 만들어 해소 |
+| P1-7 | 현재월 예산 수정이 과거월 계획을 소급 변경한다 (D-3) | PO | `apps/api/src/budgets/budget.service.ts:106`,`:190` · `packages/database/src/schema.ts:1146` | M | ✅ ADR-0030 월 원장 — `effective_month`로 달마다 계획을 분리(`0052_budget_month_ledger.sql`) |
 | P1-8 | 문자 원문 보존·삭제 정책을 사용자가 선택하거나 철회할 수 없다 | PO | `PRD.md:788`,`:1755` · `docs/phase3-build-spec.md:21` · `apps/web/src/app/join/page.tsx:145` | L | ⬜ |
 | P1-9 | 장치 등록이 자동수집 활성화로 이어지지 않고 토큰 발급 화면에서 끝난다 | PO+디자인 | `apps/web/src/app/(app)/devices/page.tsx:481` · `apps/web/src` 내 `MacroDroid` 언급 3곳 전부 라벨 | M~L | ⬜ |
 | P1-10 | 장치의 "마지막 수신"이 실제 수신이 아닌 인증 성공 시각이다 (D-2) | PO | `packages/contracts/src/device.ts:22` · `apps/api/src/devices/device.service.ts:61` | S | ⬜ |
@@ -140,11 +140,11 @@
 | P1-12 | Slack·RAG·장기 기억·그래프 자산이 사용자 동선에 연결되지 않았다 | PO | `apps/api/src/slack/slack.controller.ts:69` · `apps/api/src/memory/memory.controller.ts:99` · `apps/web/src/app/(app)/more/page.tsx:47` | L | ⬜ |
 | P1-13 | 거래·예산 알림이 큐 투입 실패/워커 크래시 때 영구 유실된다 | 백엔드+데이터 | `apps/worker/src/promotion/transaction-promotion.service.ts:237-263`,`:817-836`,`:895-912` · `apps/worker/src/processors/notification-dispatch.processor.ts:100-109` | L | ⬜ |
 | P1-14 | 가구 전체 예산이 동시 생성 시 중복될 수 있다 | 백엔드 | `apps/api/src/budgets/budget.service.ts:133-160`,`:477-503` · `packages/database/src/schema.ts:1146-1175` | M | ⬜ |
-| P1-15 | 장치 secret 동시 회전이 active credential을 둘로 만든다 | 백엔드 | `apps/api/src/devices/device.service.ts:218-255`,`:295-313` · `packages/database/src/schema.ts:436-459` | M | ⬜ |
+| P1-15 | 장치 secret 동시 회전이 active credential을 둘로 만든다 | 백엔드 | `apps/api/src/devices/device.service.ts:241-305` · `0047_device_eligibility_and_credential_unique.sql` | M | ✅ 장치 행 `FOR UPDATE` 직렬화 + 부분 유니크 인덱스 2겹. 앱 밖 원인의 위반만 409로 올려 운영자가 정리한다 |
 | P1-16 | 반복 거절 알림이 별칭 적용 전 raw 가맹점으로 그룹화되어 2회 임계를 놓친다 | 데이터 | `apps/worker/src/notifications/notification-scheduler.service.ts:489`,`:513`,`:559` · `apps/api/src/card-sms/card-sms-query.service.ts:196` | M | ⬜ |
 | P1-17 | 가맹점 별칭 병합이 `model_prediction`을 남기고 `human_confirmed` 규칙을 삭제한다 | 데이터 | `apps/api/src/merchants/merchant.service.ts:228`,`:249`,`:261` · `docs/adr/0019-merchant-label-review-boundary.md:42` | M | ⬜ |
 | P1-18 | 토스뱅크 거절 문자의 가맹점이 거절 사유 문장으로 저장된다 | 데이터 | `packages/card-parsers/src/parsers/toss.parser.ts:70`,`:141` · `packages/card-parsers/src/parsers/base.parser.ts:267` | S | ⬜ |
-| P1-19 | 파서 안전정수 허용범위와 PostgreSQL `integer` 범위가 달라 잡이 반복 실패한다 | 데이터 | `packages/card-parsers/src/currency.ts:56` · `packages/database/src/schema.ts:648`,`:1044` | L | ⬜ |
+| P1-19 | 파서 안전정수 허용범위와 PostgreSQL `integer` 범위가 달라 잡이 반복 실패한다 | 데이터 | `packages/card-parsers/src/currency.ts:74` | L | ✅ `toMinorUnits`가 `Number.isSafeInteger` 밖·음수를 값 없이 warning으로 돌려보낸다 — 잡을 실패시키지 않고 사람 검토로 보낸다 |
 | P1-20 | 리마인더 딥링크가 "이번 달" 필터에 걸려 알림 대상 거래가 안 보인다 | 프론트 | `packages/shared/src/notifications.ts:113` · `apps/web/src/app/(app)/transactions/page.tsx:249-252` | S | ⬜ |
 | P1-21 | 대시보드 "확인이 필요한 거래 N건"의 N과 도착 화면 목록이 일치하지 않는다 | 프론트 | `apps/web/src/app/(app)/dashboard/page.tsx:206-213`,`:447` | S | ⬜ |
 | P1-22 | 예산 초과를 알린 뒤 할 수 있는 게 "예산 수정"과 "삭제"뿐이다 | 디자인 | `apps/web/src/app/(app)/budgets/page.tsx:401-422` · `apps/web/src/components/widgets/usage-bar.tsx:44-50` | S | ⬜ |
@@ -574,8 +574,18 @@ PO 원 점수의 Effort는 M이 2와 3에 걸쳐 있다 — 원문 값을 그대
 | owner 데이터 내보내기 · 가족 그룹 삭제 (PO B9) | L | 비동기 export·만료 링크·재인증·유예 기간·감사 이벤트가 한 묶음이다. 위 항목과 같은 데이터 모델을 쓰므로 따로 만들면 두 번 만든다 | **하지 않기로 함 (2026-08-18 사용자 결정)** — 단일 가족 운영에서 이탈·종료 시나리오가 없다. 외부 사용자에게 열 때 다시 본다 |
 | C-6 Dual-mode AI 허브 (Slack 업로드 · 업무 질의 · 기억 후보 승인 · 타임라인) | L | RICE 15.0으로 최하위이고 owner 전용이라 Reach가 가장 작다. **Memory·Graph 목록 API에 페이지 상한이 없어**(`apps/api/src/memory/memory.controller.ts:59-77`) 표면을 열면 그대로 성능 사고가 된다. 구현 비용은 이미 지불됐으므로 자산이 사라지지는 않는다 | 페이지네이션(아래) 완료 후. 그 전에 S4에서 카피·거부만 정직하게 만든다 |
 | ~~C-8 할 일 탭 신설 + `/more` 3그룹 재편 + 아바타 메뉴 확장~~ **(2026-08-10 처리됨)** | M + S | 보류 조건이던 "표면 확정"이 `0f56d77`로 충족돼 **한 덩어리로** 옮겼다(ADR-0031). '더보기' 탭이 헤더 아바타로 올라가고 그 슬롯을 '할 일'이 받았다. 재학습은 한 번으로 끝났고, IA에 묶여 있던 P2·P3도 같이 정리했다(아래 표 참조) | — |
-| 비밀번호 찾기 | M | 저장소 전체에 `password-reset`/`forgot` 구현이 0건이고, 메일 발송 인프라부터 필요하다 | 인증 인프라 작업을 여는 시점. 그때까지 로그인 실패 반복 시 안내 문구만 제공 |
-| 정기 결제 완전판 (다음 예상일 · 월 구독 총액 · 해지 종료 처리 · 카드 교체 CTA) | M | S4는 **후보 표시와 사용자 확정까지만** 한다. 예상일·총액은 확정 데이터가 쌓인 뒤라야 정확도를 평가할 수 있다 | 확정 후보가 축적되고 정밀도 목표를 만족한 뒤 |
+| 비밀번호 찾기 | M | 저장소 전체에 `password-reset`/`forgot` 구현이 0건이고, 메일 발송 인프라(발송 경로 선택·도메인 인증·토큰 만료 설계)부터 필요하다 | **하지 않기로 함 (2026-09-03 사용자 결정)** — 2인 운영이고 둘 다 로그인 상태다. `/more/password`로 **아는 상태에서의 변경**은 가능하니 실사용 공백은 "잊었을 때"뿐이고, 그때는 owner가 DB로 복구할 수 있다. 다시 볼 조건: 외부 사용자 개방, 또는 구성원이 실제로 잠긴 사건 1회 |
+| ~~정기 결제 완전판 중 **다음 예상일**~~ **(2026-08-18 처리됨)** | S | `forecastRecurring`은 `last_seen_at`·`interval_days`의 순수 함수라 금액 계약과 무관하다. 창(±N일)과 함께 말한다 | — |
+| 정기 결제 **금액 레이어** (월 구독 총액 · 예정 알림 금액 · 해지 종료 처리 · 카드 교체 CTA) | M | 금액 위의 **예고**라서 ADR-0027 7단계(레거시 186건 수리)가 선행이다. 후보 표시는 관측된 사실만 말하므로 그 게이트에 걸리지 않는다 | 7단계 완료 후 |
+
+> **2026-09-03 — 플래그로 잠겨 있던 기능 2건을 켰다.** 코드는 완성돼 있는데 env 값이 없어
+> 사용자에게 닿지 않던 것들이다. `RECURRING_RADAR_ENABLED=true`(C-5 후보 표시·확정),
+> `CARD_SMS_LLM_MODE=on`(ADR-0023 L2 폴백 — 규칙 파서가 **실패한 문자에만** 개입하고 결과는
+> `quarantined`로 적재돼 사람 확인 전까지 거래로 승격되지 않는다).
+>
+> 배운 것: **"구현 완료"와 "사용자에게 닿음" 사이에 플래그라는 구간이 있고, 이 문서는 그
+> 구간을 세지 않았다.** 로드맵이 ✅로 적은 C-5는 3주 넘게 화면에서 "아직 준비 중"이었다.
+> 앞으로 플래그가 붙은 기능은 상태를 `✅ 구현` / `🔓 활성` 둘로 나눠 적는다.
 
 ### 5-2. P2 — 지금 서비스가 죽지는 않는 것
 
