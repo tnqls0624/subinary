@@ -14,8 +14,10 @@ import { describe, it } from 'node:test';
 
 import {
   CARD_SMS_DEDUPE_WINDOW_MS,
+  CARD_SMS_FINGERPRINT_WINDOW_MS,
   CARD_SMS_KEY_SOURCES,
   CARD_SMS_SUPPRESSION_REASONS,
+  cardSmsContentCarriesTimestamp,
   cardSmsContentHash,
   cardSmsDedupeWindowLowerBound,
   cardSmsDedupeWindowStart,
@@ -211,5 +213,72 @@ describe('배포 안전 — 이미 배포된 자동화의 키가 바뀌면 안 �
       deriveCardSmsEventId(SENDER, CONTENT),
       cardSmsContentHash(SENDER, CONTENT),
     );
+  });
+});
+
+/**
+ * 지연 재전송 회귀 — 2026-08 실측.
+ *
+ * 08-23 20:05 쿠팡 취소 문자 하나가 11시간·25시간 뒤에 재전송돼 `content_hash`가 같은
+ * 이벤트 3건이 됐고, 그중 2건은 원거래 잔액이 이미 0이라 영원히 `pending_review`로
+ * 남아 매일 승격 정체 경보 + "확인이 필요한 거래" 알림을 만들었다. 키 창(3분)은 그대로
+ * 두고 **지문 창만** 넓혀 막는다.
+ */
+describe('지연 재전송 — 본문에 일시가 있으면 지문 창을 넓게 본다', () => {
+  const CARD_SENDER = '15888900';
+  /** 실측 원문(삼성카드 취소). `MM/DD HH:mm`이 본문 안에 있다. */
+  const DATED = '[Web발신]\n삼성7420취소 이*빈\n-3,700원 일시불\n08/23 20:05 쿠팡';
+
+  /** @param {Date} ingestedAt */
+  const dated = (ingestedAt) =>
+    resolveCardSmsIdempotency({ sender: CARD_SENDER, content: DATED, ingestedAt });
+
+  const FIRST = new Date('2026-08-23T11:06:23.000Z');
+
+  it('본문의 거래 일시를 인식한다', () => {
+    assert.equal(cardSmsContentCarriesTimestamp(DATED), true);
+    // 연/월/일 접두와 다른 구분자도 같은 등급이다.
+    assert.equal(cardSmsContentCarriesTimestamp('2026/08/20 23:54 ANTHROPIC'), true);
+    assert.equal(cardSmsContentCarriesTimestamp('08-23 20:05 쿠팡'), true);
+  });
+
+  it('시간 축이 없는 본문은 종전 3분 창 그대로다 — 넓히면 결제 소실이다', () => {
+    assert.equal(cardSmsContentCarriesTimestamp(CONTENT), false);
+    assert.equal(
+      resolve().windowLowerBound.getTime(),
+      new Date('2026-08-08T12:00:00.000Z').getTime() - CARD_SMS_DEDUPE_WINDOW_MS,
+    );
+  });
+
+  it('25시간 뒤 재전송도 지문 조회 범위 안에 든다 (실측 사례)', () => {
+    // 08-25 09:38 수집분 — 첫 수집(08-23 20:06)보다 하한이 앞서야 지문 조회가 그 행을 찾는다.
+    const third = dated(new Date('2026-08-25T00:38:28.000Z'));
+    assert.ok(third.windowLowerBound < FIRST, '25시간 전 행을 조회 범위가 덮어야 한다');
+    // 종전 3분 창이었다면 덮지 못했다 — 이 대비가 이 수정의 전부다.
+    assert.ok(
+      cardSmsDedupeWindowLowerBound(new Date('2026-08-25T00:38:28.000Z')) > FIRST,
+    );
+  });
+
+  it('지문은 세 번의 재전송에서 모두 같다 — 조회가 찾을 대상이 존재한다', () => {
+    const hashes = [
+      dated(FIRST),
+      dated(new Date('2026-08-23T22:44:58.000Z')),
+      dated(new Date('2026-08-25T00:38:28.000Z')),
+    ].map((r) => r.contentHash);
+    assert.equal(new Set(hashes).size, 1);
+  });
+
+  it('창 상한은 유한하다 — 30일을 넘긴 동일 본문은 별개로 남는다', () => {
+    const far = dated(new Date(FIRST.getTime() + CARD_SMS_FINGERPRINT_WINDOW_MS + 1000));
+    assert.ok(far.windowLowerBound > FIRST);
+  });
+
+  it('키 창은 건드리지 않는다 — event_id 형식이 바뀌면 기존 행과 호환이 깨진다', () => {
+    const a = dated(new Date('2026-08-23T11:06:23.000Z'));
+    const b = dated(new Date('2026-08-25T00:38:28.000Z'));
+    // 키는 여전히 3분 창 기반이라 서로 다르다. 중복 흡수는 지문 조회가 한다.
+    assert.notEqual(a.eventId, b.eventId);
+    assert.equal(a.keySource, 'derived_window');
   });
 });
