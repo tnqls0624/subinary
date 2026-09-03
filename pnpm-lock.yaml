@@ -196,6 +196,9 @@ importers:
       '@capacitor/status-bar':
         specifier: ^8.0.3
         version: 8.0.3(@capacitor/core@8.4.2)
+      '@capgo/capacitor-updater':
+        specifier: ^8.51.15
+        version: 8.51.15(@capacitor/core@8.4.2)
     devDependencies:
       '@capacitor/assets':
         specifier: ^3.0.5
