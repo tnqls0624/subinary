@@ -469,9 +469,9 @@ export class TransactionMoneyRepairService {
         // 날아가고 앞선 행만 커밋된 반쪽 배치가 남는다(2026-09-03에 실제로 57건이 그랬다).
         if (
           v2ConstraintViolations({
-            ...(row as object),
+            ...(row as unknown as TransactionMoneyV2CheckRowLike),
             ...patch,
-          } as TransactionMoneyV2CheckRowLike).length > 0
+          }).length > 0
         ) {
           return 'blocked' as const;
         }
