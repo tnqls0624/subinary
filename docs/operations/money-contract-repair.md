@@ -55,6 +55,7 @@ node scripts/repair-money-contract.mjs apply <batch-id>
 | `적용 N건` | 스탬프 완료 | — |
 | `낡은 manifest N건` | 계획 이후 누군가 그 거래를 수정했다 | `plan`을 다시 돌려 새 배치를 만든다. 덮어쓰지 않은 것이 **정상 동작**이다 |
 | `이미 v2 N건` | 이전 실행이 이미 처리 | 무해. 이 명령은 멱등하다 |
+| `v2 제약 미충족으로 차단 N건` | 그 행은 아직 v2 계약을 만족하지 못한다(예: 외화인데 환율 스냅샷 없음) | 아래 4절. **DB가 막기 전에 도구가 멈춘 것**이라 반쪽 배치가 생기지 않는다 |
 | `사람 검토로 남김 N건` | auto 대상이 아님 | 아래 4절 |
 
 종료 코드: `0` 정상 · `1` 검토 대상 잔존 · `2` 낡은 manifest를 건너뜀 · `3` 실행 실패.
@@ -63,6 +64,11 @@ node scripts/repair-money-contract.mjs apply <batch-id>
 
 자동으로 넘어가지 않은 행은 manifest에 남아 있다. 판정별로 무엇을 봐야 하는지는 ADR
 §데이터 마이그레이션 계획 §2의 분류표를 따른다.
+
+`reason`이 `repair:review:v2_*`면 **v2 제약이 막은 것**이고, 접미가 곧 막은 제약이다.
+가장 흔한 것은 `v2_fx_snapshot`(외화인데 환율 스냅샷 없음)이며, 이 유형은
+`scripts/fixate-legacy-fx-snapshots.mjs`로 거래일 스냅샷을 고정한 뒤 다시 `plan`을 돌리면
+auto로 넘어간다. `note.v2Violations`에 위반 전체가 배열로 들어 있다.
 
 ```sql
 select transaction_id, reason, net_amount_before, net_amount_after, net_amount_delta, note

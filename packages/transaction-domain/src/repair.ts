@@ -77,6 +77,59 @@ export const MONEY_REPAIR_AUTO_VERDICTS: readonly MoneyShadowVerdict[] = [
 export type MoneyRepairEligibility = 'auto' | 'review';
 
 /**
+ * 계획을 적용해도 **사용자가 보는 금액이 그대로**여야 하는 축.
+ *
+ * 이 여섯 개가 하나라도 달라지면 지출 합계·취소 체인·귀속이 움직인다. auto는 이것들이
+ * 전부 같을 때만 성립한다.
+ */
+const MONEY_IDENTITY_COLUMNS = [
+  'amount',
+  'currency',
+  'cancelledAmount',
+  'netAmount',
+  'parentTransactionId',
+  'status',
+] as const;
+
+/**
+ * 금액을 바꾸지 않고 **증빙만 채우는** 컬럼.
+ *
+ * `null → 값`은 허용한다(없던 근거가 생기는 것). `값 → 다른 값`은 금지한다 — 그건
+ * 이미 적용된 환율을 다시 쓰는 것이고, 사용자가 본 KRW가 흔들린다.
+ */
+const MONEY_EVIDENCE_COLUMNS = [
+  'originalAmount',
+  'originalCurrency',
+  'exchangeRate',
+  'fxRateSnapshotId',
+  'originalCancelledAmount',
+] as const;
+
+/** 계획을 적용해도 금액이 움직이지 않는가. 순수 함수다. */
+export function planKeepsMoneyIdentity(
+  actualRow: TransactionMoneyRowLike,
+  planned: Record<string, unknown> | null,
+): boolean {
+  if (!planned) return false;
+
+  for (const column of MONEY_IDENTITY_COLUMNS) {
+    const before = (actualRow as unknown as Record<string, unknown>)[column] ?? null;
+    const after = planned[column] ?? null;
+    if (before !== after) return false;
+  }
+
+  for (const column of MONEY_EVIDENCE_COLUMNS) {
+    const before = (actualRow as unknown as Record<string, unknown>)[column] ?? null;
+    const after = planned[column] ?? null;
+    // 없던 근거가 생기는 것만 허용한다.
+    if (before !== null && before !== after) return false;
+  }
+
+  return true;
+}
+
+
+/**
  * 판정 → 처리 등급. 순수 함수다(테스트가 DB 없이 전 판정을 훑는다).
  *
  * `auto`는 "버전 스탬프만 찍는다"는 뜻이지 "계획을 적용한다"가 아니다. 이 구분이
@@ -202,8 +255,26 @@ export class TransactionMoneyRepairManifestSink {
       ...actualRow,
       transactionType: record.transactionType,
     } as TransactionMoneyV2CheckRowLike);
-    const eligibility = classifyRepairEligibility(record.verdict, violations);
     const planned = record.planned;
+
+    // 스탬프로는 못 고치지만 **금액을 바꾸지 않고 증빙만 채우면** v2가 되는 행이 있다.
+    // 대표 사례: 외화인데 `fx_rate_snapshot_id`가 비어 있는 행. 스냅샷을 고정해 두면
+    // (`fixate-legacy-fx-snapshots.mjs`) 계획이 그 스냅샷을 고르고, 금액은 그대로다.
+    // 이때만 계획을 **적용**한다 — 그 밖의 계획 적용은 여전히 사람 몫이다.
+    const evidenceOnly =
+      violations.length > 0 &&
+      MONEY_REPAIR_AUTO_VERDICTS.includes(record.verdict) &&
+      planKeepsMoneyIdentity(actualRow, planned as Record<string, unknown> | null) &&
+      v2ConstraintViolations({
+        ...actualRow,
+        ...(planned as object),
+        transactionType: record.transactionType,
+        moneyContractVersion: MONEY_CONTRACT_VERSION_V2,
+      } as TransactionMoneyV2CheckRowLike).length === 0;
+
+    const eligibility: MoneyRepairEligibility = evidenceOnly
+      ? 'auto'
+      : classifyRepairEligibility(record.verdict, violations);
 
     // auto는 **스탬프**다: after 이미지는 before에서 계약 버전만 올린 것.
     // review는 관찰기의 계획을 그대로 담아 사람이 before/after를 비교하게 한다.
@@ -211,6 +282,9 @@ export class TransactionMoneyRepairManifestSink {
       eligibility === 'auto'
         ? buildTransactionMoneyImage({
             ...actualRow,
+            // evidence 모드는 계획의 증빙 컬럼을 담는다. 금액 축은 위에서 동일함을
+            // 확인했으므로 이 병합이 사용자가 보는 숫자를 바꾸지 않는다.
+            ...(evidenceOnly ? (planned as object) : {}),
             moneyContractVersion: MONEY_CONTRACT_VERSION_V2,
           })
         : planned
@@ -238,8 +312,9 @@ export class TransactionMoneyRepairManifestSink {
       action: repairAction(record, violations),
       // 제약 때문에 막힌 행은 **무엇이 막았는지**를 reason에 싣는다. verdict만 적으면
       // 집계에서 `review:match`가 되어 "일치하는데 왜 검토?"라는 답 없는 줄이 남는다.
-      reason:
-        violations.length > 0
+      reason: evidenceOnly
+        ? `${MONEY_REPAIR_REASON_PREFIX}auto:evidence:${violations[0]}`
+        : violations.length > 0
           ? `${MONEY_REPAIR_REASON_PREFIX}review:${violations[0]}`
           : `${MONEY_REPAIR_REASON_PREFIX}${eligibility}:${record.verdict}`,
       note: repairNote(record, eligibility, violations),
@@ -257,7 +332,11 @@ export class TransactionMoneyRepairManifestSink {
     this.planned += 1;
     if (eligibility === 'auto') this.auto += 1;
     else this.review += 1;
-    const key = violations.length > 0 ? `blocked:${violations[0]}` : record.verdict;
+    const key = evidenceOnly
+      ? `evidence:${violations[0]}`
+      : violations.length > 0
+        ? `blocked:${violations[0]}`
+        : record.verdict;
     this.byVerdict.set(key, (this.byVerdict.get(key) ?? 0) + 1);
 
     this.logger?.info(
@@ -326,6 +405,7 @@ export class TransactionMoneyRepairService {
         transactionId: schema.transactionMoneyRepairLog.transactionId,
         reason: schema.transactionMoneyRepairLog.reason,
         checksumBefore: schema.transactionMoneyRepairLog.checksumBefore,
+        afterMoney: schema.transactionMoneyRepairLog.afterMoney,
       })
       .from(schema.transactionMoneyRepairLog)
       .where(
@@ -372,17 +452,37 @@ export class TransactionMoneyRepairService {
           return 'blocked' as const;
         }
 
+        // evidence 모드는 증빙 컬럼을 함께 채운다. 금액 축은 계획 단계에서 동일함을
+        // 확인했고, 여기서 한 번 더 본다 — 계획과 적용 사이에 행이 바뀌었을 수 있다.
+        const evidence = entry.reason.startsWith(`${MONEY_REPAIR_REASON_PREFIX}auto:evidence:`)
+          ? (entry.afterMoney as Record<string, unknown> | null)
+          : null;
+        if (evidence && !planKeepsMoneyIdentity(row as TransactionMoneyRowLike, evidence)) {
+          return 'blocked' as const;
+        }
+
+        const patch: Record<string, unknown> = {
+          moneyContractVersion: MONEY_CONTRACT_VERSION_V2,
+        };
+        if (evidence) {
+          for (const column of MONEY_EVIDENCE_COLUMNS) {
+            const before = (row as unknown as Record<string, unknown>)[column] ?? null;
+            const after = evidence[column] ?? null;
+            if (before === null && after !== null) patch[column] = after;
+          }
+        }
+
         await tx
           .update(schema.cardTransactions)
-          .set({ moneyContractVersion: MONEY_CONTRACT_VERSION_V2 })
+          .set(patch)
           .where(eq(schema.cardTransactions.id, entry.transactionId));
 
         // 적용 후 이미지로 checksumAfter를 만든다 — 되돌릴 때 "그 뒤로 사용자가
         // 손댔는지"를 보는 값이라 반드시 **적용 결과**에서 계산해야 한다.
         const after = transactionMoneyChecksum({
           ...(row as TransactionMoneyRowLike),
-          moneyContractVersion: MONEY_CONTRACT_VERSION_V2,
-        });
+          ...patch,
+        } as TransactionMoneyRowLike);
         await tx
           .update(schema.transactionMoneyRepairLog)
           .set({ appliedAt: new Date(), checksumAfter: after })
@@ -446,8 +546,8 @@ export class TransactionMoneyRepairService {
         skippedNotApplied += 1;
         continue;
       }
-      const before = entry.beforeMoney as { moneyContractVersion?: number } | null;
-      const targetVersion = before?.moneyContractVersion;
+      const before = entry.beforeMoney as Record<string, unknown> | null;
+      const targetVersion = before?.moneyContractVersion as number | undefined;
       if (typeof targetVersion !== 'number') {
         skippedNotApplied += 1;
         continue;
@@ -465,9 +565,16 @@ export class TransactionMoneyRepairService {
         const current = transactionMoneyChecksum(row as TransactionMoneyRowLike);
         if (current !== entry.checksumAfter) return 'blocked' as const;
 
+        // before 이미지의 보호 컬럼을 통째로 되돌린다 — evidence 모드가 채운 증빙
+        // 컬럼도 함께 원복해야 "적용 전 상태"가 된다. 버전만 내리면 스냅샷 id가 남는다.
+        const restore: Record<string, unknown> = { moneyContractVersion: targetVersion };
+        for (const column of MONEY_EVIDENCE_COLUMNS) {
+          restore[column] =
+            (before as Record<string, unknown>)[column] ?? null;
+        }
         await tx
           .update(schema.cardTransactions)
-          .set({ moneyContractVersion: targetVersion })
+          .set(restore)
           .where(eq(schema.cardTransactions.id, entry.transactionId));
         await tx
           .update(schema.transactionMoneyRepairLog)

@@ -7,6 +7,7 @@ import {
   MONEY_REPAIR_AUTO_VERDICTS,
   TransactionMoneyRepairManifestSink,
   classifyRepairEligibility,
+  planKeepsMoneyIdentity,
   repairAction,
 } from './repair.js';
 import type { MoneyShadowActual, MoneyShadowRecord, MoneyShadowVerdict } from './shadow.js';
@@ -178,6 +179,46 @@ describe('repairAction', () => {
   });
 });
 
+describe('planKeepsMoneyIdentity', () => {
+  it('증빙만 채우는 계획은 통과한다 — 없던 근거가 생기는 것', () => {
+    expect(
+      planKeepsMoneyIdentity(
+        { ...row, originalCurrency: 'USD', originalAmount: 2_200, fxRateSnapshotId: null },
+        {
+          ...row,
+          originalCurrency: 'USD',
+          originalAmount: 2_200,
+          fxRateSnapshotId: 'snapshot-1',
+          originalCancelledAmount: 0,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('금액이 움직이면 통과하지 못한다', () => {
+    expect(planKeepsMoneyIdentity(row, { ...row, netAmount: 9_500 })).toBe(false);
+    expect(planKeepsMoneyIdentity(row, { ...row, currency: 'USD' })).toBe(false);
+  });
+
+  it('사람이 고른 연결을 끊는 계획은 통과하지 못한다', () => {
+    expect(planKeepsMoneyIdentity(row, { ...row, parentTransactionId: null })).toBe(false);
+  });
+
+  it('이미 있는 환율을 다른 값으로 바꾸는 계획은 통과하지 못한다', () => {
+    // `값 → 다른 값`을 허용하면 사용자가 본 KRW가 흔들린다.
+    expect(
+      planKeepsMoneyIdentity(
+        { ...row, exchangeRate: 1_486.949463 },
+        { ...row, exchangeRate: 1_500 },
+      ),
+    ).toBe(false);
+  });
+
+  it('계획이 없으면 통과하지 못한다', () => {
+    expect(planKeepsMoneyIdentity(row, null)).toBe(false);
+  });
+});
+
 describe('TransactionMoneyRepairManifestSink', () => {
   it('auto 행은 계약 버전만 올린 after를 남기고 delta가 0이다', async () => {
     const { captured, db } = fakeDb();
@@ -277,6 +318,63 @@ describe('TransactionMoneyRepairManifestSink', () => {
     expect(captured[0].reason).toBe('repair:review:v2_fx_snapshot');
     expect(captured[0].action).toBe('normalize_currency');
     expect(JSON.parse(captured[0].note as string).v2Violations).toContain('v2_fx_snapshot');
+  });
+
+  it('스냅샷만 채우면 v2가 되는 행은 auto(증빙 채움)로 간다', async () => {
+    const { captured, db } = fakeDb();
+    const sink = new TransactionMoneyRepairManifestSink(db, 'batch-8');
+    const fxRow = {
+      ...row,
+      originalAmount: 2_200,
+      originalCurrency: 'USD',
+      originalCancelledAmount: 0,
+      exchangeRate: 1_486.949463,
+      fxRateSnapshotId: null,
+    };
+
+    await sink.record(
+      record({
+        verdict: 'match',
+        foreign: true,
+        // 스냅샷을 고정해 둔 뒤라 계획이 그것을 고른다. 금액은 그대로다.
+        planned: { ...(fxRow as unknown as MoneyColumns), fxRateSnapshotId: 'snapshot-1' },
+      }),
+      fxRow,
+    );
+
+    const [entry] = captured;
+    expect(entry.reason).toBe('repair:auto:evidence:v2_fx_snapshot');
+    const after = entry.afterMoney as Record<string, unknown>;
+    expect(after.fxRateSnapshotId).toBe('snapshot-1');
+    expect(after.moneyContractVersion).toBe(2);
+    // 금액은 한 원도 움직이지 않는다.
+    expect(entry.netAmountBefore).toBe(entry.netAmountAfter);
+  });
+
+  it('금액을 바꾸는 계획은 증빙 모드로 통과하지 못한다', async () => {
+    const { captured, db } = fakeDb();
+    const sink = new TransactionMoneyRepairManifestSink(db, 'batch-9');
+    const fxRow = {
+      ...row,
+      originalAmount: 2_200,
+      originalCurrency: 'USD',
+      originalCancelledAmount: 0,
+      fxRateSnapshotId: null,
+    };
+
+    await sink.record(
+      record({
+        verdict: 'match',
+        planned: {
+          ...(fxRow as unknown as MoneyColumns),
+          fxRateSnapshotId: 'snapshot-1',
+          netAmount: 30_000, // 금액이 움직인다
+        },
+      }),
+      fxRow,
+    );
+
+    expect(captured[0].reason).toBe('repair:review:v2_fx_snapshot');
   });
 
   it('통계가 auto/review를 나눠 센다', async () => {
