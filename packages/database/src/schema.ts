@@ -4411,6 +4411,30 @@ export const recurringSeries = pgTable(
      */
     needsReviewReason: text('needs_review_reason'),
     /** 판별 알고리즘 버전. 규칙이 바뀌면 올려서 과거 결과와 구분한다. */
+    /**
+     * 다음 결제 예상 시점.
+     *
+     * **모든 series에 저장하고 노출만 `confirmed`로 제한한다.** 저장을 confirmed로
+     * 좁히면 사용자가 확정하는 순간 값이 없어 `decide()`가 다시 계산해야 하는데,
+     * 그때의 `now`는 재계산 시점의 `now`와 달라 같은 series가 두 날짜를 갖는다.
+     * 저장은 순수 계산이라 무해하고, "후보에 다음 결제를 말하지 않는다"는 요구는
+     * 조회 계층에서 지킨다.
+     *
+     * 저장하는 이유: 목록·홈·예정 알림 **세 곳이 같은 값을 봐야** 한다. 각자
+     * 계산하면 요청 시각 차이로 다른 날짜를 말하고, "내일 빠져요"라고 알린 뒤
+     * 목록에서 모레로 보이는 사고가 된다. `last_seen_at`·`interval_days`의 순수
+     * 함수라 재계산 시점에 확정할 수 있다.
+     *
+     * 반면 국면(upcoming/due/overdue)은 **조회 시각에 의존**하므로 저장하지 않는다.
+     * 저장된 예상일 하나에서 각자 계산하면 값은 자연히 일치한다.
+     */
+    nextExpectedAt: timestamp('next_expected_at', { withTimezone: true }),
+    /**
+     * 예상일의 창 폭(일). `cadence`에서 유도되는 상수지만 함께 저장한다 — 상수를
+     * 바꿀 때 과거 예상이 소급 변하면 "8월 24일쯤(±2일)"이라고 보낸 알림이 사후에
+     * 다른 말을 한 셈이 된다.
+     */
+    nextExpectedWindowDays: integer('next_expected_window_days'),
     algorithmVersion: integer('algorithm_version').notNull(),
     /**
      * 이 series가 기대는 금액 계약 버전 — 근거 거래들의 **최솟값**이다.
@@ -4459,6 +4483,15 @@ export const recurringSeries = pgTable(
     check(
       'recurring_series_needs_review_reason_check',
       sql`${table.needsReviewReason} is null or ${table.status} = 'needs_review'`,
+    ),
+    // 홈·알림이 "이번 달 남은 정기"를 뽑는 경로(금액 레이어 S1).
+    index('recurring_series_next_expected_idx')
+      .on(table.householdId, table.nextExpectedAt)
+      .where(sql`${table.status} = 'confirmed' and ${table.nextExpectedAt} is not null`),
+    // 창 폭 0은 "정확히 그날"이라는 뜻이 되어 기획 D3(범위로 말한다)을 어긴다.
+    check(
+      'recurring_series_next_window_check',
+      sql`${table.nextExpectedWindowDays} is null or ${table.nextExpectedWindowDays} > 0`,
     ),
   ],
 );

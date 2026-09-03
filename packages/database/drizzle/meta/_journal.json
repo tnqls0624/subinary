@@ -407,6 +407,13 @@
       "when": 1788447600000,
       "tag": "0057_validate_money_contract_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788451200000,
+      "tag": "0058_recurring_next_expected",
+      "breakpoints": true
     }
   ]
 }

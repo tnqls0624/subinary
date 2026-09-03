@@ -68,8 +68,10 @@ export const recurringSeriesItemSchema = z.object({
    * 다음 결제 예상 시점(ISO). **`confirmed`인 series에만** 붙는다 — 아직 정기인지
    * 확정되지 않은 후보에 예상일을 말하면 그 자체가 확정처럼 읽힌다.
    *
-   * ⛔ 금액 예고는 여기 없다. ADR-0027 enforce 전까지 `net_amount`가 확정이 아니므로
-   * 날짜만 말한다(`docs/concept-upcoming-spend-2026-08.md` D2).
+   * ✅ **2026-09-03 — 금액 예고 조건이 풀렸다.** ADR-0027이 8단계까지 끝나
+   * (전량 v2 + 제약 VALIDATE) `net_amount`가 확정이다. 금액 예고는 `/upcoming`이
+   * 담당하고, 개별 series의 예고 가능 여부는 `amountForecastable`이 말한다
+   * (기획 D2: 근거에 v1이 하나라도 섞이면 그 series는 금액을 예고하지 않는다).
    */
   nextExpectedAt: z.string().nullable(),
   /** 예상일의 불확실 폭(일). "8월 24일쯤(±2일)"의 그 폭. */
@@ -149,4 +151,73 @@ export const recurringRecomputeResponseSchema = z.object({
 });
 export type RecurringRecomputeResponse = z.infer<
   typeof recurringRecomputeResponseSchema
+>;
+
+/* ---------------------------------------------------------------------------
+ * 예정 정기 지출 — 금액 레이어 S1 (`docs/concept-upcoming-spend-2026-08.md`)
+ * ------------------------------------------------------------------------- */
+
+export const recurringUpcomingItemSchema = z.object({
+  id: z.string(),
+  merchant: z.string(),
+  /** 예상 금액(중앙값, minor units). `amountForecastable`이 false면 **읽지 마라**. */
+  amount: z.number().int(),
+  amountMin: z.number().int(),
+  amountMax: z.number().int(),
+  currency: z.string(),
+  cadence: recurringCadenceSchema,
+  /** 예상일(ISO). 저장된 값이라 목록·홈·알림이 같은 날짜를 본다. */
+  nextExpectedAt: z.string(),
+  /** 예상일의 불확실 폭(일). 기획 D3 — 단일 날짜는 반드시 틀린다. */
+  nextExpectedWindowDays: z.number().int(),
+  nextExpectedPhase: z.enum(['upcoming', 'due', 'overdue']),
+  overdueDays: z.number().int(),
+  mine: z.boolean(),
+  /**
+   * 이 series의 **금액을 예고해도 되는가** (기획 D2).
+   *
+   * `moneyContractVersion >= 2`일 때만 true다. 그 컬럼은 "근거 거래 중 최솟값"이라
+   * 하나라도 v1이 섞이면 series 전체가 v1 신뢰도다. false면 화면은 날짜만 말하고
+   * 금액 칸을 비워야 하며, 합계에도 들어가지 않는다.
+   */
+  amountForecastable: z.boolean(),
+  /** 금액 변동형 구독이면 true(`amountMin !== amountMax`). */
+  amountVaries: z.boolean(),
+});
+export type RecurringUpcomingItem = z.infer<typeof recurringUpcomingItemSchema>;
+
+/** `GET /v1/recurring/upcoming?householdId=&until=` */
+export const recurringUpcomingResponseSchema = z.object({
+  /** `RECURRING_RADAR_ENABLED`. false면 `items`가 비고 화면은 그 사실을 말한다. */
+  enabled: z.boolean(),
+  /**
+   * 조회 기간의 끝(ISO). 요청에서 받은 값을 그대로 되돌려준다 — 화면이 "이번 달"과
+   * "앞으로 7일"을 같은 응답 모양으로 그릴 수 있어야 한다.
+   */
+  until: z.string(),
+  /** 예상일 오름차순. `overdue`가 먼저 온다(지난 것이 더 급하다). */
+  items: z.array(recurringUpcomingItemSchema),
+  /**
+   * 예고 가능한 것들의 합계(minor units, `totalCurrency` 기준).
+   *
+   * **`amountForecastable`이 false인 series는 여기 들어가지 않는다.** 합계가
+   * "전부"인 척하지 않도록 아래 `excludedCount`를 함께 읽어야 한다.
+   */
+  totalAmount: z.number().int(),
+  totalCurrency: z.string(),
+  /** 합계에 들어간 건수. */
+  forecastableCount: z.number().int(),
+  /**
+   * 금액을 예고할 수 없어 합계에서 빠진 건수. 0이 아니면 화면이 그 사실을 말해야
+   * 한다 — 빠진 걸 숨긴 합계는 "이만큼만 나간다"는 거짓말이 된다.
+   */
+  excludedCount: z.number().int(),
+  /**
+   * 통화가 섞여 합산하지 못한 건수. 외화 구독이 있으면 0이 아니다.
+   * KRW 환산은 여기서 하지 않는다 — 환산은 금액 계약의 일이고, 예고는 관측만 말한다.
+   */
+  otherCurrencyCount: z.number().int(),
+});
+export type RecurringUpcomingResponse = z.infer<
+  typeof recurringUpcomingResponseSchema
 >;

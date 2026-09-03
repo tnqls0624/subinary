@@ -155,6 +155,7 @@ export type {
 } from './notifications.js';
 export {
   forecastRecurring,
+  resolveRecurringPhase,
   RECURRING_WINDOW_DAYS,
   RECURRING_STOPPED_GRACE_RATIO,
 } from './recurring-forecast.js';

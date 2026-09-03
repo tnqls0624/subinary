@@ -11,6 +11,7 @@ import type {
   RecurringDecisionResponse,
   RecurringRecomputeResponse,
   RecurringSeriesListResponse,
+  RecurringUpcomingResponse,
 } from "@family/contracts";
 
 import { apiFetch } from "@/lib/api-client";
@@ -50,4 +51,38 @@ export function recomputeRecurringSeries(
     accessToken,
     body: { householdId },
   });
+}
+
+export const recurringUpcomingQueryKey = (
+  householdId: string | null,
+  until: string,
+) => ["recurring-upcoming", householdId, until] as const;
+
+/**
+ * 예정 정기 지출 + 합계 (금액 레이어 S1).
+ *
+ * `until`을 호출부가 정하는 이유: 목록은 "이번 달 남은 것", 홈은 "앞으로 나갈 돈"으로
+ * 창이 다르다. 서버가 기본값을 정하면 두 화면이 같은 합계를 말하는지 알 수 없다.
+ * 그래서 창은 화면이 정하고 서버는 받은 값을 그대로 되돌려준다.
+ */
+export function fetchRecurringUpcoming(
+  accessToken: string | null,
+  householdId: string,
+  until: string,
+): Promise<RecurringUpcomingResponse> {
+  const params = new URLSearchParams({ householdId, until });
+  return apiFetch<RecurringUpcomingResponse>(
+    `/v1/recurring/upcoming?${params.toString()}`,
+    { accessToken },
+  );
+}
+
+/** 이번 달 마지막 순간(KST). 목록 상단 "이번 달 남은 정기"의 창. */
+export function endOfMonthKst(now: Date = new Date()): string {
+  const shifted = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const year = shifted.getUTCFullYear();
+  const month = shifted.getUTCMonth();
+  // 다음 달 1일 00:00 KST에서 1ms 뺀다 = 이번 달 마지막 순간.
+  const nextMonth = Date.UTC(year, month + 1, 1) - 9 * 60 * 60 * 1000;
+  return new Date(nextMonth - 1).toISOString();
 }

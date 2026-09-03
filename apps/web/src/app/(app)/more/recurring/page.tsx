@@ -11,13 +11,19 @@
  * (`@family/shared`의 `forecastRecurring`). 월 주기는 일(day-of-month)을 앵커로 쓰고,
  * 창(±N일)과 함께 말한다 — 카드 결제일은 주말·영업일로 밀리므로 단일 날짜는 반드시 틀린다.
  *
- * ⛔ **여전히 없는 것 — 금액 레이어**: 이번 달 정기 지출 **총액** · 예정 알림의 금액 ·
- * 해지 종료 처리 · 카드 교체 CTA. 금액 계약(ADR-0027)이 아직 enforce 전이라
- * `net_amount`가 확정이 아니고, 그 위에서 "다음 달 12,900원이 나갑니다"를 띄우면
- * 틀린 예고를 하는 것이다. 여기에 금액 기반 표면을 얹으려면 enforce와 과거 수리,
- * 전량 재계산이 먼저다(`docs/concept-upcoming-spend-2026-08.md` §2).
+ * ✅ **2026-09-03 추가 — 금액 레이어(S1)**: 상단에 "이번 달 남은 정기" 합계를 둔다.
+ * ADR-0027이 8단계까지 끝나(전량 v2 + 제약 VALIDATE) `net_amount`가 확정됐기 때문이다.
  *
- * 그래서 화면은 금액을 **관측된 사실**로만 말한다("최근 3회 13,500원"). 예측하지 않는다.
+ * 합계는 **예고할 수 있는 것만** 담는다. 근거에 v1이 하나라도 섞인 series는 금액을
+ * 예고하지 않고(기획 D2), 외화는 환산하지 않는다 — 환산은 금액 계약의 일이고 예고는
+ * 관측만 말한다. 빠진 건수를 문구로 함께 말한다: 빠진 걸 숨긴 합계는 "이만큼만
+ * 나간다"는 거짓말이 된다.
+ *
+ * ⛔ **여전히 없는 것**: 예정 알림 발송(S3) · 해지 종료 처리(S4) · 카드 교체 CTA(폐기).
+ * 앞의 둘은 오탐이 확정처럼 전달되거나 사용자 모르게 상태가 바뀌는 문제라 별도
+ * 슬라이스다(`docs/concept-upcoming-spend-2026-08.md` §4).
+ *
+ * 금액은 예측하지 않는다 — 관측된 중앙값을 그대로 말한다("최근 3회 13,500원").
  * ------------------------------------------------------------------------- */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -29,12 +35,14 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useMemo } from "react";
 import { toast } from "sonner";
 
 import type {
   CardSmsDeclineReason,
   RecurringSeriesItem,
   RecurringSeriesListResponse,
+  RecurringUpcomingResponse,
 } from "@family/contracts";
 
 import { Button } from "@/components/ui/button";
@@ -49,9 +57,12 @@ import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
 import {
   decideRecurringSeries,
+  endOfMonthKst,
   fetchRecurringSeries,
+  fetchRecurringUpcoming,
   recomputeRecurringSeries,
   recurringQueryKey,
+  recurringUpcomingQueryKey,
 } from "./recurring-api";
 
 function formatDate(iso: string): string {
@@ -232,6 +243,65 @@ function SeriesRow({
   );
 }
 
+/**
+ * 이번 달 남은 정기 합계 (금액 레이어 S1).
+ *
+ * 세 가지를 정직하게 말한다.
+ *  1. 합계에 **들어간** 건수와 금액
+ *  2. 금액을 예고할 수 없어 **빠진** 건수 (근거에 v1이 섞인 series — 기획 D2)
+ *  3. 통화가 달라 **합산하지 않은** 건수 (환산은 금액 계약의 일이다)
+ *
+ * 2·3을 숨기면 합계가 "이만큼만 나간다"는 거짓말이 된다. 그래서 0이 아닐 때만,
+ * 그러나 반드시 말한다.
+ *
+ * 예정이 0건이면 아무것도 그리지 않는다 — 빈 카드가 "정기 결제가 없다"로 읽히면
+ * 그건 없는 사실이다(이 화면의 다른 빈 상태와 같은 규칙).
+ */
+function UpcomingSummary({ data }: { data: RecurringUpcomingResponse }) {
+  if (data.items.length === 0) return null;
+
+  const overdue = data.items.filter(
+    (i) => i.nextExpectedPhase === "overdue",
+  ).length;
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-2 p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[15px] font-medium">이번 달 남은 정기</span>
+          {data.forecastableCount > 0 ? (
+            <span className="text-[17px] font-semibold tabular-nums">
+              <Money amount={data.totalAmount} currency={data.totalCurrency} />
+            </span>
+          ) : null}
+        </div>
+
+        <p className="text-muted-foreground text-[13px] leading-relaxed">
+          {data.forecastableCount > 0
+            ? `${data.forecastableCount}건이 나갈 예정이에요.`
+            : "예정된 금액을 아직 말할 수 없어요."}
+          {overdue > 0 ? ` ${overdue}건은 예정일이 지났어요.` : ""}
+        </p>
+
+        {/*
+         * 빠진 것을 말하는 문단. 두 사유를 따로 쓰는 이유: 사용자가 취할 조치가
+         * 다르다 — 앞은 기다리면 풀리고(재계산), 뒤는 영구적이다(외화).
+         */}
+        {data.excludedCount > 0 || data.otherCurrencyCount > 0 ? (
+          <p className="text-muted-foreground bg-muted rounded-lg p-3 text-[12px] leading-relaxed">
+            {data.excludedCount > 0
+              ? `${data.excludedCount}건은 과거 거래 기준이 아직 정리되지 않아 금액을 세지 않았어요. `
+              : ""}
+            {data.otherCurrencyCount > 0
+              ? `${data.otherCurrencyCount}건은 원화가 아니라 합계에 넣지 않았어요.`
+              : ""}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function RecurringPage() {
   const { householdId } = useHousehold();
   const { authedFetch } = useAuth();
@@ -244,8 +314,24 @@ export default function RecurringPage() {
       authedFetch((token) => fetchRecurringSeries(token, householdId as string)),
   });
 
-  const invalidate = () =>
+  // 창은 화면이 정한다("이번 달"). 한 번 계산해 두고 렌더마다 바꾸지 않는다 —
+  // 매 렌더 새 값을 만들면 queryKey가 달라져 요청이 무한히 늘어난다.
+  const until = useMemo(() => endOfMonthKst(), []);
+
+  const upcomingQuery = useQuery<RecurringUpcomingResponse>({
+    queryKey: recurringUpcomingQueryKey(householdId, until),
+    enabled: householdId != null && seriesQuery.data?.enabled === true,
+    queryFn: () =>
+      authedFetch((token) =>
+        fetchRecurringUpcoming(token, householdId as string, until),
+      ),
+  });
+
+  const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: recurringQueryKey(householdId) });
+    // 확정·재계산은 예정 목록도 바꾼다 — 한쪽만 갱신하면 합계가 목록과 어긋난다.
+    queryClient.invalidateQueries({ queryKey: ["recurring-upcoming"] });
+  };
 
   const decide = useMutation({
     mutationFn: ({
@@ -319,6 +405,15 @@ export default function RecurringPage() {
 
       {data?.enabled ? (
         <>
+          {/*
+           * 합계를 목록 **위**에 둔다 — 사용자가 이 화면에 오는 이유는 "얼마 나가지?"이고,
+           * 개별 확정은 그 답을 얻은 뒤의 작업이다. 예정 0건이면 컴포넌트가 스스로
+           * 사라진다(빈 카드를 "정기 결제 없음"으로 읽히게 두지 않는다).
+           */}
+          {upcomingQuery.data ? (
+            <UpcomingSummary data={upcomingQuery.data} />
+          ) : null}
+
           <div className="flex items-center justify-between gap-2 px-1">
             <p className="text-muted-foreground text-[13px] leading-relaxed">
               최근 6개월에서 반복으로 보이는 결제예요. 맞는지 알려 주시면 다음부터

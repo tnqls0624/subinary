@@ -25,7 +25,9 @@ import {
   gt,
   gte,
   inArray,
+  isNotNull,
   isNull,
+  lte,
   ne,
   not,
   notExists,
@@ -35,11 +37,14 @@ import {
 import type {
   RecurringDecisionResponse,
   RecurringNeedsReviewReason,
+  RecurringRecomputeResponse,
   RecurringSeriesItem,
   RecurringSeriesListResponse,
-  RecurringRecomputeResponse,
+  RecurringUpcomingItem,
+  RecurringUpcomingResponse,
 } from '@family/contracts';
 import {
+  MONEY_CONTRACT_VERSION_V2,
   REDACTED_MERCHANT_LABEL,
   notTransferCategory,
   schema,
@@ -52,6 +57,7 @@ import {
   forecastRecurring,
   regroupByCanonicalMerchant,
   resolveCanonicalMerchant,
+  resolveRecurringPhase,
 } from '@family/shared';
 
 import { DB } from '../database/database.constants';
@@ -61,6 +67,7 @@ import {
   type RecurringOccurrence,
 } from './detect';
 import { reconcileSeries, type DecidedSeries } from './reconcile';
+import { isAmountForecastable, summarizeUpcoming } from './upcoming-summary';
 import {
   RECURRING_LOOKBACK_MONTHS,
   isRecurringRadarEnabled,
@@ -71,6 +78,31 @@ const DECLINE_LINK_WINDOW_DAYS = 60;
 
 /** 거절 묶음을 "반복"으로 볼 최소 시도 수. ADR-0024 §4와 같은 임계. */
 const DECLINE_LINK_MIN_ATTEMPTS = 2;
+
+/**
+ * 재계산이 확정하는 예상일 컬럼.
+ *
+ * `now`를 인자로 받아 한 배치 안의 모든 series가 같은 기준 시각을 쓴다. 항목마다
+ * `new Date()`를 부르면 같은 재계산 안에서 서로 다른 국면 경계에 걸리는 series가
+ * 생긴다 — 재현 불가능한 차이라 나중에 설명할 수 없다.
+ */
+function forecastColumns(
+  candidate: Pick<RecurringCandidate, 'lastSeenAt' | 'intervalDays' | 'cadence'>,
+  now: Date,
+): { nextExpectedAt: Date; nextExpectedWindowDays: number } {
+  const forecast = forecastRecurring(
+    {
+      lastSeenAt: candidate.lastSeenAt,
+      intervalDays: candidate.intervalDays,
+      cadence: candidate.cadence,
+    },
+    now,
+  );
+  return {
+    nextExpectedAt: new Date(forecast.nextExpectedAt),
+    nextExpectedWindowDays: forecast.windowDays,
+  };
+}
 
 @Injectable()
 export class RecurringService {
@@ -117,6 +149,8 @@ export class RecurringService {
         needsReviewReason: schema.recurringSeries.needsReviewReason,
         moneyContractVersion: schema.recurringSeries.moneyContractVersion,
         computedAt: schema.recurringSeries.computedAt,
+        nextExpectedAt: schema.recurringSeries.nextExpectedAt,
+        nextExpectedWindowDays: schema.recurringSeries.nextExpectedWindowDays,
         // 타인의 `summary_only` 근거가 하나라도 있으면 이름을 가린다(금액은 남긴다).
         redacted: exists(this.summaryOnlyEvidence(actorMemberId)),
       })
@@ -139,13 +173,17 @@ export class RecurringService {
     const items: RecurringSeriesItem[] = rows.map((r) => {
       const linked = declines.get(`${r.merchantCanonical}`);
       // 예상일은 **확정된 series에만** 붙인다. 후보에 붙이면 예상 자체가 확정처럼 읽힌다.
-      const forecast =
-        r.status === 'confirmed'
-          ? forecastRecurring(
+      //
+      // 저장된 `nextExpectedAt`을 읽고 국면만 계산한다 — 매번 다시 계산하면 월 주기의
+      // "첫 미래 주기까지 민다" 규칙 때문에 조회 시각에 따라 날짜가 달라지고, 목록과
+      // 알림이 다른 날을 말한다. 저장값이 없는 행(재계산 전)은 예상을 말하지 않는다.
+      const phase =
+        r.status === 'confirmed' && r.nextExpectedAt && r.nextExpectedWindowDays
+          ? resolveRecurringPhase(
               {
-                lastSeenAt: r.lastSeenAt,
+                nextExpectedAt: r.nextExpectedAt,
                 intervalDays: r.intervalDays,
-                cadence: r.cadence,
+                windowDays: r.nextExpectedWindowDays,
               },
               now,
             )
@@ -167,11 +205,11 @@ export class RecurringService {
           (r.needsReviewReason as RecurringNeedsReviewReason | null) ?? null,
         mine: r.memberId === actorMemberId,
         moneyContractVersion: r.moneyContractVersion,
-        nextExpectedAt: forecast?.nextExpectedAt ?? null,
-        nextExpectedWindowDays: forecast?.windowDays ?? null,
-        nextExpectedPhase: forecast?.phase ?? null,
-        overdueDays: forecast?.overdueDays ?? 0,
-        stoppedCandidate: forecast?.stoppedCandidate ?? false,
+        nextExpectedAt: phase ? r.nextExpectedAt!.toISOString() : null,
+        nextExpectedWindowDays: phase ? r.nextExpectedWindowDays : null,
+        nextExpectedPhase: phase?.phase ?? null,
+        overdueDays: phase?.overdueDays ?? 0,
+        stoppedCandidate: phase?.stoppedCandidate ?? false,
         // 이름을 가린 항목에는 거절 사유도 붙이지 않는다 — 사유가 곧 가맹점 힌트다.
         recentDeclineReason: r.redacted ? null : (linked?.reason ?? null),
         recentDeclineAttempts: r.redacted ? 0 : (linked?.attempts ?? 0),
@@ -184,10 +222,143 @@ export class RecurringService {
     );
     return {
       enabled: true,
-      // ADR-0027 enforce + 과거 수리 뒤 전량 재계산해야 false가 된다.
-      provisional: true,
+      // ADR-0027이 8단계까지 끝났으므로(전량 v2 + 제약 VALIDATE) 이 값은 이제
+      // **데이터가 판정한다.** 하드코딩을 남겨 두면 조건이 충족된 뒤에도 홈·알림이
+      // 영원히 열리지 않는다 — 플래그로 잠긴 기능과 같은 실패다.
+      //
+      // 근거 하나라도 v1이면 그 series는 v1 신뢰도이므로(기획 D2) 목록 전체를
+      // provisional로 본다. 개별 series의 예고 가능 여부는 `/upcoming`이 항목마다
+      // `amountForecastable`로 말한다.
+      provisional: rows.some(
+        (row) => row.moneyContractVersion < MONEY_CONTRACT_VERSION_V2,
+      ),
       items,
       computedAt: computedAt ? computedAt.toISOString() : null,
+    };
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 예정 정기 지출 — 금액 레이어 S1                                          */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * 확정된 series의 **예정 목록 + 합계** (`docs/concept-upcoming-spend-2026-08.md` S1).
+   *
+   * ## 무엇을 말하고 무엇을 말하지 않는가
+   *
+   * 말하는 것: 관측된 중앙값(`amount_median`)과 저장된 예상일. **예측하지 않는다**
+   * (기획 D1 — 추세 외삽·LLM 없음). 화면이 근거를 함께 띄울 수 있어야 한다.
+   *
+   * 말하지 않는 것:
+   * - `moneyContractVersion < 2`인 series의 **금액**. 그 컬럼은 근거 거래 중 최솟값이라
+   *   하나라도 v1이 섞이면 series 전체가 v1 신뢰도다(기획 D2). 항목은 내보내되
+   *   `amountForecastable: false`로 표시하고 **합계에서 뺀다.**
+   * - 다른 통화의 합산. 환산은 금액 계약의 일이고 예고는 관측만 말한다. 섞여 있으면
+   *   `otherCurrencyCount`로 알린다.
+   *
+   * 빠진 건수를 함께 내보내는 것이 핵심이다 — 빠진 걸 숨긴 합계는 "이만큼만 나간다"는
+   * 거짓말이 된다.
+   *
+   * 공개범위는 목록과 같은 규칙을 쓴다(`visibleToActor`). 타인의 `private` 근거가 있는
+   * series는 애초에 조회되지 않으므로 합계에 새지 않는다.
+   */
+  async upcoming(
+    actorUserId: string,
+    householdId: string,
+    until: Date,
+  ): Promise<RecurringUpcomingResponse> {
+    if (!householdId) {
+      throw new BadRequestException('householdId is required');
+    }
+    const actorMemberId = await this.requireMembership(householdId, actorUserId);
+
+    if (!isRecurringRadarEnabled()) {
+      return {
+        enabled: false,
+        until: until.toISOString(),
+        items: [],
+        totalAmount: 0,
+        totalCurrency: 'KRW',
+        forecastableCount: 0,
+        excludedCount: 0,
+        otherCurrencyCount: 0,
+      };
+    }
+
+    const rows = await this.db
+      .select({
+        id: schema.recurringSeries.id,
+        memberId: schema.recurringSeries.memberId,
+        merchantCanonical: schema.recurringSeries.merchantCanonical,
+        amountMin: schema.recurringSeries.amountMin,
+        amountMax: schema.recurringSeries.amountMax,
+        amountMedian: schema.recurringSeries.amountMedian,
+        currency: schema.recurringSeries.currency,
+        cadence: schema.recurringSeries.cadence,
+        intervalDays: schema.recurringSeries.intervalDays,
+        moneyContractVersion: schema.recurringSeries.moneyContractVersion,
+        nextExpectedAt: schema.recurringSeries.nextExpectedAt,
+        nextExpectedWindowDays: schema.recurringSeries.nextExpectedWindowDays,
+        redacted: exists(this.summaryOnlyEvidence(actorMemberId)),
+      })
+      .from(schema.recurringSeries)
+      .where(
+        and(
+          eq(schema.recurringSeries.householdId, householdId),
+          // 확정된 것만. 후보에 "다음 결제"를 말하면 예상이 확정처럼 읽힌다.
+          eq(schema.recurringSeries.status, 'confirmed'),
+          isNotNull(schema.recurringSeries.nextExpectedAt),
+          lte(schema.recurringSeries.nextExpectedAt, until),
+          this.visibleToActor(actorMemberId),
+        ),
+      )
+      // 지난 것이 더 급하다 — 예상일 오름차순이면 overdue가 자연히 먼저 온다.
+      .orderBy(
+        asc(schema.recurringSeries.nextExpectedAt),
+        asc(schema.recurringSeries.merchantCanonical),
+      );
+
+    // 한 응답 안에서는 같은 `now`로 국면을 판정한다.
+    const now = new Date();
+    const totalCurrency = 'KRW';
+    // 합계는 순수 함수가 소유한다 — 여기서 다시 세면 규칙이 두 곳으로 갈라지고,
+    // 그 순간 "빠진 건수"가 실제로 빠진 것과 어긋난다(`upcoming-summary.ts`).
+    const summary = summarizeUpcoming(rows, totalCurrency);
+
+    const items: RecurringUpcomingItem[] = rows.map((r) => {
+      const phase = resolveRecurringPhase(
+        {
+          nextExpectedAt: r.nextExpectedAt!,
+          intervalDays: r.intervalDays,
+          windowDays: r.nextExpectedWindowDays ?? 0,
+        },
+        now,
+      );
+
+      return {
+        id: r.id,
+        merchant: r.redacted ? REDACTED_MERCHANT_LABEL : r.merchantCanonical,
+        amount: r.amountMedian,
+        amountMin: r.amountMin,
+        amountMax: r.amountMax,
+        currency: r.currency,
+        cadence: r.cadence,
+        nextExpectedAt: r.nextExpectedAt!.toISOString(),
+        nextExpectedWindowDays: r.nextExpectedWindowDays ?? 0,
+        nextExpectedPhase: phase.phase,
+        overdueDays: phase.overdueDays,
+        mine: r.memberId === actorMemberId,
+        amountForecastable: isAmountForecastable(r, totalCurrency),
+        amountVaries: r.amountMin !== r.amountMax,
+      };
+    });
+
+    return {
+      enabled: true,
+      until: until.toISOString(),
+      items,
+      totalCurrency,
+      ...summary,
     };
   }
 
@@ -351,6 +522,7 @@ export class RecurringService {
             status: 'candidate',
             algorithmVersion: candidate.algorithmVersion,
             moneyContractVersion: candidate.moneyContractVersion,
+            ...forecastColumns(candidate, computedAt),
             computedAt,
           })
           .returning({ id: schema.recurringSeries.id });
@@ -513,6 +685,9 @@ export class RecurringService {
         lastSeenAt: candidate.lastSeenAt,
         algorithmVersion: candidate.algorithmVersion,
         moneyContractVersion: candidate.moneyContractVersion,
+        // 예상일은 재계산 시점에 확정한다 — 목록·홈·알림이 같은 날짜를 봐야 한다.
+        // 같은 `computedAt`을 `now`로 넘겨 한 배치 안에서 판정을 하나로 묶는다.
+        ...forecastColumns(candidate, computedAt),
         computedAt,
         updatedAt: computedAt,
         ...(reason

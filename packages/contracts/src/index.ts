@@ -551,6 +551,8 @@ export {
   recurringDecisionResponseSchema,
   recurringRecomputeRequestSchema,
   recurringRecomputeResponseSchema,
+  recurringUpcomingItemSchema,
+  recurringUpcomingResponseSchema,
 } from './recurring.js';
 export type {
   RecurringSeriesStatus,
@@ -562,6 +564,8 @@ export type {
   RecurringDecisionResponse,
   RecurringRecomputeRequest,
   RecurringRecomputeResponse,
+  RecurringUpcomingItem,
+  RecurringUpcomingResponse,
 } from './recurring.js';
 
 export {
