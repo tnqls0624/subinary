@@ -28,6 +28,7 @@
     "verify:ai-pipeline:isolated": "node scripts/verify-model-promotion-isolated.mjs",
     "verify:training-runner:isolated": "node scripts/verify-training-runner-isolated.mjs",
     "verify:card-sms:isolated": "node scripts/verify-card-sms-ingest-isolated.mjs",
+    "parser:gate:check": "node scripts/check-parser-gate.mjs",
     "money:repair:plan": "node scripts/repair-money-contract.mjs plan",
     "money:repair:status": "node scripts/repair-money-contract.mjs status",
     "money:repair:apply": "node scripts/repair-money-contract.mjs apply",
