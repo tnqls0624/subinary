@@ -157,6 +157,25 @@ describe('v2ConstraintViolations', () => {
   });
 });
 
+describe('증빙 patch와 제약 판정 시점', () => {
+  const fxRow = {
+    ...row,
+    transactionType: 'approval',
+    originalAmount: 2_200,
+    originalCurrency: 'USD',
+    originalCancelledAmount: 0,
+    exchangeRate: 1_486.949463,
+    fxRateSnapshotId: null,
+  };
+
+  it('적용 전 행은 위반 중이고, patch가 바로 그것을 해소한다', () => {
+    // 적용 **전** 행으로 제약을 보면 증빙 모드는 영원히 차단된다 — 그 행은 정의상
+    // 지금 위반 중이기 때문이다. 실제로 그렇게 구현해서 마지막 1건이 막혔다.
+    expect(v2ConstraintViolations(fxRow)).toContain('v2_fx_snapshot');
+    expect(v2ConstraintViolations({ ...fxRow, fxRateSnapshotId: 'snapshot-1' })).toEqual([]);
+  });
+});
+
 describe('repairAction', () => {
   it('자동 대상은 재계산으로 적는다 — 실제로 재계산했더니 같았다는 뜻이다', () => {
     expect(repairAction(record({ verdict: 'match' }))).toBe('recalculate_chain');

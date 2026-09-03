@@ -443,15 +443,6 @@ export class TransactionMoneyRepairService {
         const current = transactionMoneyChecksum(row as TransactionMoneyRowLike);
         if (current !== entry.checksumBefore) return 'stale' as const;
 
-        // 계획 이후 제약 상황이 달라졌을 수 있고, 무엇보다 **DB가 막기 전에 우리가
-        // 멈춰야** 한다. 여기서 던지면 남은 행이 통째로 날아가고 앞선 행만 커밋된
-        // 반쪽 배치가 남는다(2026-09-03에 실제로 그렇게 57건이 남았다).
-        if (
-          v2ConstraintViolations(row as unknown as TransactionMoneyV2CheckRowLike).length > 0
-        ) {
-          return 'blocked' as const;
-        }
-
         // evidence 모드는 증빙 컬럼을 함께 채운다. 금액 축은 계획 단계에서 동일함을
         // 확인했고, 여기서 한 번 더 본다 — 계획과 적용 사이에 행이 바뀌었을 수 있다.
         const evidence = entry.reason.startsWith(`${MONEY_REPAIR_REASON_PREFIX}auto:evidence:`)
@@ -470,6 +461,19 @@ export class TransactionMoneyRepairService {
             const after = evidence[column] ?? null;
             if (before === null && after !== null) patch[column] = after;
           }
+        }
+
+        // 제약은 **적용 결과**로 본다. 적용 전 행으로 보면 증빙 모드가 영원히 차단된다 —
+        // 그 행은 정의상 지금 위반 중이고, 이 patch가 바로 그것을 해소하기 때문이다.
+        // 무엇보다 **DB가 막기 전에 우리가 멈춰야** 한다. 여기서 던지면 남은 행이 통째로
+        // 날아가고 앞선 행만 커밋된 반쪽 배치가 남는다(2026-09-03에 실제로 57건이 그랬다).
+        if (
+          v2ConstraintViolations({
+            ...(row as object),
+            ...patch,
+          } as TransactionMoneyV2CheckRowLike).length > 0
+        ) {
+          return 'blocked' as const;
         }
 
         await tx
