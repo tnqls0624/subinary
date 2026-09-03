@@ -196,6 +196,16 @@ export const recurringUpcomingItemSchema = z.object({
   amountForecastable: z.boolean(),
   /** 금액 변동형 구독이면 true(`amountMin !== amountMax`). */
   amountVaries: z.boolean(),
+  /**
+   * 이 series가 나가는 결제 카드. **근거 거래의 카드가 하나일 때만** 채운다(기획 D7).
+   *
+   * 갈리면 `null`이다 — 실측(2026-09-03)에서 쿠팡은 카드 3장, 영등포구청은 2장으로
+   * 결제됐다. "정기 결제는 한 카드로 나간다"가 항상 참이 아니므로, 억지로 하나를
+   * 고르면 카드 예산에 틀린 금액을 얹는다(기획 D1: 관측에서만).
+   *
+   * 카드 예산(`scope_type='card'`)의 `scopeRefId`와 이 값으로 매칭한다.
+   */
+  cardId: z.string().nullable(),
 });
 export type RecurringUpcomingItem = z.infer<typeof recurringUpcomingItemSchema>;
 

@@ -16,7 +16,7 @@
 import { Suspense, useCallback, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MoreHorizontal, Plus, Wallet } from "lucide-react";
 
 import type {
@@ -26,8 +26,15 @@ import type {
   BudgetScopeType,
   BudgetSummary,
   BudgetUpdateRequest,
+  RecurringUpcomingResponse,
 } from "@family/contracts";
 import { budgetCopyResponseSchema } from "@family/contracts";
+
+import {
+  endOfMonthKst,
+  fetchRecurringUpcoming,
+  recurringUpcomingQueryKey,
+} from "@/lib/recurring-api";
 
 import {
   AlertDialog,
@@ -177,6 +184,63 @@ function parsePositiveInt(value: string): number | null {
   return parsed;
 }
 
+/**
+ * "이대로면 초과" 한 줄 (금액 레이어 D7).
+ *
+ * ## 왜 이 한 줄인가
+ *
+ * P1-22가 남긴 문제는 "초과를 알린 뒤 할 수 있는 게 예산 수정과 삭제뿐"이었다. 그걸
+ * **정보로** 푼다 — 넘기 전에 알려주면 사용자가 지출을 조절할 수 있다. 자동 예산
+ * 조정·추천은 하지 않는다(D7).
+ *
+ * ## 카드 예산만 매칭하는 이유
+ *
+ * `recurring_series`는 어느 **카드**로 나가는지를 근거 거래에서 유도할 수 있지만
+ * (`cardId`), 카테고리·구성원은 알 수 없다. 카테고리는 사용자가 거래별로 바꾸므로
+ * series 단위로 하나를 고를 수 없고, 그건 별도 결정이다.
+ *
+ * 그래서 `scope_type='card'`가 아닌 예산에는 **아무 말도 하지 않는다.** 틀린 경고보다
+ * 침묵이 낫다. 근거 카드가 갈리는 series도 `cardId`가 null이라 자연히 빠진다 —
+ * 실측에서 쿠팡은 카드 3장으로 결제됐다.
+ *
+ * ## 이미 넘은 예산에는 말하지 않는다
+ *
+ * `BudgetStatusLine`이 이미 "예산을 N원 넘었어요"라고 말한다. 그 위에 "이대로면
+ * 초과"를 얹으면 같은 사실을 두 번 말하는 것이다.
+ */
+function ProjectedOverLine({
+  budget,
+  upcoming,
+  isCurrentMonth,
+}: {
+  budget: BudgetSummary;
+  upcoming: RecurringUpcomingResponse | undefined;
+  isCurrentMonth: boolean;
+}) {
+  // 과거 달에 "앞으로 나갈 돈"은 뜻이 없다.
+  if (!isCurrentMonth || !upcoming?.enabled) return null;
+  if (budget.scopeType !== "card" || !budget.scopeRefId) return null;
+  if (budget.usageRate >= 1) return null;
+
+  // 이 카드로 나갈 정기 중 **금액을 예고할 수 있는 것만** 더한다(기획 D2).
+  const mine = upcoming.items.filter(
+    (i) => i.cardId === budget.scopeRefId && i.amountForecastable,
+  );
+  if (mine.length === 0) return null;
+
+  const pending = mine.reduce((sum, i) => sum + i.amount, 0);
+  const projected = budget.spent + pending;
+  if (projected <= budget.amount) return null;
+
+  const overBy = projected - budget.amount;
+  return (
+    <p className="text-warning-strong text-[13px] font-medium">
+      이대로면 {formatMoney(overBy, budget.currency)} 넘어요 · 정기 결제{" "}
+      {mine.length}건 {formatMoney(pending, budget.currency)} 남았어요
+    </p>
+  );
+}
+
 /** 사용률 기반 상태 카피(해요체). 기존 usageRate 데이터로만 계산. */
 function BudgetStatusLine({ budget }: { budget: BudgetSummary }) {
   if (budget.usageRate >= 1) {
@@ -250,6 +314,19 @@ function BudgetsView() {
     [router, thisMonth],
   );
   const isCurrentMonth = month === thisMonth;
+
+  // 이대로면 초과(D7)를 계산할 재료. 창은 이번 달 말까지 — 홈·정기 지출 화면과 같다.
+  // `enabled`가 이번 달로 제한되므로 과거 달을 보면 요청조차 하지 않는다.
+  const upcomingUntil = useMemo(() => endOfMonthKst(), []);
+  const upcomingQuery = useQuery<RecurringUpcomingResponse>({
+    queryKey: recurringUpcomingQueryKey(householdId, upcomingUntil),
+    enabled: householdId != null && isCurrentMonth,
+    queryFn: () =>
+      authedFetch((token) =>
+        fetchRecurringUpcoming(token, householdId as string, upcomingUntil),
+      ),
+  });
+
   const isPastMonth = month < thisMonth;
   const isFutureMonth = month > thisMonth;
   // 과거월 예산은 **읽기 전용**이다. 예산액을 지금 바꾸면 그 달 달성률이 소급해서
@@ -565,6 +642,12 @@ function BudgetsView() {
                     }
                   />
                   <BudgetStatusLine budget={budget} />
+                  {/* 넘기 전에 알린다 — P1-22를 정보로 푸는 한 줄(D7). */}
+                  <ProjectedOverLine
+                    budget={budget}
+                    upcoming={upcomingQuery.data}
+                    isCurrentMonth={isCurrentMonth}
+                  />
                   {/* 주 액션은 '어디서 썼는지 보기'다. 예산을 넘었다고 알린 뒤
                     줄 수 있는 게 '예산 늘리기'와 '예산 삭제'뿐이면 가계부가
                     최악의 조언을 하는 셈이다 — 수정·삭제는 ⋯로 내린다.

@@ -301,6 +301,18 @@ export class RecurringService {
         moneyContractVersion: schema.recurringSeries.moneyContractVersion,
         nextExpectedAt: schema.recurringSeries.nextExpectedAt,
         nextExpectedWindowDays: schema.recurringSeries.nextExpectedWindowDays,
+        // 근거 거래의 카드가 **하나일 때만** 카드를 말한다(기획 D7).
+        // 갈리면 null — 실측(2026-09-03)에서 쿠팡은 3장, 영등포구청은 2장으로
+        // 결제됐다. "정기 결제는 한 카드로 나간다"가 항상 참이 아니므로, 억지로
+        // 하나 고르면 카드 예산에 틀린 금액을 얹는다(기획 D1: 관측에서만).
+        cardId: sql<string | null>`(
+          select case when count(distinct t.card_id) = 1
+                      then min(t.card_id::text)
+                      else null end
+            from recurring_series_evidence e
+            join card_transactions t on t.id = e.transaction_id
+           where e.series_id = ${schema.recurringSeries.id}
+        )`,
         redacted: exists(this.summaryOnlyEvidence(actorMemberId)),
       })
       .from(schema.recurringSeries)
@@ -352,6 +364,7 @@ export class RecurringService {
         mine: r.memberId === actorMemberId,
         amountForecastable: isAmountForecastable(r, totalCurrency),
         amountVaries: r.amountMin !== r.amountMax,
+        cardId: r.cardId,
       };
     });
 
