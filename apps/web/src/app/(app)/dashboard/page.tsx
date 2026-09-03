@@ -65,6 +65,7 @@ import {
   type TodoCounts,
 } from "@/components/widgets";
 import { MonthlyInsightsCard } from "@/components/monthly-insights-card";
+import { UpcomingSpendCard } from "./upcoming-card";
 import { AddTransactionDialog } from "../transactions/add-transaction-dialog";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -574,6 +575,16 @@ function DashboardView() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/*
+       * 앞으로 나갈 돈 (금액 레이어 S2). 히어로가 "얼마 썼나"를 말한 직후에 "얼마 더
+       * 나가나"를 답한다 — 순서를 바꾸면 아직 안 쓴 돈이 쓴 돈보다 먼저 읽힌다.
+       * 예정 0건·과거 달·Radar 꺼짐이면 컴포넌트가 스스로 사라진다.
+       */}
+      <UpcomingSpendCard
+        isCurrentMonth={isCurrentMonth}
+        monthlyNet={monthly?.totalNet ?? null}
+      />
 
       {/* AI 인사이트(있을 때만 렌더). 자연어 질의는 하단 탭 중앙 'AI'(/ai)로 분리. */}
       <MonthlyInsightsCard month={month} />

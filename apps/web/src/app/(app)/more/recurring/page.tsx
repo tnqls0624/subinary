@@ -63,7 +63,7 @@ import {
   recomputeRecurringSeries,
   recurringQueryKey,
   recurringUpcomingQueryKey,
-} from "./recurring-api";
+} from "@/lib/recurring-api";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("ko-KR", {
