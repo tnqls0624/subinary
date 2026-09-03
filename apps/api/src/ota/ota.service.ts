@@ -88,13 +88,22 @@ export class OtaService {
    * 매니페스트가 없으면 "없음"이다 — 에러가 아니다. OTA를 아직 한 번도 배포하지 않은
    * 상태가 정상이고, 그때 500을 내면 앱이 매번 실패를 재시도한다.
    */
-  async resolveUpdate(currentVersion?: string): Promise<OtaUpdateResponse> {
+  async resolveUpdate(
+    currentVersion?: string,
+    platform?: string,
+  ): Promise<OtaUpdateResponse> {
     const manifest = await this.readManifest();
     // 요청을 남긴다. Caddy는 access log가 꺼져 있어 warn만 기록하므로, 이 줄이 없으면
     // "앱이 업데이트를 확인했는가"를 알 방법이 아예 없다 — 앱을 열어 보는 것 말고는.
-    // PII 없음: 번들 버전 문자열뿐이고 기기 식별자는 받지도 쓰지도 않는다.
+    //
+    // `platform`을 함께 남기는 이유: iOS와 Android는 **따로 빌드·설치**하므로 한쪽만
+    // 갱신된 상태가 정상적으로 존재한다. 플랫폼 없이 로그를 보면 "앱이 받았다"가 어느
+    // 쪽인지 알 수 없어, 안 받은 쪽을 받았다고 착각한다.
+    //
+    // PII 없음: 번들 버전과 플랫폼 문자열뿐이고 기기 식별자는 받지도 쓰지도 않는다.
     this.logger.log(
-      `ota check: app=${currentVersion ?? 'unknown'} latest=${manifest?.version ?? 'none'}`,
+      `ota check: platform=${platform ?? 'unknown'} ` +
+        `app=${currentVersion ?? 'unknown'} latest=${manifest?.version ?? 'none'}`,
     );
     if (!manifest) {
       return { message: 'Version not found' };

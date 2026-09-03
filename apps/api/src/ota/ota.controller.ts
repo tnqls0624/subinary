@@ -51,7 +51,7 @@ export class OtaController {
   @Post('updates')
   @HttpCode(HttpStatus.OK)
   updates(@Body() body: AppInfosBody): Promise<OtaUpdateResponse> {
-    return this.otaService.resolveUpdate(body?.version_name);
+    return this.otaService.resolveUpdate(body?.version_name, body?.platform);
   }
 
   /**
