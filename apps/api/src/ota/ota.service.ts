@@ -90,6 +90,12 @@ export class OtaService {
    */
   async resolveUpdate(currentVersion?: string): Promise<OtaUpdateResponse> {
     const manifest = await this.readManifest();
+    // 요청을 남긴다. Caddy는 access log가 꺼져 있어 warn만 기록하므로, 이 줄이 없으면
+    // "앱이 업데이트를 확인했는가"를 알 방법이 아예 없다 — 앱을 열어 보는 것 말고는.
+    // PII 없음: 번들 버전 문자열뿐이고 기기 식별자는 받지도 쓰지도 않는다.
+    this.logger.log(
+      `ota check: app=${currentVersion ?? 'unknown'} latest=${manifest?.version ?? 'none'}`,
+    );
     if (!manifest) {
       return { message: 'Version not found' };
     }
@@ -135,6 +141,9 @@ export class OtaService {
     } catch {
       throw new NotFoundException('bundle not found');
     }
+    // 다운로드가 시작됐다는 사실을 남긴다. 확인(check)만 있고 이 줄이 없으면
+    // "앱이 새 번들을 받기 시작했는지"를 구분할 수 없다.
+    this.logger.log(`ota download: ${name} (${size} bytes)`);
     return { stream: createReadStream(full), size, name };
   }
 
