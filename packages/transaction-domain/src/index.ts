@@ -91,6 +91,23 @@ export type { MoneyShadowLogger, MoneyShadowSinkStats } from './shadow-sink.js';
 export { TransactionMoneyShadowObserver } from './shadow-observer.js';
 
 export {
+  MONEY_REPAIR_AUTO_VERDICTS,
+  MONEY_REPAIR_REASON_PREFIX,
+  TransactionMoneyRepairManifestSink,
+  TransactionMoneyRepairService,
+  classifyRepairEligibility,
+  newRepairBatchId,
+  repairAction,
+} from './repair.js';
+export type {
+  MoneyRepairApplyStats,
+  MoneyRepairEligibility,
+  MoneyRepairLogger,
+  MoneyRepairPlanStats,
+  MoneyRepairRevertStats,
+} from './repair.js';
+
+export {
   DYNAMIC_COLUMNS,
   MONEY_WRITE_PATTERNS,
   scanMoneyWriteViolations,
