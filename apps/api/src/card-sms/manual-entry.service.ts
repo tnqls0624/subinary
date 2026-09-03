@@ -24,9 +24,11 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { and, eq } from 'drizzle-orm';
 
 import { parseCardSms } from '@family/card-parsers';
+import type { AppConfig } from '@family/config';
 import type {
   ManualFieldsEntryRequest,
   ManualParsePreviewRequest,
@@ -62,18 +64,29 @@ export class ManualEntryService {
     // ADR-0027 5단계: enforce가 켜지면 금액 쓰기를 이쪽이 소유한다. 꺼져 있으면
     // 아래 legacy 삽입이 그대로 돈다 — 한쪽만 켜진 중간 상태는 쓰기 펜스가 막는다.
     private readonly moneyWrite: MoneyWriteService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    // ADR-0027 6단계 게이트. **worker와 같은 설정을 읽어야 한다** — 미리보기가 게이트를
+    // 안 거치고 실제 파싱만 거치면 사용자가 본 금액과 저장되는 금액이 갈린다.
+    this.actionGate =
+      configService.get<AppConfig['ai']>('ai')?.cardSmsActionGate !== 'off';
+  }
+
+  private readonly actionGate: boolean;
 
   /**
    * 붙여넣은 문자를 상태 없이 파싱해 미리보기 결과를 돌려준다. DB 미접근이라
    * 가구 스코프가 없어 멤버십 검사도 하지 않는다(민감정보 없음, 순수 파싱).
    */
   parsePreview(input: ManualParsePreviewRequest): ManualParsePreviewResponse {
-    const result = parseCardSms({
-      sender: input.sender?.trim() || MANUAL_SENDER,
-      content: input.content,
-      receivedAt: new Date(),
-    });
+    const result = parseCardSms(
+      {
+        sender: input.sender?.trim() || MANUAL_SENDER,
+        content: input.content,
+        receivedAt: new Date(),
+      },
+      { actionGate: this.actionGate },
+    );
     const parseable =
       result.transactionType !== 'unknown' &&
       result.amount != null &&

@@ -127,6 +127,20 @@ export const configSchema = z.object({
       cardSmsLlmMode: z.enum(['off', 'shadow', 'on']).default('off'),
       /** 카드 문자 LLM 호출 일일 상한. 초과분은 호출 없이 사람 검토로 보낸다. */
       cardSmsLlmDailyBudget: z.coerce.number().int().min(0).max(10_000).default(50),
+      /**
+       * 액션 결박 금액 게이트 (ADR-0027 롤아웃 6단계). 기본 **on**.
+       *
+       * - `on`: 액션에 결박된 유일한 금액만 L0 성공으로 인정한다. 미확정이면 금액을
+       *   비우고 L1(레시피)→L2(LLM)로 내려보낸다. 광고·한도·누적·잔액 금액이 승인액으로
+       *   승격되던 D-4를 구조로 막는다.
+       * - `off`: 게이트 없이 기존 추출기(본문 첫 `N원`)를 그대로 쓴다.
+       *
+       * 끄는 것은 **사고 대응 수단**이다. ADR이 "enforce 이후 금액 불변식 위반·설명되지
+       * 않은 delta·기존 정상 승인의 신규 격리가 한 건이라도 발생하면 shadow로 되돌린다"고
+       * 정했으므로 되돌림 경로를 남겨 둔다. 활성화 근거는
+       * `node scripts/check-parser-gate.mjs`(운영 문자 전수 재생)로 확인한다.
+       */
+      cardSmsActionGate: z.enum(['on', 'off']).default('on'),
     })
     .superRefine((value, context) => {
       const identityFields = [
@@ -291,6 +305,7 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       modelCanaryMonitorBatchSize: env.AI_MODEL_CANARY_MONITOR_BATCH_SIZE,
       cardSmsLlmMode: env.CARD_SMS_LLM_MODE,
       cardSmsLlmDailyBudget: env.CARD_SMS_LLM_DAILY_BUDGET,
+      cardSmsActionGate: env.CARD_SMS_ACTION_GATE,
     },
     observability: {
       alertWebhookUrl: optionalEnvValue(env.PIPELINE_ALERT_WEBHOOK_URL),

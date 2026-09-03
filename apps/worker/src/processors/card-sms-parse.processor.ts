@@ -49,6 +49,8 @@ const MIN_PARSED_CONFIDENCE = 70;
 @Processor(QUEUE_NAMES.CARD_SMS_PARSE)
 export class CardSmsParseProcessor extends WorkerHost {
   private readonly logger: ReturnType<typeof createLogger>;
+  /** ADR-0027 6단계 게이트. 끄는 것은 사고 대응 수단이다(기본 on). */
+  private readonly actionGate: boolean;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -64,6 +66,7 @@ export class CardSmsParseProcessor extends WorkerHost {
     this.logger = createLogger('worker:card-sms-parse-processor', {
       pretty: nodeEnv !== 'production',
     });
+    this.actionGate = configService.get<AppConfig['ai']>('ai')?.cardSmsActionGate !== 'off';
     // ADR-0027 5단계: 승격 소비 일시정지 대상으로 자기 자신을 등록한다.
     // `WorkerHost.worker`는 이 프로세스의 BullMQ Worker다 — `pause()`는 새 잡을
     // 가져오지 않을 뿐 큐에서 지우지 않으므로 pause 중 들어온 잡은 그대로 쌓인다.
@@ -151,8 +154,10 @@ export class CardSmsParseProcessor extends WorkerHost {
       receivedAt: event.receivedAt,
     };
 
-    // L0 — 결정적 규칙 파서(현행). 대부분의 문자가 여기서 끝난다.
-    let result = parseCardSms(input);
+    // L0 — 결정적 규칙 파서 + 액션 결박 금액 게이트(ADR-0027 6단계).
+    // 게이트가 금액을 확정하지 못하면 amount를 비우고 내려보내므로, 아래 `parseable`이
+    // 자연히 false가 되어 L1(레시피)→L2(LLM) 경로가 이어받는다.
+    let result = parseCardSms(input, { actionGate: this.actionGate });
     const parseable = (candidate: typeof result): boolean =>
       candidate.transactionType !== 'unknown' &&
       candidate.amount !== undefined &&

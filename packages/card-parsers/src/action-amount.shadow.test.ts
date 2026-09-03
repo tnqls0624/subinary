@@ -16,7 +16,17 @@ import {
   extractActionGroundedAmount,
   summarizeAmountShadow,
 } from './action-amount.js';
-import { parseCardSms } from './dispatch.js';
+import { parseCardSms, type ParseCardSmsOptions } from './dispatch.js';
+
+/**
+ * **게이트를 끈** 파싱 — shadow 비교의 legacy 쪽이다.
+ *
+ * 6단계에서 게이트가 기본 on이 됐으므로, 그냥 `parseCardSms(input)`을 legacy로 쓰면
+ * 게이트 결과와 게이트 결과를 비교하게 되어 이 파일의 모든 대조가 무의미해진다.
+ * `legacyAmount` 기준값은 게이트 **이전**에 측정한 값이라 여기서도 그 기준으로 읽는다.
+ */
+const NO_GATE: ParseCardSmsOptions = { actionGate: false };
+const legacyParse = (input: Parameters<typeof parseCardSms>[0]) => parseCardSms(input, NO_GATE);
 import { SHADOW_CORPUS } from './fixtures/action-amount.corpus.js';
 
 import type { AmountShadowRecord } from './action-amount.js';
@@ -24,14 +34,14 @@ import type { AmountShadowRecord } from './action-amount.js';
 const replay = (): { entry: (typeof SHADOW_CORPUS)[number]; record: AmountShadowRecord }[] =>
   SHADOW_CORPUS.map((entry) => {
     const input = { sender: entry.sender, content: entry.content, receivedAt: entry.receivedAt };
-    return { entry, record: compareAmountEvidence(input, parseCardSms(input)) };
+    return { entry, record: compareAmountEvidence(input, legacyParse(input)) };
   });
 
 describe('shadow 재생 — 기존 결과 무회귀', () => {
   it.each(SHADOW_CORPUS.map((e) => [e.id, e] as const))(
     '기존 파서 금액이 기준값 그대로다: %s',
     (_id, entry) => {
-      const legacy = parseCardSms({
+      const legacy = legacyParse({
         sender: entry.sender,
         content: entry.content,
         receivedAt: entry.receivedAt,
@@ -45,7 +55,7 @@ describe('shadow 재생 — 기존 결과 무회귀', () => {
 
   it('코퍼스 전수의 기존 금액 delta가 0이다', () => {
     const delta = SHADOW_CORPUS.filter((entry) => {
-      const legacy = parseCardSms({
+      const legacy = legacyParse({
         sender: entry.sender,
         content: entry.content,
         receivedAt: entry.receivedAt,

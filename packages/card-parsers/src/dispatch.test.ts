@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseCardSms } from './dispatch.js';
+import { ACTION_GATE_WARNING_PREFIX, parseCardSms } from './dispatch.js';
 
 describe('parseCardSms dispatch', () => {
   it('routes Shinhan messages to the Shinhan parser', () => {
@@ -337,5 +337,74 @@ describe('비카드 문자 배제 (유령 거래 방지)', () => {
 
     expect(result.transactionType).toBe('declined');
     expect(result.warnings).not.toContain('no matching parser');
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * 액션 결박 금액 게이트 (ADR-0027 롤아웃 6단계)
+ *
+ * 게이트는 기본 on이다. 여기서 보는 것은 "게이트가 D-4를 막는가"와 "정상 문자를
+ * 잡아먹지 않는가" 둘이다. 후자가 더 중요하다 — 운영 문자 264건 전수 재생에서
+ * 전부 `same`이었고, 그 사실이 게이트를 켤 근거였다.
+ * ------------------------------------------------------------------------- */
+describe('parseCardSms — 액션 결박 금액 게이트', () => {
+  const at = new Date('2026-08-01T00:00:00Z');
+
+  it('한도 금액을 승인액으로 고르던 것을 바로잡는다 (D-4)', () => {
+    const result = parseCardSms({
+      sender: '15881688',
+      content: '삼성카드 이용한도 1,000,000원 / 승인 10,000원',
+      receivedAt: at,
+    });
+
+    // 게이트 없이는 본문 첫 `N원`인 1,000,000원이 승인액이 됐다.
+    expect(result.amount).toBe(10_000);
+    expect(result.currency).toBe('KRW');
+  });
+
+  it('유효 후보가 둘이면 금액을 비운다 — 첫 값을 고르지 않는다', () => {
+    const result = parseCardSms({
+      sender: '15881688',
+      content: '삼성카드 승인 10,000원 / 삼성카드 승인 20,000원',
+      receivedAt: at,
+    });
+
+    // 금액이 없으면 거래로 승격되지 않고 L1→L2가 이어받는다.
+    expect(result.amount).toBeUndefined();
+    expect(result.currency).toBeUndefined();
+    expect(result.warnings.some((w) => w.startsWith(ACTION_GATE_WARNING_PREFIX))).toBe(true);
+  });
+
+  it('정상 승인 문자는 그대로 통과한다 — 게이트가 잡아먹지 않는다', () => {
+    const result = parseCardSms({
+      sender: '15771111',
+      content: '신한카드(1234)승인\n12,500원 일시불\n08/01 09:30\n스타벅스강남점',
+      receivedAt: at,
+    });
+
+    expect(result.amount).toBe(12_500);
+    expect(result.transactionType).toBe('approval');
+    expect(result.warnings.some((w) => w.startsWith(ACTION_GATE_WARNING_PREFIX))).toBe(false);
+  });
+
+  it('잔액 라인이 붙은 문자도 결제 금액을 고른다 (한국어 어순 비대칭)', () => {
+    const result = parseCardSms({
+      sender: '15771111',
+      content: '신한카드(1234)승인\n12,500원 일시불\n08/03 09:30\n스타벅스강남점\n잔액 340,000원',
+      receivedAt: at,
+    });
+
+    expect(result.amount).toBe(12_500);
+  });
+
+  it('게이트를 끄면 기존 동작 그대로다 — 사고 대응 경로', () => {
+    const input = {
+      sender: '15881688',
+      content: '삼성카드 이용한도 1,000,000원 / 승인 10,000원',
+      receivedAt: at,
+    };
+
+    expect(parseCardSms(input, { actionGate: false }).amount).toBe(1_000_000);
+    expect(parseCardSms(input, { actionGate: true }).amount).toBe(10_000);
   });
 });

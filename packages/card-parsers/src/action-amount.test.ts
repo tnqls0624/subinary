@@ -12,7 +12,8 @@ import { parseCardSms } from './dispatch.js';
 const receivedAt = new Date('2026-08-08T12:00:00+09:00');
 const shadow = (content: string) => {
   const input = { sender: '15771234', content, receivedAt };
-  return compareAmountEvidence(input, parseCardSms(input));
+  // legacy는 게이트를 끈 결과다 — 게이트끼리 비교하면 대조가 무의미해진다.
+  return compareAmountEvidence(input, parseCardSms(input, { actionGate: false }));
 };
 
 describe('extractActionGroundedAmount — D-4 실패 사례', () => {
