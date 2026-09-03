@@ -22,6 +22,7 @@
     "@capacitor/push-notifications": "^8.0.0",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
+    "@capgo/capacitor-updater": "^8.51.15",
     "@family/contracts": "workspace:*",
     "@family/shared": "workspace:*",
     "@hookform/resolvers": "^5.4.0",

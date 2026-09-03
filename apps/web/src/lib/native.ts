@@ -158,6 +158,22 @@ export function isNative(): boolean {
   return typeof window !== "undefined" && Capacitor.isNativePlatform();
 }
 
+/**
+ * OTA 번들이 정상 부팅했음을 플러그인에 알린다(@capgo/capacitor-updater).
+ *
+ * 실패해도 삼킨다 — 플러그인이 없거나(구버전 네이티브 셸) 호출이 깨져도 앱 부팅을
+ * 막아서는 안 된다. 다만 그 경우 새 번들은 `appReadyTimeout` 뒤 롤백되므로, 앱이
+ * 갱신되지 않는다면 여기부터 의심한다.
+ */
+async function notifyOtaReady(): Promise<void> {
+  try {
+    const { CapacitorUpdater } = await import("@capgo/capacitor-updater");
+    await CapacitorUpdater.notifyAppReady();
+  } catch {
+    // 구버전 셸에는 플러그인이 없다. 그쪽은 OTA 자체가 없으므로 무해하다.
+  }
+}
+
 /** 네이티브: 저장된 refresh 토큰. 웹: 항상 null(쿠키 사용). */
 export async function getStoredRefreshToken(): Promise<string | null> {
   if (!isNative()) return null;
@@ -508,6 +524,16 @@ async function registerLocalActionListener(): Promise<void> {
  */
 export async function initNative(opts: InitNativeOptions = {}): Promise<void> {
   if (!isNative()) return;
+
+  // OTA 롤백 방지 — **가장 먼저** 한다.
+  //
+  // 새 번들로 부팅한 뒤 `appReadyTimeout`(10초) 안에 이 호출이 없으면 플러그인이
+  // 이전 번들로 되돌린다. 깨진 번들을 올려도 앱이 벽돌이 되지 않는 유일한 안전장치이고,
+  // 뒤집어 말하면 **정상 번들도 이 호출을 놓치면 영원히 갱신되지 않는다.**
+  //
+  // 스플래시·딥링크 초기화보다 앞에 두는 이유: 저것들이 실패해도 앱은 살아 있는데,
+  // 그 예외 때문에 여기 도달하지 못하면 멀쩡한 번들이 롤백된다.
+  void notifyOtaReady();
 
   const [{ SplashScreen }, { App }] = await Promise.all([
     import("@capacitor/splash-screen"),

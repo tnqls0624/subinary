@@ -44,6 +44,9 @@ importers:
       '@capacitor/status-bar':
         specifier: ^8.0.3
         version: 8.0.3(@capacitor/core@8.4.2)
+      '@capgo/capacitor-updater':
+        specifier: ^8.51.15
+        version: 8.51.15(@capacitor/core@8.4.2)
     devDependencies:
       '@capacitor/assets':
         specifier: ^3.0.5
@@ -135,6 +138,11 @@ packages:
     resolution: {integrity: sha512-csSpfNeN49Hx9JaQBSJEIiEbOLtXg3kcc2IpScq2fu5L520h3AWEvsxoH8Srk1jxfRKepaJ4S4sqSC3foI4AgA==}
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
+
+  '@capgo/capacitor-updater@8.51.15':
+    resolution: {integrity: sha512-eJxQrwMYjlaRY79r+1jJWzetgqeyVdXkkHTngVLVQq3/1BK6itOkO45wRzyFrrB9WZD84fY1ziGp8ItGCN3hWA==}
+    peerDependencies:
+      '@capacitor/core': ^8.0.0
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -2009,6 +2017,10 @@ snapshots:
       '@capacitor/core': 8.4.2
 
   '@capacitor/status-bar@8.0.3(@capacitor/core@8.4.2)':
+    dependencies:
+      '@capacitor/core': 8.4.2
+
+  '@capgo/capacitor-updater@8.51.15(@capacitor/core@8.4.2)':
     dependencies:
       '@capacitor/core': 8.4.2
 

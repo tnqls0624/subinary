@@ -336,6 +336,10 @@ services:
     <<: *app-build
     command: pnpm --filter @family/api start
     init: true
+    volumes:
+      # 읽기 전용. api는 번들을 **서빙만** 하고 쓰지 않는다 — 쓰는 것은 배포
+      # 스크립트뿐이라, 앱 프로세스가 뚫려도 번들을 갈아끼울 수 없게 한다.
+      - ota-bundles:/srv/ota:ro
     env_file:
       - .env               # 기존 시크릿(DB/JWT/스토리지/AI) 상속
       - .env.production     # prod override(도메인·NODE_ENV·터널 토큰)
@@ -529,6 +533,11 @@ services:
     restart: unless-stopped
 
 volumes:
+  # OTA 웹 번들(zip + manifest.json). 앱이 네이티브 재빌드 없이 웹 자산만 받아 가는
+  # 경로다(@capgo/capacitor-updater 자체 호스팅). 배포 스크립트가 여기에 쓰고 api가 읽는다.
+  # 볼륨인 이유: 이미지에 구우면 번들을 갱신할 때마다 이미지를 다시 만들어야 하고,
+  # 그러면 "재빌드를 없앤다"는 목적 자체가 무너진다.
+  ota-bundles:
   pgdata:
   redisdata:
   miniodata:
