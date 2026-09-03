@@ -119,7 +119,15 @@ try {
     console.log(`batch: ${r.batchId}`);
     console.log(`적용 ${r.applied}건`);
     console.log(`  건너뜀: 낡은 manifest ${r.skippedStale}건 · 이미 v2 ${r.skippedAlreadyV2}건 · 행 없음 ${r.skippedMissing}건`);
+    console.log(`  v2 제약 미충족으로 차단 ${r.skippedBlocked}건`);
     console.log(`  사람 검토로 남김 ${r.review}건`);
+    if (r.skippedBlocked > 0) {
+      console.log('');
+      console.log('⚠ v2 제약을 아직 만족하지 못한 행이 있다. DB가 막기 전에 우리가 멈춘 것이다.');
+      console.log('  무엇이 막았는지는 수리 로그의 note.v2Violations에 있다:');
+      console.log("    select reason, count(*) from transaction_money_repair_log");
+      console.log(`     where batch_id = '${r.batchId}' group by 1;`);
+    }
     if (r.skippedStale > 0) {
       console.log('');
       console.log('⚠ 낡은 manifest가 있었다. 그 사이 누군가 해당 거래를 수정했다는 뜻이다.');
@@ -127,7 +135,7 @@ try {
     }
     printRemaining(r);
     console.log('='.repeat(72));
-    process.exit(r.skippedStale > 0 ? 2 : r.review > 0 ? 1 : 0);
+    process.exit(r.skippedStale > 0 ? 2 : r.review + r.skippedBlocked > 0 ? 1 : 0);
   }
 
   if (r.command === 'revert') {

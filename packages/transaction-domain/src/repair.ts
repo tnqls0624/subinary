@@ -48,8 +48,11 @@ import {
   buildTransactionMoneyImage,
   schema,
   transactionMoneyChecksum,
+  v2ConstraintViolations,
   type DbExecutor,
+  type MoneyV2Constraint,
   type TransactionMoneyRowLike,
+  type TransactionMoneyV2CheckRowLike,
 } from '@family/database';
 import type { TransactionMoneyRepairAction } from '@family/database';
 import { and, eq, isNull, isNotNull, sql } from 'drizzle-orm';
@@ -78,10 +81,22 @@ export type MoneyRepairEligibility = 'auto' | 'review';
  *
  * `auto`는 "버전 스탬프만 찍는다"는 뜻이지 "계획을 적용한다"가 아니다. 이 구분이
  * 무너지면 `link_manual_only`가 사람 연결을 끊는다(위 머리주석 참고).
+ *
+ * ## 관문이 둘인 이유 (2026-09-03 실행에서 배웠다)
+ *
+ * 처음에는 verdict만 봤다. 그랬더니 186건을 전부 auto로 분류했고, 적용 58번째 행에서
+ * `card_transactions_v2_fx_snapshot_check`에 걸려 멈췄다 — 외화인데 환율 스냅샷이 없는
+ * 행이었다(ADR §2 분류표의 "자동 외화 v1"). 앞선 57건은 이미 커밋된 뒤였다.
+ *
+ * **금액이 같다는 사실과 v2 계약을 만족한다는 사실은 다르다.** 관찰기는 앞을 보고,
+ * `v2ConstraintViolations`가 뒤를 본다. 스탬프는 행을 v2로 **선언**하는 행위라 둘 다
+ * 통과해야 한다.
  */
 export function classifyRepairEligibility(
   verdict: MoneyShadowVerdict,
+  violations: readonly MoneyV2Constraint[] = [],
 ): MoneyRepairEligibility {
+  if (violations.length > 0) return 'review';
   return MONEY_REPAIR_AUTO_VERDICTS.includes(verdict) ? 'auto' : 'review';
 }
 
@@ -91,18 +106,39 @@ export function classifyRepairEligibility(
  * 스탬프도 `recalculate_chain`으로 적는다 — "체인을 재계산했더니 같았다"가 실제로 일어난
  * 일이고, enum에 'stamp'를 새로 파면 되돌림·집계 쿼리가 전부 한 값씩 늘어난다.
  */
-export function repairAction(record: MoneyShadowRecord): TransactionMoneyRepairAction {
-  if (classifyRepairEligibility(record.verdict) === 'auto') return 'recalculate_chain';
+export function repairAction(
+  record: MoneyShadowRecord,
+  violations: readonly MoneyV2Constraint[] = [],
+): TransactionMoneyRepairAction {
+  if (classifyRepairEligibility(record.verdict, violations) === 'auto') {
+    return 'recalculate_chain';
+  }
   if (record.verdict === 'link_target_differs') return 'link_cancellation';
-  if (record.actual.currency.toUpperCase() !== 'KRW') return 'normalize_currency';
+  // 통화·스냅샷 계열 위반은 전부 통화 정규화 작업으로 묶인다 — 원통화를 확정하고
+  // 거래일 스냅샷을 붙이는 한 작업이지, 서로 다른 수리가 아니다.
+  if (
+    violations.includes('v2_currency_krw') ||
+    violations.includes('v2_fx_snapshot') ||
+    violations.includes('v2_original_pair') ||
+    violations.includes('v2_original_cancelled') ||
+    record.actual.currency.toUpperCase() !== 'KRW'
+  ) {
+    return 'normalize_currency';
+  }
   return 'recalculate_chain';
 }
 
 /** 진단용 최소 정보. 가맹점명·원문은 넣지 않는다(ADR: 로그에는 집계 수치만). */
-function repairNote(record: MoneyShadowRecord, eligibility: MoneyRepairEligibility): string {
+function repairNote(
+  record: MoneyShadowRecord,
+  eligibility: MoneyRepairEligibility,
+  violations: readonly MoneyV2Constraint[],
+): string {
   return JSON.stringify({
     eligibility,
     verdict: record.verdict,
+    // 사람이 "무엇을 고쳐야 v2가 되는가"를 이 한 줄에서 알 수 있어야 한다.
+    v2Violations: violations,
     path: record.path,
     transactionType: record.transactionType,
     foreign: record.foreign,
@@ -160,7 +196,13 @@ export class TransactionMoneyRepairManifestSink {
    * 대상이 되지 않고, 조용히 빠진 계획은 "대상 없음"으로 오독된다.
    */
   async record(record: MoneyShadowRecord, actualRow: TransactionMoneyRowLike): Promise<void> {
-    const eligibility = classifyRepairEligibility(record.verdict);
+    // 스탬프를 찍으면 이 행은 v2로 **선언**된다. 그래서 관찰기 판정만이 아니라 v2 제약도
+    // 미리 본다 — 둘은 다른 사실이고, 하나만 보면 적용 중간에 DB가 막는다.
+    const violations = v2ConstraintViolations({
+      ...actualRow,
+      transactionType: record.transactionType,
+    } as TransactionMoneyV2CheckRowLike);
+    const eligibility = classifyRepairEligibility(record.verdict, violations);
     const planned = record.planned;
 
     // auto는 **스탬프**다: after 이미지는 before에서 계약 버전만 올린 것.
@@ -193,9 +235,14 @@ export class TransactionMoneyRepairManifestSink {
       householdId: record.householdId,
       transactionId: record.transactionId,
       sourceEventId: record.sourceEventId,
-      action: repairAction(record),
-      reason: `${MONEY_REPAIR_REASON_PREFIX}${eligibility}:${record.verdict}`,
-      note: repairNote(record, eligibility),
+      action: repairAction(record, violations),
+      // 제약 때문에 막힌 행은 **무엇이 막았는지**를 reason에 싣는다. verdict만 적으면
+      // 집계에서 `review:match`가 되어 "일치하는데 왜 검토?"라는 답 없는 줄이 남는다.
+      reason:
+        violations.length > 0
+          ? `${MONEY_REPAIR_REASON_PREFIX}review:${violations[0]}`
+          : `${MONEY_REPAIR_REASON_PREFIX}${eligibility}:${record.verdict}`,
+      note: repairNote(record, eligibility, violations),
       beforeMoney: buildTransactionMoneyImage(actualRow),
       afterMoney,
       netAmountBefore: comparable ? record.actual.netAmount : null,
@@ -210,7 +257,8 @@ export class TransactionMoneyRepairManifestSink {
     this.planned += 1;
     if (eligibility === 'auto') this.auto += 1;
     else this.review += 1;
-    this.byVerdict.set(record.verdict, (this.byVerdict.get(record.verdict) ?? 0) + 1);
+    const key = violations.length > 0 ? `blocked:${violations[0]}` : record.verdict;
+    this.byVerdict.set(key, (this.byVerdict.get(key) ?? 0) + 1);
 
     this.logger?.info(
       {
@@ -234,6 +282,8 @@ export interface MoneyRepairApplyStats {
   readonly skippedAlreadyV2: number;
   /** manifest에 있지만 대상 행이 사라진 건수. */
   readonly skippedMissing: number;
+  /** v2 제약을 아직 만족하지 못해 건너뛴 건수. DB가 막기 전에 우리가 멈춘 수다. */
+  readonly skippedBlocked: number;
   /** 사람 검토로 남긴 건수(자동 적용 대상이 아님). */
   readonly review: number;
 }
@@ -290,6 +340,7 @@ export class TransactionMoneyRepairService {
     let skippedStale = 0;
     let skippedAlreadyV2 = 0;
     let skippedMissing = 0;
+    let skippedBlocked = 0;
     let review = 0;
 
     for (const entry of entries) {
@@ -311,6 +362,15 @@ export class TransactionMoneyRepairService {
         // 적용 직전 재확인. manifest가 낡았으면 이 체인은 통째로 건너뛴다.
         const current = transactionMoneyChecksum(row as TransactionMoneyRowLike);
         if (current !== entry.checksumBefore) return 'stale' as const;
+
+        // 계획 이후 제약 상황이 달라졌을 수 있고, 무엇보다 **DB가 막기 전에 우리가
+        // 멈춰야** 한다. 여기서 던지면 남은 행이 통째로 날아가고 앞선 행만 커밋된
+        // 반쪽 배치가 남는다(2026-09-03에 실제로 그렇게 57건이 남았다).
+        if (
+          v2ConstraintViolations(row as unknown as TransactionMoneyV2CheckRowLike).length > 0
+        ) {
+          return 'blocked' as const;
+        }
 
         await tx
           .update(schema.cardTransactions)
@@ -334,10 +394,19 @@ export class TransactionMoneyRepairService {
       if (outcome === 'applied') applied += 1;
       else if (outcome === 'stale') skippedStale += 1;
       else if (outcome === 'already') skippedAlreadyV2 += 1;
+      else if (outcome === 'blocked') skippedBlocked += 1;
       else skippedMissing += 1;
     }
 
-    const stats = { batchId, applied, skippedStale, skippedAlreadyV2, skippedMissing, review };
+    const stats = {
+      batchId,
+      applied,
+      skippedStale,
+      skippedAlreadyV2,
+      skippedMissing,
+      skippedBlocked,
+      review,
+    };
     this.logger?.info({ ...stats }, 'money repair batch applied');
     return stats;
   }

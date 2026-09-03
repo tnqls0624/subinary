@@ -112,6 +112,88 @@ export interface TransactionMoneyRowLike {
   approvedAt: Date | string | null;
 }
 
+/**
+ * v2 제약(마이그레이션 `0049`)을 코드에서 미리 보는 목록.
+ *
+ * ## 왜 코드에 또 두는가 — 제약은 "고칠 수 있는가"를 알려주지 않는다
+ *
+ * DB CHECK는 위반을 **막는다**. 그건 옳지만, 수리 작업에는 부족하다. 수리는 어떤 행을
+ * 자동으로 v2로 올릴 수 있고 어떤 행이 사람 손을 타야 하는지를 **적용 전에** 알아야
+ * 하는데, DB에 물어보는 유일한 방법이 "UPDATE 해 보고 터지는지 본다"라면 그건 이미
+ * 절반이 적용된 배치를 남긴다.
+ *
+ * 실제로 2026-09-03에 그 일이 일어났다. 관찰기의 `match`를 "v2로 올려도 된다"로 읽고
+ * 186건을 스탬프했는데 58번째에서 `card_transactions_v2_fx_snapshot_check`에 걸렸다
+ * (외화인데 환율 스냅샷 없음 = ADR §2 분류표의 "자동 외화 v1"). 앞선 57건은 이미
+ * 커밋된 뒤였다. **금액이 같다는 사실과 v2 계약을 만족한다는 사실은 다른 것이다.**
+ *
+ * 목록이 `0049`의 CHECK와 1:1로 대응해야 한다. 어긋나면 수리가 "통과할 것"이라고
+ * 판단한 행이 DB에서 터진다 — 그때 믿을 것은 DB 쪽이다.
+ */
+export const MONEY_V2_CONSTRAINTS = [
+  'v2_currency_krw',
+  'v2_original_pair',
+  'v2_fx_snapshot',
+  'v2_original_cancelled',
+  'v2_approval_sum',
+  'v2_cancellation_net_zero',
+] as const;
+
+export type MoneyV2Constraint = (typeof MONEY_V2_CONSTRAINTS)[number];
+
+/** v2 제약 판정에 필요한 최소 행 모양 — 금액 컬럼 + 거래 유형. */
+export interface TransactionMoneyV2CheckRowLike extends TransactionMoneyRowLike {
+  transactionType: string;
+}
+
+/**
+ * 이 행을 `money_contract_version = 2`로 올렸을 때 깨지는 제약을 전부 돌려준다.
+ * 빈 배열이면 스탬프해도 안전하다는 뜻이다.
+ *
+ * 순수 함수다 — 수리 계획이 DB를 때려 보지 않고 분류할 수 있어야 한다.
+ */
+export function v2ConstraintViolations(
+  row: TransactionMoneyV2CheckRowLike,
+): MoneyV2Constraint[] {
+  const violations: MoneyV2Constraint[] = [];
+
+  // v2-1. 저장 통화는 항상 KRW.
+  if (row.currency !== 'KRW') violations.push('v2_currency_krw');
+
+  // v2-2. original_amount와 original_currency는 함께 있거나 함께 없다.
+  if ((row.originalAmount === null) !== (row.originalCurrency === null)) {
+    violations.push('v2_original_pair');
+  }
+
+  // v2-3. 외화 원본이면 환율 스냅샷이 반드시 있다.
+  if (row.originalCurrency !== null && row.fxRateSnapshotId === null) {
+    violations.push('v2_fx_snapshot');
+  }
+
+  if (row.transactionType === 'approval') {
+    // v2-4. 외화 승인은 원통화 취소 누계를 가지며 원금액을 넘지 않는다.
+    if (
+      row.originalCurrency !== null &&
+      (row.originalCancelledAmount === null ||
+        row.originalAmount === null ||
+        row.originalCancelledAmount > row.originalAmount)
+    ) {
+      violations.push('v2_original_cancelled');
+    }
+    // v2-5. 승인 순액 항등식.
+    if (row.amount !== row.cancelledAmount + row.netAmount) {
+      violations.push('v2_approval_sum');
+    }
+  }
+
+  // v2-6. 취소 행의 순액은 0.
+  if (row.transactionType === 'cancellation' && row.netAmount !== 0) {
+    violations.push('v2_cancellation_net_zero');
+  }
+
+  return violations;
+}
+
 /** `transaction_money_repair_log.before_money` / `after_money`에 저장하는 모양. */
 export type TransactionMoneyImage = {
   [K in MoneyProtectedColumn]: TransactionMoneyRowLike[K] | null;

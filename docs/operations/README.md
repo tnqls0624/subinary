@@ -63,6 +63,7 @@ subinary(Family Memory AI) 프로덕션은 맥 홈서버 1대 + Docker Compose +
 - [ai-pipeline-alerting.md](./ai-pipeline-alerting.md) — 경보 3계층·ADR-0022
 - [ai-pipeline-dashboard.md](./ai-pipeline-dashboard.md) — 운영 지표 API
 - [card-sms-parser-quality.md](./card-sms-parser-quality.md) — 카드 문자 파서 품질 지표(문구 개편 조기 감지)
+- [money-contract-repair.md](./money-contract-repair.md) — 금액 계약 수리(ADR-0027 7단계): 계획·적용·되돌림
 - [observability-ui.md](./observability-ui.md) — Beszel 온보딩·관측 UI 노출
 - [ai-training-readiness.md](./ai-training-readiness.md) / [ai-training-runner.md](./ai-training-runner.md) — 학습 운영
 - ADR: `docs/adr/` (0017 파이프라인 버저닝, 0018 트래픽/shadow, 0020 alert dispatcher, 0021 이미지 digest, 0022 경보 경계)

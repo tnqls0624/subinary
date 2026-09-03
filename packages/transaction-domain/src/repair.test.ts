@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { v2ConstraintViolations } from '@family/database';
+
 import type { MoneyColumns } from './plan.js';
 import {
   MONEY_REPAIR_AUTO_VERDICTS,
@@ -95,6 +97,65 @@ describe('classifyRepairEligibility', () => {
   });
 });
 
+describe('classifyRepairEligibility — v2 제약 관문', () => {
+  it('금액이 같아도 v2 제약을 어기면 자동으로 넘기지 않는다', () => {
+    // 2026-09-03 실행에서 배운 것: match는 "금액이 같다"이지 "v2로 올려도 된다"가 아니다.
+    expect(classifyRepairEligibility('match', ['v2_fx_snapshot'])).toBe('review');
+    expect(classifyRepairEligibility('link_manual_only', ['v2_currency_krw'])).toBe('review');
+  });
+
+  it('위반이 없으면 기존 판정 그대로다', () => {
+    expect(classifyRepairEligibility('match', [])).toBe('auto');
+  });
+});
+
+describe('v2ConstraintViolations', () => {
+  const krwApproval = {
+    ...row,
+    transactionType: 'approval',
+  };
+
+  it('KRW 승인은 위반이 없다', () => {
+    expect(v2ConstraintViolations(krwApproval)).toEqual([]);
+  });
+
+  it('외화인데 환율 스냅샷이 없으면 잡는다 — 실제로 배치를 멈춘 그 제약', () => {
+    expect(
+      v2ConstraintViolations({
+        ...krwApproval,
+        originalAmount: 2_200,
+        originalCurrency: 'USD',
+        originalCancelledAmount: 0,
+        fxRateSnapshotId: null,
+      }),
+    ).toContain('v2_fx_snapshot');
+  });
+
+  it('저장 통화가 KRW가 아니면 잡는다', () => {
+    expect(v2ConstraintViolations({ ...krwApproval, currency: 'USD' })).toContain(
+      'v2_currency_krw',
+    );
+  });
+
+  it('원금액과 원통화가 한쪽만 있으면 잡는다', () => {
+    expect(
+      v2ConstraintViolations({ ...krwApproval, originalAmount: 2_200, originalCurrency: null }),
+    ).toContain('v2_original_pair');
+  });
+
+  it('승인 순액 항등식이 깨지면 잡는다', () => {
+    expect(
+      v2ConstraintViolations({ ...krwApproval, cancelledAmount: 500 }),
+    ).toContain('v2_approval_sum');
+  });
+
+  it('취소 행의 순액이 0이 아니면 잡는다', () => {
+    expect(
+      v2ConstraintViolations({ ...row, transactionType: 'cancellation', netAmount: 3_000 }),
+    ).toContain('v2_cancellation_net_zero');
+  });
+});
+
 describe('repairAction', () => {
   it('자동 대상은 재계산으로 적는다 — 실제로 재계산했더니 같았다는 뜻이다', () => {
     expect(repairAction(record({ verdict: 'match' }))).toBe('recalculate_chain');
@@ -143,15 +204,20 @@ describe('TransactionMoneyRepairManifestSink', () => {
     const { captured, db } = fakeDb();
     const sink = new TransactionMoneyRepairManifestSink(db, 'batch-2');
 
+    // 취소 행의 순액은 0이다(v2-6). 이 값을 틀리게 두면 제약 관문이 먼저 걸러서
+    // 정작 보려던 것(연결 보존)을 못 본다 — 실제로 처음 작성했을 때 그렇게 걸렸다.
+    const cancellationRow = { ...row, netAmount: 0, parentTransactionId: 'parent-chosen-by-human' };
+
     // 신규 규칙은 후보가 유일하지 않아 부모를 고르지 못했다(=null).
     await sink.record(
       record({
         verdict: 'link_manual_only',
         transactionType: 'cancellation',
+        actual: { ...actual, netAmount: 0 },
         plannedParentTransactionId: null,
-        planned: { ...(row as unknown as MoneyColumns), parentTransactionId: null },
+        planned: { ...(cancellationRow as unknown as MoneyColumns), parentTransactionId: null },
       }),
-      row,
+      cancellationRow,
     );
 
     const after = captured[0].afterMoney as Record<string, unknown>;
@@ -193,6 +259,24 @@ describe('TransactionMoneyRepairManifestSink', () => {
     // 한쪽만 채우면 생성 컬럼 net_amount_delta가 `-before`가 되어 합계가 거짓말을 한다.
     expect(entry.netAmountBefore).toBeNull();
     expect(entry.netAmountAfter).toBeNull();
+  });
+
+  it('외화·스냅샷 없음은 review로 보내고 무엇이 막았는지 reason에 적는다', async () => {
+    const { captured, db } = fakeDb();
+    const sink = new TransactionMoneyRepairManifestSink(db, 'batch-7');
+
+    await sink.record(record({ verdict: 'match' }), {
+      ...row,
+      originalAmount: 2_200,
+      originalCurrency: 'USD',
+      originalCancelledAmount: 0,
+      fxRateSnapshotId: null,
+    });
+
+    // `review:match`로 적으면 "일치하는데 왜 검토?"라는 답 없는 줄이 집계에 남는다.
+    expect(captured[0].reason).toBe('repair:review:v2_fx_snapshot');
+    expect(captured[0].action).toBe('normalize_currency');
+    expect(JSON.parse(captured[0].note as string).v2Violations).toContain('v2_fx_snapshot');
   });
 
   it('통계가 auto/review를 나눠 센다', async () => {
