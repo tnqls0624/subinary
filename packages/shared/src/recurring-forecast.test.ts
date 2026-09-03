@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   forecastRecurring,
+  resolveRecurringPhase,
   RECURRING_WINDOW_DAYS,
 } from './recurring-forecast.js';
 
@@ -105,5 +106,58 @@ describe('forecastRecurring — 불변', () => {
     const a = forecastRecurring({ lastSeenAt: kst('2026-07-12T09:00:00'), intervalDays: 30, cadence: 'monthly' }, now);
     const b = forecastRecurring({ lastSeenAt: kst('2026-07-12T09:00:00').toISOString(), intervalDays: 30, cadence: 'monthly' }, now);
     expect(a).toEqual(b);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * 해지 확인 묻기 — 답을 무시하지 않는다 (금액 레이어 S4, 기획 D4)
+ * ------------------------------------------------------------------------- */
+describe('resolveRecurringPhase — 해지 후보 판정', () => {
+  // 월 주기(30일), 창 ±3일, 유예 30% = 9일.
+  // 예상일이 20일 지났으면 창(3) + 유예(9) = 12일을 넘어 해지 후보다.
+  const base = {
+    nextExpectedAt: '2026-08-01T00:00:00.000Z',
+    intervalDays: 30,
+    windowDays: 3,
+  };
+  const at = (iso: string) => new Date(iso);
+
+  it('창 + 유예를 넘기면 해지 후보가 된다', () => {
+    const r = resolveRecurringPhase(base, at('2026-08-21T00:00:00.000Z'));
+    expect(r.phase).toBe('overdue');
+    expect(r.stoppedCandidate).toBe(true);
+  });
+
+  it('유예 안에서는 후보가 아니다 — overdue지만 아직 묻지 않는다', () => {
+    const r = resolveRecurringPhase(base, at('2026-08-08T00:00:00.000Z'));
+    expect(r.phase).toBe('overdue');
+    expect(r.stoppedCandidate).toBe(false);
+  });
+
+  it('"계속 써요"라고 답한 뒤 한 주기 안에는 다시 묻지 않는다', () => {
+    const r = resolveRecurringPhase(
+      { ...base, stoppedDismissedAt: '2026-08-21T00:00:00.000Z' },
+      at('2026-08-25T00:00:00.000Z'),
+    );
+    // 답을 받고 4일밖에 안 지났다 — 또 물으면 답을 무시하는 것이다.
+    expect(r.stoppedCandidate).toBe(false);
+    // 국면은 사실이라 그대로 말한다. 답이 누르는 것은 묻기뿐이다.
+    expect(r.phase).toBe('overdue');
+  });
+
+  it('답한 뒤 한 주기가 지나면 다시 묻는다', () => {
+    const r = resolveRecurringPhase(
+      { ...base, stoppedDismissedAt: '2026-08-21T00:00:00.000Z' },
+      at('2026-09-21T00:00:00.000Z'),
+    );
+    expect(r.stoppedCandidate).toBe(true);
+  });
+
+  it('답이 없으면(null) 판정에 영향이 없다', () => {
+    const r = resolveRecurringPhase(
+      { ...base, stoppedDismissedAt: null },
+      at('2026-08-21T00:00:00.000Z'),
+    );
+    expect(r.stoppedCandidate).toBe(true);
   });
 });

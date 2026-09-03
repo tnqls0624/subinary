@@ -4345,6 +4345,14 @@ export const recurringSeriesStatus = pgEnum('recurring_series_status', [
   'confirmed',
   'rejected',
   'needs_review',
+  /**
+   * 사용자가 "해지했어요"라고 **확정한** 상태(금액 레이어 S4).
+   *
+   * 시스템이 스스로 이 상태로 옮기지 않는다 — 예상일이 지났다는 사실만으로 끄면
+   * 사용자 모르게 이번 달 예상 총액이 줄어든다(기획 D4). 유예 경과는 화면이 묻는
+   * 근거일 뿐이고, 상태는 답을 받을 때만 바뀐다.
+   */
+  'ended',
 ]);
 
 /**
@@ -4428,6 +4436,16 @@ export const recurringSeries = pgTable(
      * 반면 국면(upcoming/due/overdue)은 **조회 시각에 의존**하므로 저장하지 않는다.
      * 저장된 예상일 하나에서 각자 계산하면 값은 자연히 일치한다.
      */
+    /**
+     * 사용자가 "아니에요, 계속 써요"라고 답한 시각(금액 레이어 S4).
+     *
+     * `stoppedCandidate`는 시간의 함수라 한 번 true가 되면 결제가 들어올 때까지 계속
+     * true다. 답을 받고도 다음 조회에서 또 물으면 그건 답을 무시하는 것이다. 이 시각
+     * 뒤 **한 주기가 더 지나야** 다시 묻는다.
+     */
+    stoppedDismissedAt: timestamp('stopped_dismissed_at', {
+      withTimezone: true,
+    }),
     nextExpectedAt: timestamp('next_expected_at', { withTimezone: true }),
     /**
      * 예상일의 창 폭(일). `cadence`에서 유도되는 상수지만 함께 저장한다 — 상수를

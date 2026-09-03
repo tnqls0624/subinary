@@ -16,6 +16,12 @@ export const recurringSeriesStatusSchema = z.enum([
   'confirmed',
   'rejected',
   'needs_review',
+  /**
+   * 사용자가 "해지했어요"라고 확정한 상태(금액 레이어 S4). 시스템이 스스로 이 상태로
+   * 옮기지 않는다 — 예상일이 지났다는 사실만으로 끄면 사용자 모르게 이번 달 예상
+   * 총액이 줄어든다(기획 D4).
+   */
+  'ended',
 ]);
 export type RecurringSeriesStatus = z.infer<typeof recurringSeriesStatusSchema>;
 
@@ -111,14 +117,21 @@ export type RecurringSeriesListResponse = z.infer<
 >;
 
 /**
- * `POST /v1/recurring/series/:id/decision` — "정기 결제 맞음 / 아님".
+ * `POST /v1/recurring/series/:id/decision` — 사용자 판단.
  *
  * `needs_review`·`candidate`는 사용자가 직접 고를 수 없다. 전자는 시스템이 남긴
  * 재검토 표시이고 후자는 엔진의 초기값이라, 사용자가 그 값으로 되돌리는 동작은
  * 의미가 없다(되돌리려면 반대쪽을 다시 고르면 된다).
+ *
+ * 네 값의 뜻이 다르다:
+ * - `confirmed` / `rejected` — "정기 결제 맞음 / 아님" (후보 판정)
+ * - `ended` — "해지했어요" (금액 레이어 S4). 이번 달 예상에서 빠진다.
+ * - `still_active` — "아니에요, 계속 써요". 상태는 `confirmed`로 **유지**하고
+ *   `stoppedDismissedAt`만 기록한다 — 답을 받고도 또 묻지 않기 위해서다.
+ *   상태를 안 바꾸므로 예상 총액도 그대로다.
  */
 export const recurringDecisionRequestSchema = z.object({
-  decision: z.enum(['confirmed', 'rejected']),
+  decision: z.enum(['confirmed', 'rejected', 'ended', 'still_active']),
 });
 export type RecurringDecisionRequest = z.infer<
   typeof recurringDecisionRequestSchema

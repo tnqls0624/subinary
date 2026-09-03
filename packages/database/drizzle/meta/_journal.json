@@ -414,6 +414,13 @@
       "when": 1788451200000,
       "tag": "0058_recurring_next_expected",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788454800000,
+      "tag": "0059_recurring_ended",
+      "breakpoints": true
     }
   ]
 }

@@ -127,7 +127,9 @@ function SeriesRow({
 }: {
   item: RecurringSeriesItem;
   busy: boolean;
-  onDecide: (decision: "confirmed" | "rejected") => void;
+  onDecide: (
+    decision: "confirmed" | "rejected" | "ended" | "still_active",
+  ) => void;
 }) {
   const review = needsReviewText(item);
   const forecast = forecastText(item);
@@ -183,6 +185,10 @@ function SeriesRow({
               label="정기 결제 아님"
             />
           ) : null}
+          {item.status === "ended" ? (
+            // 해지는 실패가 아니다 — 사용자가 정리를 끝낸 상태라 중립 톤을 쓴다.
+            <StatusBadge status={item.status} tone="neutral" label="해지함" />
+          ) : null}
           {item.status === "needs_review" ? (
             <StatusBadge
               status={item.status}
@@ -214,6 +220,46 @@ function SeriesRow({
                 `최근 ${item.recentDeclineAttempts}번 결제에 실패했어요`}
             </span>
           </Link>
+        ) : null}
+
+        {/*
+         * 해지 확인 (금액 레이어 S4, 기획 D4 "묻는다, 끄지 않는다").
+         *
+         * 일반 판정 버튼과 **분리한다.** "정기 결제 맞아요/아니에요"는 후보 판정이고
+         * 이건 사실 확인이다 — 한 줄에 네 버튼을 놓으면 사용자가 무엇을 답하는지
+         * 흐려진다.
+         *
+         * 답을 받을 때까지 이 series는 예상 총액에 **그대로 남는다.** 시스템이 미리
+         * 빼면 사용자 모르게 총액이 줄어든다(D4).
+         */}
+        {item.stoppedCandidate ? (
+          <div className="border-warning/40 flex flex-col gap-2 rounded-lg border p-3">
+            <span className="text-[14px] font-medium">해지하셨나요?</span>
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
+              나갈 차례가 {item.overdueDays}일 지났는데 결제가 안 들어왔어요. 아직
+              쓰고 계시면 그대로 두고 셀게요.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                disabled={busy}
+                onClick={() => onDecide("ended")}
+              >
+                해지했어요
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                disabled={busy}
+                onClick={() => onDecide("still_active")}
+              >
+                계속 써요
+              </Button>
+            </div>
+          </div>
         ) : null}
 
         <div className="flex gap-2">
@@ -339,15 +385,19 @@ export default function RecurringPage() {
       decision,
     }: {
       id: string;
-      decision: "confirmed" | "rejected";
+      decision: "confirmed" | "rejected" | "ended" | "still_active";
     }) => authedFetch((token) => decideRecurringSeries(token, id, decision)),
     onSuccess: async (_, variables) => {
       await invalidate();
-      toast.success(
-        variables.decision === "confirmed"
-          ? "정기 결제로 표시했어요."
-          : "정기 결제가 아닌 것으로 표시했어요.",
-      );
+      // 네 답이 서로 다른 일을 한다 — 토스트도 그 차이를 말해야 사용자가 무엇이
+      // 바뀌었는지 안다. 특히 `still_active`는 **아무 상태도 바꾸지 않는다.**
+      const message: Record<typeof variables.decision, string> = {
+        confirmed: "정기 결제로 표시했어요.",
+        rejected: "정기 결제가 아닌 것으로 표시했어요.",
+        ended: "해지한 것으로 표시했어요. 이번 달 예상에서 빠져요.",
+        still_active: "계속 쓰는 것으로 알겠어요. 예상 금액은 그대로예요.",
+      };
+      toast.success(message[variables.decision]);
     },
     onError: () => toast.error("저장하지 못했어요. 잠시 후 다시 시도해 주세요."),
   });

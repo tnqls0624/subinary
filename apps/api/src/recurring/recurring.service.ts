@@ -151,6 +151,7 @@ export class RecurringService {
         computedAt: schema.recurringSeries.computedAt,
         nextExpectedAt: schema.recurringSeries.nextExpectedAt,
         nextExpectedWindowDays: schema.recurringSeries.nextExpectedWindowDays,
+        stoppedDismissedAt: schema.recurringSeries.stoppedDismissedAt,
         // 타인의 `summary_only` 근거가 하나라도 있으면 이름을 가린다(금액은 남긴다).
         redacted: exists(this.summaryOnlyEvidence(actorMemberId)),
       })
@@ -184,6 +185,7 @@ export class RecurringService {
                 nextExpectedAt: r.nextExpectedAt,
                 intervalDays: r.intervalDays,
                 windowDays: r.nextExpectedWindowDays,
+                stoppedDismissedAt: r.stoppedDismissedAt,
               },
               now,
             )
@@ -376,7 +378,7 @@ export class RecurringService {
   async decide(
     actorUserId: string,
     seriesId: string,
-    decision: 'confirmed' | 'rejected',
+    decision: 'confirmed' | 'rejected' | 'ended' | 'still_active',
   ): Promise<RecurringDecisionResponse> {
     if (!isRecurringRadarEnabled()) {
       throw new ForbiddenException('recurring radar is not enabled');
@@ -396,16 +398,34 @@ export class RecurringService {
       actorUserId,
     );
 
+    const now = new Date();
+    // `still_active`("계속 써요")는 **상태를 바꾸지 않는다.** 상태를 건드리면 그 series가
+    // `/upcoming`(confirmed만 조회)에서 빠져 이번 달 예상 총액이 줄어드는데, 사용자는
+    // "계속 쓴다"고 답했을 뿐이다 — 기획 D4가 막으려던 바로 그 일이다. 기록하는 것은
+    // "물어봤고 답을 받았다"는 사실뿐이고, 그 뒤 한 주기 동안 다시 묻지 않는다.
+    const patch =
+      decision === 'still_active'
+        ? {
+            status: 'confirmed' as const,
+            stoppedDismissedAt: now,
+            needsReviewReason: null,
+            updatedAt: now,
+          }
+        : {
+            status: decision,
+            statusChangedAt: now,
+            statusChangedBy: actorUserId,
+            // 사용자가 다시 판단했으므로 재검토 표시는 걷는다(CHECK: reason은 needs_review 전용).
+            needsReviewReason: null,
+            // 해지·재확정은 이전 "계속 써요" 답을 무의미하게 만든다 — 남겨 두면 나중에
+            // 다시 confirmed가 됐을 때 오래된 답이 묻기를 막는다.
+            stoppedDismissedAt: null,
+            updatedAt: now,
+          };
+
     const [updated] = await this.db
       .update(schema.recurringSeries)
-      .set({
-        status: decision,
-        statusChangedAt: new Date(),
-        statusChangedBy: actorUserId,
-        // 사용자가 다시 판단했으므로 재검토 표시는 걷는다(CHECK: reason은 needs_review 전용).
-        needsReviewReason: null,
-        updatedAt: new Date(),
-      })
+      .set(patch)
       .where(
         and(
           eq(schema.recurringSeries.id, seriesId),

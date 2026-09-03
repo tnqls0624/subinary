@@ -33,11 +33,17 @@ export function fetchRecurringSeries(
   );
 }
 
-/** "정기 결제 맞음 / 아님". 이 확정은 재계산이 지우지 않는다(근거 교집합으로 이어진다). */
+/**
+ * 사용자 판단. 이 확정은 재계산이 지우지 않는다(근거 교집합으로 이어진다).
+ *
+ * 네 값의 뜻이 다르다 — `still_active`("계속 써요")는 **상태를 바꾸지 않고** 물어본
+ * 사실만 기록한다. 상태를 건드리면 그 series가 예상 총액에서 빠지는데, 사용자는
+ * 계속 쓴다고 답했을 뿐이다(기획 D4).
+ */
 export function decideRecurringSeries(
   accessToken: string | null,
   seriesId: string,
-  decision: "confirmed" | "rejected",
+  decision: "confirmed" | "rejected" | "ended" | "still_active",
 ): Promise<RecurringDecisionResponse> {
   return apiFetch<RecurringDecisionResponse>(
     `/v1/recurring/series/${seriesId}/decision`,

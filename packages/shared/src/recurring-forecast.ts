@@ -139,6 +139,11 @@ export function resolveRecurringPhase(
     nextExpectedAt: Date | string;
     intervalDays: number;
     windowDays: number;
+    /**
+     * 사용자가 "계속 써요"라고 답한 시각. 있으면 그 뒤 **한 주기**가 지나기 전에는
+     * 다시 묻지 않는다 — 답을 받고도 또 묻는 것은 답을 무시하는 것이다(기획 D4).
+     */
+    stoppedDismissedAt?: Date | string | null;
   },
   now: Date,
 ): Pick<RecurringForecast, 'phase' | 'overdueDays' | 'stoppedCandidate'> {
@@ -161,11 +166,18 @@ export function resolveRecurringPhase(
     phase = 'due';
   }
 
-  return {
-    phase,
-    overdueDays,
-    stoppedCandidate: elapsed > windowMs + graceMs,
-  };
+  // 국면(overdue)은 사실이라 답과 무관하게 그대로 말한다. 답이 누르는 것은 **묻기**뿐이다.
+  let stoppedCandidate = elapsed > windowMs + graceMs;
+  if (stoppedCandidate && input.stoppedDismissedAt) {
+    const dismissed =
+      input.stoppedDismissedAt instanceof Date
+        ? input.stoppedDismissedAt
+        : new Date(input.stoppedDismissedAt);
+    const sinceDismiss = now.getTime() - dismissed.getTime();
+    if (sinceDismiss < input.intervalDays * DAY_MS) stoppedCandidate = false;
+  }
+
+  return { phase, overdueDays, stoppedCandidate };
 }
 
 export function forecastRecurring(
