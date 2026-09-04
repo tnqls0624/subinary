@@ -29,8 +29,12 @@
 #
 # ## 사용
 #
-#   sh scripts/ops/deploy-ota-bundle.sh                # 버전 자동(타임스탬프)
+#   sh scripts/ops/deploy-ota-bundle.sh                # 버전 자동(웹 소스 커밋 sha)
 #   sh scripts/ops/deploy-ota-bundle.sh 1.4.0          # 버전 지정
+#   OTA_FORCE=true sh scripts/ops/deploy-ota-bundle.sh # 같은 버전도 강제 재배포
+#
+# 웹 소스가 안 바뀌었으면 **빌드 없이 즉시 종료**한다(exit 0). 앱이 같은 번들을 다시
+# 받지 않게 하고, export 시간도 매 배포에서 빠진다.
 #
 # 종료 코드: 0 = 배포됨 · 1 = 실패
 # =============================================================================
@@ -40,16 +44,43 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$script_dir/../.." && pwd)"
 cd "$repository_root"
 
-# 번들 버전. 플러그인은 설치된 버전과 **문자열 비교**만 하므로 단조 증가하면 충분하다.
-# 기본값을 타임스탬프로 두는 이유: 사람이 매번 번호를 정하면 빠뜨리고, 같은 버전을 두 번
-# 올리면 앱이 갱신을 건너뛴다(조용히 아무 일도 안 일어난다).
-version="${1:-$(date '+%Y.%m.%d-%H%M%S')}"
+# 번들 버전 = **웹에 영향 주는 경로의 마지막 커밋 sha**.
+#
+# 처음에는 타임스탬프였다. 그랬더니 웹 소스가 그대로인 배포에서도 매번 새 버전이 생겨
+# 앱이 1.1MB를 헛되게 받았다(2026-09-04 실측: ops·네이티브·api만 고친 커밋 3개 동안
+# 번들이 두 번 새로 만들어졌다).
+#
+# zip 체크섬으로 같음을 판별할 수 없다 — Next.js `buildId`가 빌드마다 달라져 **같은
+# 소스도 다른 산출물**이 나온다. 그래서 콘텐츠가 아니라 **소스**를 기준으로 삼는다.
+#
+# 경로를 `apps/web packages`로 넓게 잡는 이유: 놓치는 쪽(웹이 바뀌었는데 번들을 안
+# 만드는 것)이 과하게 만드는 쪽보다 나쁘다. 웹이 안 쓰는 패키지가 바뀌어 번들이 한 번
+# 더 나가는 것은 낭비지만, 바뀐 웹이 앱에 안 가면 그건 버그로 보인다.
+web_sha="$(git log -1 --format=%h -- apps/web packages 2>/dev/null || true)"
+version="${1:-${web_sha:-$(date '+%Y.%m.%d-%H%M%S')}}"
 api_container="${OTA_API_CONTAINER:-family-memory-ai-api-1}"
 bundle_name="web-${version}.zip"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 
-echo "[ota] 버전: $version"
+echo "[ota] 버전: $version (웹 소스 커밋 기준)"
+
+# 이미 그 버전이 올라가 있으면 **빌드조차 하지 않는다.** 앱은 같은 버전을 다시 받지
+# 않으므로 올려도 무해하지만, export에 드는 시간이 매 배포에 얹힌다.
+# 강제로 다시 올리려면 `OTA_FORCE=true`(빌드 산출물이 의심될 때).
+if [ "${OTA_FORCE:-false}" != "true" ]; then
+  deployed="$(docker exec "$api_container" node -e "
+    fetch('http://localhost:3001/v1/ota/manifest')
+      .then(r => r.json())
+      .then(j => console.log(j.version ?? ''))
+      .catch(() => console.log(''));
+  " 2>/dev/null | tr -d '\r\n' || true)"
+  if [ -n "$deployed" ] && [ "$deployed" = "$version" ]; then
+    echo "[ota] 이미 배포된 버전입니다 — 건너뜁니다 (웹 소스 변경 없음)."
+    echo "[ota]   강제로 다시 올리려면 OTA_FORCE=true"
+    exit 0
+  fi
+fi
 
 # --- 1. 정적 export -----------------------------------------------------------
 # API URL은 빌드 시 번들에 인라인된다. 기본값(프로덕션)을 덮어쓰지 않도록 명시한다 —
