@@ -136,6 +136,21 @@ export type {
 } from './merchant-classifier.js';
 export { createMerchantCategoryTargetId } from './merchant-label.js';
 export {
+  BRANCH_MIN_PREFIX_LENGTH,
+  MERCHANT_BRANDS,
+  extractMerchantIdentity,
+  findMerchantIdentityCandidates,
+  rollupByMerchantBrand,
+} from './merchant-identity.js';
+export type {
+  MerchantBrandEntry,
+  MerchantBrandRollup,
+  MerchantIdentity,
+  MerchantIdentityCandidateGroup,
+  MerchantIdentityInput,
+  MerchantMergeReason,
+} from './merchant-identity.js';
+export {
   TRUNCATION_MIN_PREFIX_LENGTH,
   findTruncationCandidates,
 } from './merchant-truncation.js';

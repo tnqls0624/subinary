@@ -21,10 +21,29 @@
  *
  * 그래서 카드사가 잘라 보낸 이름(엄격한 접두 관계)을 화면이 찾아 위에 올린다.
  * **묶지는 않는다** — 이 저장소의 규약은 "묶음은 사용자 확정의 결과"이고, 제안은
- * 기존 대표 선택 다이얼로그를 그대로 열 뿐이다. 음차(`GS25`↔`지에스25`)와 지점·브랜드
- * 병합은 일부러 제안하지 않는다(사람만 아는 판단 — `findTruncationCandidates` 주석).
+ * 기존 대표 선택 다이얼로그를 그대로 열 뿐이다.
+ *
+ * ## 브랜드 제안 + 브랜드 축 (2026-09-04)
+ *
+ * 절단 제안은 실측에서 한계에 닿았다: 102개 이름에 후보가 **1묶음**뿐이다(사용자가
+ * 별칭 10건으로 이미 정리했다). 남은 문제는 음차(`GS25`↔`지에스25`)와 브랜드·지점
+ * 병합인데, 이 둘은 `findTruncationCandidates`가 "제품 결정이라 규칙이 답하지 않는다"며
+ * 일부러 비워 둔 자리였다.
+ *
+ * 그 제품 결정이 내려졌다: **별칭은 매장 단위, 브랜드는 별도 집계 축.** 그래서
+ * 화면이 두 가지를 더 한다.
+ *
+ *   1. 브랜드가 같고 지점도 같은 이름을 병합 후보로 올린다(`brand_notation`).
+ *      브랜드가 다르면 지명이 같아도 올리지 않는다 — `씨유영등포도림`(CU)과
+ *      `GS25영등포도림`은 경쟁 브랜드다.
+ *   2. 브랜드별 합계를 **파생 축**으로 보여준다. 이름은 하나도 바뀌지 않으므로
+ *      되돌릴 것이 없고, 지점별 소비도 그대로 남는다.
+ *
+ * 제안에는 **판정 근거**(어떤 토큰을 브랜드로 읽었고 지점이 무엇인지)를 함께 띄운다.
+ * 근거 없이 "묶으세요"만 내보내면 사용자가 검증할 수 없고, 한 번 틀린 제안이 도구
+ * 신뢰를 깎는다.
  * ------------------------------------------------------------------------- */
-import { Check, Link2Off, Sparkles, Store } from "lucide-react";
+import { Check, ChevronDown, Layers, Link2Off, Sparkles, Store } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -58,7 +77,12 @@ import {
   useMerchantList,
 } from "@/lib/queries";
 import type { MerchantSummary } from "@family/contracts";
-import { findTruncationCandidates } from "@family/shared";
+import {
+  findMerchantIdentityCandidates,
+  findTruncationCandidates,
+  rollupByMerchantBrand,
+  type MerchantIdentityCandidateGroup,
+} from "@family/shared";
 
 export default function MerchantsPage() {
   const { data, isLoading, isError } = useMerchantList();
@@ -91,10 +115,41 @@ export default function MerchantsPage() {
   const suggestions = useMemo(() => findTruncationCandidates(items), [items]);
 
   /**
+   * 브랜드/지점 구조로 찾은 병합 후보.
+   *
+   * 절단 제안이 다루는 이름은 **제외한다**(`excludeNames`). 실측에서 겹치는 쌍이
+   * 있고(`씨유영등포` ⊂ `씨유영등포도림`은 양쪽에서 잡힌다), 같은 묶음이 두 블록에
+   * 나오면 사용자가 같은 가게를 두 번 처리한다.
+   */
+  const identitySuggestions = useMemo(
+    () =>
+      findMerchantIdentityCandidates(items, {
+        excludeNames: new Set(
+          suggestions.flatMap((g) => [g.canonical, ...g.aliases]),
+        ),
+      }),
+    [items, suggestions],
+  );
+
+  /**
+   * 브랜드 축 — **파생 데이터**다. 이름을 바꾸지 않으므로 되돌릴 것이 없다.
+   * 이름이 2개 이상 묶이는 브랜드만 보여준다. 하나짜리는 목록에 이미 그대로 있어
+   * 같은 줄을 두 번 읽히는 것이 된다.
+   */
+  const brandRollups = useMemo(
+    () => rollupByMerchantBrand(items).filter((r) => r.storeCount >= 2),
+    [items],
+  );
+  const [brandOpen, setBrandOpen] = useState(false);
+
+  /**
    * 제안을 그대로 받아 **대표 선택 다이얼로그를 연다**(바로 저장하지 않는다).
    * 사용자가 대표를 바꿀 수도 있고, 무엇보다 확정은 사람이 해야 한다.
    */
-  const applySuggestion = (group: (typeof suggestions)[number]) => {
+  const applySuggestion = (group: {
+    canonical: string;
+    aliases: string[];
+  }) => {
     setSelected(new Set([group.canonical, ...group.aliases]));
     setCanonical(group.canonical);
     setPickOpen(true);
@@ -220,6 +275,86 @@ export default function MerchantsPage() {
                   </div>
                 ))}
               </div>
+            </Card>
+          ) : null}
+
+          {identitySuggestions.length > 0 ? (
+            <Card className="border-primary/30 bg-primary/5 space-y-3 p-4">
+              <div className="flex items-start gap-2">
+                <Sparkles className="text-primary mt-0.5 size-4 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">
+                    같은 가게로 보이는 이름이 {identitySuggestions.length}묶음
+                    있어요
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    브랜드와 지점이 같은 이름이에요. 표기만 다른 경우가 많아요.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {identitySuggestions.map((g) => (
+                  <IdentitySuggestionRow
+                    key={`${g.reason}-${g.canonical}`}
+                    group={g}
+                    onApply={() => applySuggestion(g)}
+                  />
+                ))}
+              </div>
+            </Card>
+          ) : null}
+
+          {brandRollups.length > 0 ? (
+            <Card className="overflow-hidden p-0">
+              {/* 브랜드 축은 **파생 집계**다. 이름을 바꾸지 않으므로 되돌릴 것이
+                  없고, 지점별 소비도 목록에 그대로 남는다. 기본은 접어 둔다 —
+                  주 작업(이름 정리)보다 부가 정보다. */}
+              <button
+                type="button"
+                onClick={() => setBrandOpen((v) => !v)}
+                className="hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors"
+              >
+                <Layers className="text-muted-foreground size-4 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    브랜드로 묶어 보기
+                  </span>
+                  <span className="text-muted-foreground mt-0.5 block text-xs">
+                    이름 2개 이상인 브랜드 {brandRollups.length}개 · 이름은
+                    바뀌지 않아요
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`text-muted-foreground size-4 shrink-0 transition-transform ${
+                    brandOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {brandOpen ? (
+                <div className="divide-border border-t divide-y">
+                  {brandRollups.map((r) => (
+                    <div key={r.brand} className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {r.brand}
+                        </span>
+                        <span className="text-muted-foreground shrink-0 text-xs">
+                          {r.transactionCount}건
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums">
+                          {formatWon(r.netTotal)}
+                        </span>
+                      </div>
+                      {/* 무엇이 합산됐는지 반드시 펼쳐 보인다. 이름 수는 매장 수의
+                          하한일 뿐이라(표기가 갈린 같은 매장이 둘로 세어진다)
+                          "매장 N곳"이라 단정하면 관측하지 않은 사실이 된다. */}
+                      <p className="text-muted-foreground mt-1 text-xs">
+                        {r.names.join(" · ")}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </Card>
           ) : null}
 
@@ -399,6 +534,76 @@ export default function MerchantsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * 브랜드 병합 후보 한 줄 — **판정 근거를 함께 띄운다.**
+ *
+ * 근거가 왜 필요한가: 이 제안은 절단 제안보다 판단이 한 겹 더 들어간다(브랜드
+ * 사전을 거친다). 사용자가 "지에스25를 GS25로 읽었다"를 볼 수 있어야 제안을
+ * 검증하고, 틀렸을 때 무엇이 틀렸는지 말할 수 있다. 근거 없는 제안 하나가
+ * 도구 신뢰를 깎는다는 것은 이 화면이 이미 배운 것이다.
+ *
+ * 근거는 접어 둔다 — 대개 맞으므로 매번 펼쳐 보일 필요는 없고, 의심될 때만 열면 된다.
+ */
+function IdentitySuggestionRow({
+  group,
+  onApply,
+}: {
+  group: MerchantIdentityCandidateGroup;
+  onApply: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-card rounded-xl px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-medium">
+              {group.canonical}
+            </span>
+            <Badge variant="secondary" className="shrink-0">
+              {group.brand}
+            </Badge>
+          </span>
+          <span className="text-muted-foreground mt-0.5 block truncate text-xs">
+            {group.aliases.join(" · ")} → 합치면 {group.transactionCount}건{" "}
+            {formatWon(group.netTotal)}
+          </span>
+        </span>
+        <Button
+          size="sm"
+          variant="tint"
+          className="shrink-0"
+          onClick={onApply}
+        >
+          묶기
+        </Button>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-muted-foreground mt-1.5 text-xs underline-offset-2 hover:underline"
+      >
+        {open ? "근거 접기" : "왜 같은 가게인가요?"}
+      </button>
+      {open ? (
+        <div className="text-muted-foreground mt-1.5 space-y-1 text-xs">
+          <p>
+            {group.reason === "brand_notation"
+              ? "브랜드와 지점이 같아요. 표기만 달라요."
+              : "브랜드가 같고 지점 이름이 잘린 것으로 보여요."}
+          </p>
+          {group.evidence.map((e) => (
+            <p key={e.name} className="truncate">
+              <span className="font-medium">{e.name}</span> → 브랜드 “
+              {e.matchedToken}” · 지점 “{e.branch || "없음"}”
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
