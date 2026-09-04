@@ -64,7 +64,20 @@ RUN cd apps/worker \
   && node -e "const msgpackr = require(require.resolve('msgpackr', { paths: [require.resolve('bullmq')] })); if (!msgpackr.isNativeAccelerationEnabled) throw new Error('msgpackr 네이티브 가속이 비활성화되었습니다.');"
 
 # 패키지 dist(tsup) → 앱 빌드(api/worker=nest swc dist, web=next build)
-RUN pnpm -r --filter "./packages/*" build
+#
+# `--workspace-concurrency=2`로 동시 빌드를 묶는다. 기본값(4)이면 tsup DTS가 네 개
+# 동시에 뜨는데, DTS 생성은 패키지마다 타입 그래프 전체를 메모리에 올려 이 저장소에서
+# 가장 무거운 단계다(로컬 실측: shared 하나가 13초).
+#
+# 2026-09-05에 그 대가를 치렀다. 18GB 머신에서 프로덕션 스택 13개 컨테이너가 뜬 채로
+# 이 빌드를 돌리자 스왑이 12.1/13.3GB까지 차고 **59분간 빌드 로그가 한 줄도 늘지
+# 않았다**(CPU는 229%). 실패로 끝나지 않고 스래싱으로 멈춰 서기 때문에 증상이
+# "느리다"로만 보이고 원인을 가리킨다 — Docker daemon까지 무응답이 되어 컨테이너
+# 상태조차 볼 수 없었다.
+#
+# 순차(1)까지 내리지 않는 이유: 빌드 시간이 그만큼 늘고, 실측에서 문제가 된 것은
+# 동시 DTS의 **피크**이지 병렬 자체가 아니다. 2면 피크가 절반이다.
+RUN pnpm -r --workspace-concurrency=2 --filter "./packages/*" build
 RUN pnpm --filter @family/api build
 RUN pnpm --filter @family/worker build
 RUN pnpm --filter @family/trainer build
