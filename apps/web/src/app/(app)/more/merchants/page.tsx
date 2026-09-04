@@ -75,19 +75,19 @@ import {
   useCreateMerchantAliases,
   useDeleteMerchantAlias,
   useMerchantList,
+  useRejectMerchantIdentity,
 } from "@/lib/queries";
-import type { MerchantSummary } from "@family/contracts";
-import {
-  findMerchantIdentityCandidates,
-  findTruncationCandidates,
-  rollupByMerchantBrand,
-  type MerchantIdentityCandidateGroup,
-} from "@family/shared";
+import type {
+  MerchantIdentityCandidate,
+  MerchantSummary,
+} from "@family/contracts";
+import { findTruncationCandidates, rollupByMerchantBrand } from "@family/shared";
 
 export default function MerchantsPage() {
   const { data, isLoading, isError } = useMerchantList();
   const createAliases = useCreateMerchantAliases();
   const deleteAlias = useDeleteMerchantAlias();
+  const rejectIdentity = useRejectMerchantIdentity();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pickOpen, setPickOpen] = useState(false);
@@ -121,15 +121,16 @@ export default function MerchantsPage() {
    * 있고(`씨유영등포` ⊂ `씨유영등포도림`은 양쪽에서 잡힌다), 같은 묶음이 두 블록에
    * 나오면 사용자가 같은 가게를 두 번 처리한다.
    */
-  const identitySuggestions = useMemo(
-    () =>
-      findMerchantIdentityCandidates(items, {
-        excludeNames: new Set(
-          suggestions.flatMap((g) => [g.canonical, ...g.aliases]),
-        ),
-      }),
-    [items, suggestions],
-  );
+  /**
+   * 브랜드/지점 병합 후보 — **서버가 계산해서 내려준다.**
+   *
+   * 절단 후보처럼 화면에서 계산하지 않는 이유: 거절한 후보를 걸러야 하고, 거절
+   * 기록의 신원은 `node:crypto` 해시다(feedback 계보에 가맹점 원문을 남기지 않기
+   * 위해). 브라우저에서 같은 해시를 재현하려 들면 직렬화가 어긋났을 때 "거절했는데
+   * 또 뜬다"로만 드러나는 버그가 된다. 해시를 가진 쪽에서 걸러 내려준다.
+   */
+  const identitySuggestions: MerchantIdentityCandidate[] =
+    data?.identityCandidates ?? [];
 
   /**
    * 브랜드 축 — **파생 데이터**다. 이름을 바꾸지 않으므로 되돌릴 것이 없다.
@@ -146,6 +147,30 @@ export default function MerchantsPage() {
    * 제안을 그대로 받아 **대표 선택 다이얼로그를 연다**(바로 저장하지 않는다).
    * 사용자가 대표를 바꿀 수도 있고, 무엇보다 확정은 사람이 해야 한다.
    */
+  /**
+   * "같은 가게가 아니에요" — 상태를 바꾸지 않고 판단만 남긴다.
+   *
+   * 확인 다이얼로그를 두지 않는다. 되돌릴 상태가 없고(별칭도 거래도 그대로),
+   * 잘못 눌러도 잃는 것은 그 제안 하나다. 확정 쪽에는 다이얼로그가 있는데
+   * 그쪽은 과거 거래를 백필하기 때문이다 — 위험이 다르면 절차도 다르다.
+   */
+  const rejectSuggestion = (group: MerchantIdentityCandidate) => {
+    rejectIdentity.mutate(
+      {
+        names: [group.canonical, ...group.aliases],
+        brand: group.brand,
+        reason: group.reason,
+      },
+      {
+        onSuccess: () =>
+          toast.success("다시 제안하지 않아요", {
+            description: `‘${group.canonical}’과 ‘${group.aliases.join("’, ‘")}’은 다른 가게로 남겨요`,
+          }),
+        onError: () => toast.error("저장하지 못했어요. 잠시 후 다시 시도해 주세요"),
+      },
+    );
+  };
+
   const applySuggestion = (group: {
     canonical: string;
     aliases: string[];
@@ -298,6 +323,7 @@ export default function MerchantsPage() {
                     key={`${g.reason}-${g.canonical}`}
                     group={g}
                     onApply={() => applySuggestion(g)}
+                    onReject={() => rejectSuggestion(g)}
                   />
                 ))}
               </div>
@@ -551,9 +577,11 @@ export default function MerchantsPage() {
 function IdentitySuggestionRow({
   group,
   onApply,
+  onReject,
 }: {
-  group: MerchantIdentityCandidateGroup;
+  group: MerchantIdentityCandidate;
   onApply: () => void;
+  onReject: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -582,13 +610,22 @@ function IdentitySuggestionRow({
           묶기
         </Button>
       </div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="text-muted-foreground mt-1.5 text-xs underline-offset-2 hover:underline"
-      >
-        {open ? "근거 접기" : "왜 같은 가게인가요?"}
-      </button>
+      <div className="mt-1.5 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="text-muted-foreground text-xs underline-offset-2 hover:underline"
+        >
+          {open ? "근거 접기" : "왜 같은 가게인가요?"}
+        </button>
+        <button
+          type="button"
+          onClick={onReject}
+          className="text-muted-foreground text-xs underline-offset-2 hover:underline"
+        >
+          다른 가게예요
+        </button>
+      </div>
       {open ? (
         <div className="text-muted-foreground mt-1.5 space-y-1 text-xs">
           <p>

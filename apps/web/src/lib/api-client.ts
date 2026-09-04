@@ -54,6 +54,8 @@ import type {
   MerchantAliasCreateRequest,
   MerchantAliasCreateResponse,
   MerchantAliasDeleteResponse,
+  MerchantIdentityRejectRequest,
+  MerchantIdentityRejectResponse,
   MerchantListResponse,
   MonthlyAnalytics,
   RegisterRequest,
@@ -648,6 +650,15 @@ export const api = {
         method: "DELETE",
         accessToken,
       }),
+    /** "이 이름들은 같은 가게가 아니다" — 상태를 바꾸지 않고 판단만 남긴다. */
+    rejectIdentity: (
+      accessToken: AccessToken,
+      body: MerchantIdentityRejectRequest,
+    ) =>
+      apiFetch<MerchantIdentityRejectResponse>(
+        "/v1/merchants/identity-feedback",
+        { method: "POST", body, accessToken },
+      ),
   },
 
   transactions: {

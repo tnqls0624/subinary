@@ -134,7 +134,10 @@ export type {
   MerchantClassifierTrainingRow,
   MerchantDatasetSplit,
 } from './merchant-classifier.js';
-export { createMerchantCategoryTargetId } from './merchant-label.js';
+export {
+  createMerchantCategoryTargetId,
+  createMerchantIdentityTargetId,
+} from './merchant-label.js';
 export {
   BRANCH_MIN_PREFIX_LENGTH,
   MERCHANT_BRANDS,

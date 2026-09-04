@@ -361,6 +361,9 @@ export {
   merchantAliasSummarySchema,
   merchantAliasCreateResponseSchema,
   merchantAliasDeleteResponseSchema,
+  merchantIdentityCandidateSchema,
+  merchantIdentityRejectRequestSchema,
+  merchantIdentityRejectResponseSchema,
 } from './merchant.js';
 export type {
   MerchantSummary,
@@ -369,6 +372,9 @@ export type {
   MerchantAliasSummary,
   MerchantAliasCreateResponse,
   MerchantAliasDeleteResponse,
+  MerchantIdentityCandidate,
+  MerchantIdentityRejectRequest,
+  MerchantIdentityRejectResponse,
 } from './merchant.js';
 
 export {

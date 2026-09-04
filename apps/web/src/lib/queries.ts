@@ -456,6 +456,34 @@ export function useCreateMerchantAliases() {
   });
 }
 
+/**
+ * 병합 후보 거절.
+ *
+ * 거래·별칭을 건드리지 않으므로 **가맹점 목록만** 무효화한다. 여기서
+ * `invalidateTransactionScope`까지 부르면 대시보드·분석 전체가 아무것도 바뀌지
+ * 않은 채로 다시 불려온다.
+ */
+export function useRejectMerchantIdentity() {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      names: string[];
+      brand: string;
+      reason: "brand_notation" | "brand_branch_prefix";
+    }) =>
+      authedFetch((token) =>
+        api.merchants.rejectIdentity(token, {
+          householdId: householdId as string,
+          ...input,
+        }),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.merchants(householdId) });
+    },
+  });
+}
+
 /** 별칭 해제 — 서버가 해당 거래를 원문 재정규화 값으로 되돌린다. */
 export function useDeleteMerchantAlias() {
   const { householdId, authedFetch } = useHouseholdScope();

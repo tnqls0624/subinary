@@ -21,8 +21,10 @@ import { z } from 'zod';
 
 import {
   merchantAliasCreateRequestSchema,
+  merchantIdentityRejectRequestSchema,
   type MerchantAliasCreateResponse,
   type MerchantAliasDeleteResponse,
+  type MerchantIdentityRejectResponse,
   type MerchantListResponse,
 } from '@family/contracts';
 
@@ -37,6 +39,9 @@ class MerchantListQueryDto extends createZodDto(merchantListQuerySchema) {}
 class MerchantAliasCreateDto extends createZodDto(
   merchantAliasCreateRequestSchema,
 ) {}
+class MerchantIdentityRejectDto extends createZodDto(
+  merchantIdentityRejectRequestSchema,
+) {}
 
 @Controller('merchants')
 export class MerchantController {
@@ -48,11 +53,7 @@ export class MerchantController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: MerchantListQueryDto,
   ): Promise<MerchantListResponse> {
-    const items = await this.merchantService.listMerchants(
-      user.userId,
-      query.householdId,
-    );
-    return { items };
+    return this.merchantService.listMerchants(user.userId, query.householdId);
   }
 
   /** POST /v1/merchants/aliases — "이 이름들은 같은 가게" 확정 + 과거 데이터 백필. */
@@ -63,6 +64,22 @@ export class MerchantController {
     @Body() dto: MerchantAliasCreateDto,
   ): Promise<MerchantAliasCreateResponse> {
     return this.merchantService.createAliases(user.userId, dto);
+  }
+
+  /**
+   * POST /v1/merchants/identity-feedback — "이 이름들은 같은 가게가 아니다".
+   *
+   * **상태를 바꾸지 않는다.** append-only 판단만 남기고, 그것이 다음 제안을 거른다.
+   * 확정은 이 경로가 아니라 `POST aliases`가 처리한다(사실을 만드는 쪽에서 함께
+   * 기록해야 하나가 실패했을 때 상태가 갈리지 않는다).
+   */
+  @Post('identity-feedback')
+  @HttpCode(HttpStatus.CREATED)
+  rejectIdentity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MerchantIdentityRejectDto,
+  ): Promise<MerchantIdentityRejectResponse> {
+    return this.merchantService.rejectIdentityCandidate(user.userId, dto);
   }
 
   /** DELETE /v1/merchants/aliases/:id — 별칭 해제 + 해당 거래 원복. */

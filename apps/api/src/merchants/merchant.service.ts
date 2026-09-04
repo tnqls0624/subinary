@@ -25,11 +25,19 @@ import {
   visibilityScope,
   type Db,
 } from '@family/database';
-import { normalizeMerchant } from '@family/shared';
+import {
+  createMerchantIdentityTargetId,
+  findMerchantIdentityCandidates,
+  findTruncationCandidates,
+  normalizeMerchant,
+} from '@family/shared';
 import type {
   MerchantAliasCreateRequest,
   MerchantAliasCreateResponse,
   MerchantAliasDeleteResponse,
+  MerchantIdentityCandidate,
+  MerchantIdentityRejectRequest,
+  MerchantIdentityRejectResponse,
   MerchantSummary,
 } from '@family/contracts';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
@@ -44,6 +52,39 @@ import {
 /** 별칭 등록/해제는 가구 전체 집계를 바꾸므로 관리 권한을 요구한다. */
 const ADMIN_ROLES = ['owner', 'admin'] as const;
 
+/**
+ * 병합 후보 판단의 feedback 계보 좌표.
+ *
+ * 기존 `merchant-category`(가맹점→카테고리)와 **분리한다**. 같은 target_type을 쓰면
+ * 데이터셋 빌드가 "이 가맹점의 카테고리는 X"와 "이 이름들은 같은 가게가 아니다"를
+ * 같은 라벨 축으로 읽는다 — 다른 질문에 대한 답이라 섞으면 둘 다 못 쓴다.
+ */
+const IDENTITY_TARGET_TYPE = 'merchant-identity';
+const IDENTITY_LABEL_SCHEMA = 'merchant-identity-v1';
+
+/**
+ * ## 제안 정밀도를 어떻게 세는가
+ *
+ * 별도 지표 테이블을 만들지 않는다. `feedback_events`가 확정·거절을 모두 담으므로
+ * SQL 한 줄로 센다:
+ *
+ * ```sql
+ * select label->>'decision' as decision, label->>'reason' as reason, count(*)
+ * from feedback_events
+ * where target_type = 'merchant-identity'
+ * group by 1, 2 order by 3 desc;
+ * ```
+ *
+ * **정의를 정직하게 적어 둔다**: 이 비율은 "제안한 것 중 몇 %가 맞았나"가 아니라
+ * **"사용자가 판단한 것 중 몇 %가 맞았나"**다. 제안됐지만 사용자가 아무 행동도 하지
+ * 않은 후보는 분모에 없다. 전자를 세려면 렌더마다 제안을 기록해야 하는데, 화면이
+ * 매 렌더 순수 함수로 계산하므로 같은 후보가 수십 번 쌓인다 — 그 비용으로 얻는
+ * 정밀도는 "사용자가 무시했다"와 "아직 안 봤다"를 구분하지 못해 어차피 못 쓴다.
+ *
+ * `reason`은 거절 쪽에만 있다(확정은 화면을 거치지 않은 수동 병합도 포함하므로
+ * 유형을 붙이면 제안 성능을 과대평가한다). 유형별 약점은 거절의 `reason` 분포로 읽는다.
+ */
+
 @Injectable()
 export class MerchantService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -57,7 +98,10 @@ export class MerchantService {
   async listMerchants(
     userId: string,
     householdId: string,
-  ): Promise<MerchantSummary[]> {
+  ): Promise<{
+    items: MerchantSummary[];
+    identityCandidates: MerchantIdentityCandidate[];
+  }> {
     const actorMemberId = await this.requireMembership(householdId, userId);
 
     // 공개범위는 analytics와 **같은 헬퍼**를 쓴다. 이 목록은 가맹점명과 순지출을 그대로
@@ -147,7 +191,107 @@ export class MerchantService {
 
     // 지출 큰 것 먼저 — 정리할 가치가 큰 가맹점이 위로 온다.
     items.sort((a, b) => b.netTotal - a.netTotal || a.name.localeCompare(b.name));
-    return items;
+
+    /**
+     * 사용자가 이미 "같은 가게가 아니다"라고 답한 후보들.
+     *
+     * 한 번의 거절로 영구히 제외한다. 지시서는 "두 번 거절하면"이라 적었지만
+     * 한 번으로 좁혔다 — 사용자가 "아니에요"를 눌렀는데 같은 제안이 다시 올라오면
+     * 그것 자체가 도구 신뢰를 깎는다. 규칙이 개선돼 묶음 구성이 달라지면 target id도
+     * 달라지므로, 이 제외가 개선을 영구히 막지는 않는다.
+     */
+    const rejectedRows = await this.db
+      .selectDistinct({ targetId: schema.feedbackEvents.targetId })
+      .from(schema.feedbackEvents)
+      .where(
+        and(
+          eq(schema.feedbackEvents.householdId, householdId),
+          eq(schema.feedbackEvents.targetType, IDENTITY_TARGET_TYPE),
+          eq(schema.feedbackEvents.source, 'human_rejected'),
+        ),
+      );
+    const rejected = new Set(rejectedRows.map((r) => r.targetId));
+
+    /**
+     * 브랜드/지점 병합 후보.
+     *
+     * 절단 후보가 다루는 이름은 제외한다 — 실측에서 겹치는 쌍이 있고
+     * (`씨유영등포` ⊂ `씨유영등포도림`), 같은 묶음이 두 블록에 나오면 사용자가
+     * 같은 가게를 두 번 처리한다. 절단 쪽은 화면이 계산하므로 여기서 **같은 함수를
+     * 한 번 더** 부른다(그 결과는 내려주지 않는다).
+     *
+     * 이 목록은 타인의 `private`/`summary_only` 거래가 접힌 뒤의 이름만 담는다 —
+     * `items`가 이미 `redactedMerchantLabel`을 통과했기 때문이다. 후보를 원본
+     * 이름으로 다시 계산하면 접어 둔 이름이 제안에 실려 새어 나간다(P0-6).
+     */
+    const truncationNames = new Set(
+      findTruncationCandidates(items).flatMap((g) => [g.canonical, ...g.aliases]),
+    );
+    const identityCandidates = findMerchantIdentityCandidates(items, {
+      excludeNames: truncationNames,
+    })
+      .filter(
+        (g) =>
+          !rejected.has(
+            createMerchantIdentityTargetId(householdId, [
+              g.canonical,
+              ...g.aliases,
+            ]),
+          ),
+      )
+      .map((g) => ({
+        brand: g.brand,
+        reason: g.reason,
+        canonical: g.canonical,
+        aliases: g.aliases,
+        transactionCount: g.transactionCount,
+        netTotal: g.netTotal,
+        evidence: g.evidence.map((e) => ({ ...e })),
+      }));
+
+    return { items, identityCandidates };
+  }
+
+  /**
+   * 병합 후보 거절을 append-only로 남긴다.
+   *
+   * **상태를 바꾸지 않는다** — 별칭도, 거래도 손대지 않는다. 남는 것은 "사용자가
+   * 이 묶음을 아니라고 했다"는 사실 하나이고, 그것이 다음 제안을 거른다.
+   *
+   * 중복 호출을 막지 않는 이유: feedback_events는 append-only 계보이고, 같은 판단이
+   * 두 번 기록되는 것은 사실 왜곡이 아니다(사용자가 실제로 두 번 눌렀다).
+   * 조회는 `selectDistinct`로 묶는다.
+   */
+  async rejectIdentityCandidate(
+    userId: string,
+    input: MerchantIdentityRejectRequest,
+  ): Promise<MerchantIdentityRejectResponse> {
+    await this.requireMembership(input.householdId, userId, ADMIN_ROLES);
+    // 이름은 목록에 뜬 그대로 오지만, 화면과 서버가 같은 키를 계산해야 하므로
+    // 정규화를 한 번 더 통과시킨다(화면이 보낸 값을 그대로 믿지 않는다).
+    const names = input.names.map((n) => normalizeMerchant(n)).filter((n) => n.length > 0);
+    if (names.length < 2) {
+      throw new ConflictException('후보를 이루는 이름이 2개 미만입니다');
+    }
+    const targetId = createMerchantIdentityTargetId(input.householdId, names);
+    await this.db.insert(schema.feedbackEvents).values({
+      householdId: input.householdId,
+      targetType: IDENTITY_TARGET_TYPE,
+      targetId,
+      labelSchemaVersion: IDENTITY_LABEL_SCHEMA,
+      // 이름 원문은 넣지 않는다 — target id 해시가 신원을 담고, 이 계보는
+      // 데이터셋 스냅샷으로 흘러간다(`createMerchantIdentityTargetId` 주석).
+      label: {
+        decision: 'rejected',
+        brand: input.brand,
+        reason: input.reason,
+        nameCount: names.length,
+      },
+      source: 'human_rejected',
+      actorUserId: userId,
+      occurredAt: new Date(),
+    });
+    return { targetId };
   }
 
   /**
@@ -321,6 +465,33 @@ export class MerchantService {
         actorUserId: userId,
         plan,
         now: new Date(),
+      });
+
+      /**
+       * 6. 확정 사실을 feedback 계보에도 남긴다 — **같은 트랜잭션 안에서**.
+       *
+       * 거절(`human_rejected`)만 기록하면 제안 정밀도의 분모만 쌓이고 분자가 없다.
+       * "사용자가 판단한 후보 중 몇 %가 맞았나"를 세려면 확정도 같은 target_type에
+       * 들어와야 한다.
+       *
+       * 화면을 거치지 않고 직접 고른 병합도 여기로 들어온다 — 그것은 제안이 아니라
+       * 사용자가 스스로 찾은 것이므로 정밀도 분자로 세면 제안 성능을 과대평가한다.
+       * 그래서 label에 `brand`·`reason`을 넣지 않는다: 제안에서 온 것만 그 필드를
+       * 갖는 거절 쪽과 대칭이 깨지지만, 대칭보다 **분자를 부풀리지 않는 것**이 중요하다.
+       * 유형별 정밀도는 거절 쪽 `reason` 분포로 읽는다.
+       */
+      await tx.insert(schema.feedbackEvents).values({
+        householdId,
+        targetType: IDENTITY_TARGET_TYPE,
+        targetId: createMerchantIdentityTargetId(householdId, [
+          canonical,
+          ...allAliases,
+        ]),
+        labelSchemaVersion: IDENTITY_LABEL_SCHEMA,
+        label: { decision: 'confirmed', nameCount: allAliases.length + 1 },
+        source: 'human_confirmed',
+        actorUserId: userId,
+        occurredAt: new Date(),
       });
 
       return {
