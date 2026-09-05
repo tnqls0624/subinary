@@ -445,7 +445,17 @@ export function selectCancellationParent(
     // 카드 미연결 취소가 아무 카드 승인에나 붙는다.
     if ((candidate.cardId ?? null) !== (cancellation.cardId ?? null)) return false;
     if (candidateCurrency(candidate) !== currency) return false;
-    if (!candidate.approvedAt || candidate.approvedAt >= cancelledAt) return false;
+    // 승인이 취소보다 **나중**이면 부모가 될 수 없다. 같은 시각은 허용한다 —
+    // 카드 문자의 시각은 분 단위(`08/23 20:05`)라 같은 분에 일어난 승인과 취소는
+    // 초까지 같은 값이 된다. `>=`로 막으면 그 조합이 **영원히** 연결되지 않는다.
+    //
+    // 실측 2026-09-05: 쿠팡 3,700원이 20:05:00 승인 → 20:05:00 취소 → 20:06:34
+    // 재승인이었는데, 취소가 첫 승인에 붙지 못해 3,700원이 지출에 과다 계상됐다.
+    // 즉시 취소(결제 실패 후 재시도)는 흔한 패턴이고 **원래 같은 분에 일어난다.**
+    //
+    // 같은 시각 승인이 여럿이면 아래 유일성 판정이 `ambiguous`로 사람에게 보낸다 —
+    // 시각으로 구분되지 않는 것을 시스템이 골라 붙이지는 않는다.
+    if (!candidate.approvedAt || candidate.approvedAt > cancelledAt) return false;
 
     if (cancellation.authorizationCode) {
       if (candidate.authorizationCode !== cancellation.authorizationCode) return false;

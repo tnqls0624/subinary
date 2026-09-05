@@ -20,7 +20,7 @@ import {
   type DbExecutor,
   type TransactionMoneyRowLike,
 } from '@family/database';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, lte } from 'drizzle-orm';
 
 import type { FxSnapshotResolver } from './fx-snapshot-store.js';
 import { fxBaseDate } from './money-math.js';
@@ -212,7 +212,10 @@ export class TransactionMoneyShadowObserver {
         and(
           eq(schema.cardTransactions.householdId, row.householdId),
           eq(schema.cardTransactions.transactionType, 'approval'),
-          lt(schema.cardTransactions.approvedAt, cancelledAt),
+          // `selectCancellationParent`와 **같은 경계**여야 한다(같은 시각 포함).
+          // 여기만 `lt`로 좁히면 shadow가 실제 판정보다 후보를 적게 보고, 그러면
+          // 관측이 "차이 없음"이라 답하는데 실제 동작은 다른 상태가 된다.
+          lte(schema.cardTransactions.approvedAt, cancelledAt),
         ),
       );
 

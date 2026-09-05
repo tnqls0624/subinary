@@ -292,6 +292,35 @@ describe('취소 후보 판정 (ADR §4)', () => {
     });
   });
 
+  it('같은 시각의 승인도 후보다 — 카드 문자는 분 단위라 즉시 취소가 여기 걸린다', () => {
+    // 실측 2026-09-05: 쿠팡 3,700원이 20:05:00 승인 → 20:05:00 취소 → 20:06:34
+    // 재승인이었다. `approvedAt >= cancelledAt`으로 막던 종전 규칙에서는 후보가
+    // 0개가 되어 취소가 영원히 연결되지 않았고, 3,700원이 지출에 과다 계상됐다.
+    expect(
+      selectCancellationParent(evidence, [
+        approval({ approvedAt: CANCELLED_AT }),
+      ]),
+    ).toEqual({ kind: 'unique', approval: approval({ approvedAt: CANCELLED_AT }) });
+  });
+
+  it('취소보다 나중의 승인은 여전히 후보가 아니다', () => {
+    // 재승인(취소 이후)이 부모가 되면 상계 방향이 뒤집힌다.
+    const later = new Date(CANCELLED_AT.getTime() + 60_000);
+    expect(
+      selectCancellationParent(evidence, [approval({ approvedAt: later })]),
+    ).toEqual({ kind: 'none' });
+  });
+
+  it('같은 시각 승인이 둘이면 시스템이 고르지 않는다', () => {
+    // 시각으로 구분되지 않는 것을 골라 붙이면 틀렸을 때 되돌릴 근거가 없다.
+    expect(
+      selectCancellationParent(evidence, [
+        approval({ approvedAt: CANCELLED_AT }),
+        approval({ id: 'a2', approvedAt: CANCELLED_AT }),
+      ]),
+    ).toEqual({ kind: 'ambiguous', count: 2 });
+  });
+
   it('9. 후보가 0개면 none, 2개 이상이면 ambiguous다', () => {
     expect(selectCancellationParent(evidence, [])).toEqual({ kind: 'none' });
     expect(
