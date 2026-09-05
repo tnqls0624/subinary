@@ -24,6 +24,7 @@ import {
   ChevronRight,
   CreditCard,
   Fingerprint,
+  Gauge,
   KeyRound,
   LogOut,
   Repeat,
@@ -31,8 +32,8 @@ import {
   Smartphone,
   Store,
   Tags,
-  Wand2,
   Users,
+  Wand2,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -104,6 +105,18 @@ const GROUPS: ReadonlyArray<MoreGroup> = [
         icon: Wand2,
         title: "카테고리 규칙",
         description: "자동으로 붙는 카테고리를 확인하고 과거에도 적용해요",
+      },
+    ],
+  },
+  {
+    key: "play",
+    title: "플레이그라운드",
+    items: [
+      {
+        href: "/play",
+        icon: Gauge,
+        title: "지출로 보기",
+        description: "이번 달 페이스처럼 쌓인 지출을 다르게 보는 화면들이에요",
       },
     ],
   },

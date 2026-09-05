@@ -28,6 +28,7 @@ import type {
   MemberBreakdown,
   HouseholdSummary,
   MemberSummary,
+  TransactionSummaryResponse,
   MerchantBreakdown,
   AnalyticsMonths,
   MerchantLabelCandidateListResponse,
@@ -675,6 +676,36 @@ export function useHouseholdMembers(): UseQueryResult<MemberSummary[]> {
     queryFn: () =>
       authedFetch((token) =>
         api.households.members(token, householdId as string),
+      ),
+  });
+}
+
+/**
+ * 기간 지출 요약 — `GET /v1/transactions/summary`.
+ *
+ * **SQL로 직접 세지 않는 것이 요점이다.** 지출 합계의 정의는 ADR-0026이 하나로
+ * 정했다(취소 상계·제외 거래·공개범위를 어떻게 다루는지). 화면이 자기 방식으로
+ * 다시 세면 같은 달의 숫자가 화면마다 갈린다 — 그때 사용자가 잃는 것은 기능이
+ * 아니라 숫자에 대한 신뢰다.
+ *
+ * `from`/`to`가 없으면 요청하지 않는다(기간 없는 전체 합계는 이 훅의 계약이 아니다).
+ */
+export function useSpendSummary(
+  range: { from?: string; to?: string },
+  opts?: { enabled?: boolean },
+): UseQueryResult<TransactionSummaryResponse> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  const ready = enabled && !!range.from && !!range.to && opts?.enabled !== false;
+  return useQuery({
+    queryKey: ["spend-summary", householdId, range.from, range.to],
+    enabled: ready,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.transactions.summary(token, {
+          householdId: householdId as string,
+          from: range.from,
+          to: range.to,
+        }),
       ),
   });
 }

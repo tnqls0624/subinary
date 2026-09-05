@@ -40,6 +40,9 @@ export const ACCOUNT_PATHS: ReadonlyArray<string> = [
   "/devices",
   "/categories",
   "/ai-operations",
+  // 플레이그라운드는 `/more`에서 들어가지만 별도 루트다. 여기 없으면 미니앱을 보는
+  // 동안 어느 탭도 밝지 않아 "앱 밖으로 나왔나" 하는 인상을 준다.
+  "/play",
 ];
 
 /**
