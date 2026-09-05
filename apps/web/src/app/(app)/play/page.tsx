@@ -29,10 +29,11 @@
  * 것이 없다. 그 구조가 값을 하는 시점은 우리가 아닌 사람이 미니앱을 만들 때다.
  * 몇 개를 만들어 보고 **공통으로 필요했던 것만** 브릿지로 뽑는다.
  * ------------------------------------------------------------------------- */
-import { CalendarDays, Gauge, Store, Target } from "lucide-react";
+import { CalendarDays, Gamepad2, Gauge, Store, Target } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { ListRow, PageBackHeader } from "@/components/widgets";
+import { MINIAPPS } from "@/lib/miniapp-registry";
 
 interface PlayItem {
   href: string;
@@ -77,18 +78,46 @@ export default function PlayPage() {
         title="플레이그라운드"
         subtitle="쌓인 지출로 보는 작은 화면들이에요"
       />
-      <Card className="divide-border divide-y overflow-hidden p-0">
-        {ITEMS.map((item) => (
-          <ListRow
-            key={item.href}
-            href={item.href}
-            icon={<item.icon />}
-            title={item.title}
-            subtitle={item.description}
-            chevron
-          />
-        ))}
-      </Card>
+
+      {/* 미니앱 — 앱 코드가 아니라 **별도 번들**로 격리 실행된다. 게임을 추가할 때
+          이 화면을 고치지 않고 등록부에 한 줄을 더한다. */}
+      {MINIAPPS.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-muted-foreground px-1 text-[13px] font-semibold">
+            미니앱
+          </h2>
+          <Card className="divide-border divide-y overflow-hidden p-0">
+            {MINIAPPS.map((app) => (
+              <ListRow
+                key={app.key}
+                href={`/play/app/${app.key}`}
+                icon={<Gamepad2 />}
+                title={app.name}
+                subtitle={app.description}
+                chevron
+              />
+            ))}
+          </Card>
+        </section>
+      ) : null}
+
+      <section className="space-y-2">
+        <h2 className="text-muted-foreground px-1 text-[13px] font-semibold">
+          지출로 보기
+        </h2>
+        <Card className="divide-border divide-y overflow-hidden p-0">
+          {ITEMS.map((item) => (
+            <ListRow
+              key={item.href}
+              href={item.href}
+              icon={<item.icon />}
+              title={item.title}
+              subtitle={item.description}
+              chevron
+            />
+          ))}
+        </Card>
+      </section>
     </div>
   );
 }

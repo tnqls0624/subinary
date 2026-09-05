@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>얼마 썼을까</title>
+<!--
+  미니앱 — 호스트와 **완전히 분리된 문서**다.
+
+  `<iframe sandbox="allow-scripts">` 안에서 돌기 때문에 호스트의 쿠키·localStorage·
+  DOM에 접근할 수 없다. 필요한 것은 전부 브릿지(postMessage)로 요청한다.
+
+  ## 브릿지 SDK를 인라인한 이유
+
+  packages/shared의 `createMiniappClient`와 같은 계약이지만 여기 인라인으로 다시 썼다.
+  iframe은 별도 문서라 호스트의 모듈을 import할 수 없고, 미니앱이 지금 하나뿐이라
+  공유 파일을 만들면 쓰지 않을 빌드 스텝이 하나 생긴다.
+
+  **두 번째 미니앱이 생기면** `/miniapps/bridge.js`로 빼고 둘 다 그것을 로드한다.
+  그때까지는 계약을 `packages/shared/src/miniapp-bridge.ts`가 단일 출처로 들고 있고,
+  그쪽 테스트가 메시지 모양을 고정한다.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+    background: transparent;
+    color: #111;
+  }
+  @media (prefers-color-scheme: dark) { body { color: #f5f5f5; } }
+  .q { font-size: 17px; font-weight: 600; line-height: 1.4; margin: 0 0 4px; }
+  .sub { font-size: 13px; opacity: .6; margin: 0 0 16px; }
+  .opt {
+    display: block; width: 100%; text-align: left;
+    padding: 14px 16px; margin-bottom: 8px;
+    font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums;
+    border: 1px solid rgba(128,128,128,.35); border-radius: 12px;
+    background: rgba(128,128,128,.06); color: inherit;
+    cursor: pointer; transition: transform .06s ease, background .15s ease;
+  }
+  .opt:active { transform: scale(.985); }
+  .opt.correct { border-color: #16a34a; background: rgba(22,163,74,.14); }
+  .opt.wrong   { border-color: #dc2626; background: rgba(220,38,38,.12); }
+  .opt:disabled { cursor: default; }
+  .score { font-size: 13px; opacity: .7; margin-top: 14px; }
+  .center { text-align: center; padding: 32px 8px; }
+  .btn {
+    padding: 11px 18px; font-size: 15px; font-weight: 600;
+    border: 0; border-radius: 999px; background: #2563eb; color: #fff; cursor: pointer;
+  }
+  .muted { font-size: 13px; opacity: .65; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="root" class="center"><p class="muted">불러오는 중…</p></div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------------------------------------------------------------------- *
+   * 브릿지 클라이언트 (packages/shared/src/miniapp-sdk.ts와 같은 계약)
+   * ---------------------------------------------------------------------- */
+  const BRIDGE_VERSION = 1;
+  const TIMEOUT_MS = 8000;
+
+  function invoke(method, params = {}) {
+    return new Promise((resolve, reject) => {
+      const requestId = `r${Date.now()}${Math.random().toString(36).slice(2)}`;
+      let done = false;
+      const finish = (fn) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        fn();
+      };
+      const onMessage = (event) => {
+        const d = event.data;
+        // 요청 id로 짝짓는다 — 응답 순서가 요청 순서와 다를 수 있다.
+        if (!d || d.kind !== "response" || d.requestId !== requestId) return;
+        finish(() =>
+          d.ok ? resolve(d.data) : reject(new Error(d.error?.code ?? "host_error")),
+        );
+      };
+      // 타임아웃이 없으면 호스트가 죽었을 때 화면이 로딩으로 멈춘 채 아무 말도 안 한다.
+      const timer = setTimeout(
+        () => finish(() => reject(new Error("timeout"))),
+        TIMEOUT_MS,
+      );
+      window.addEventListener("message", onMessage);
+      window.parent.postMessage(
+        { v: BRIDGE_VERSION, kind: "request", requestId, method, params },
+        "*",
+      );
+    });
+  }
+
+  /* ---------------------------------------------------------------------- *
+   * 게임
+   * ---------------------------------------------------------------------- */
+  const STATE_KEY = "best";
+  const root = document.getElementById("root");
+  const won = (n) => n.toLocaleString("ko-KR") + "원";
+
+  let pool = [];      // 문제로 쓸 가맹점
+  let asked = 0;
+  let correct = 0;
+  let best = 0;
+
+  /** 오답 보기 — 정답에서 일정 배율만큼 떨어뜨린다. */
+  function makeOptions(answer) {
+    const factors = [0.4, 0.65, 1.6, 2.4];
+    const wrong = factors
+      .map((f) => Math.max(100, Math.round((answer * f) / 100) * 100))
+      .filter((v) => v !== answer);
+    // 중복 제거 후 둘만 고른다. 정답과 같은 값이 보기로 나오면 문제가 성립하지 않는다.
+    const uniq = [...new Set(wrong)].slice(0, 2);
+    const options = [answer, ...uniq];
+    // 결정적 셔플이 필요 없다 — 사람이 푸는 문제라 매번 달라도 된다.
+    for (let i = options.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+    return options;
+  }
+
+  function renderEmpty(message) {
+    root.className = "center";
+    root.innerHTML = `<p class="muted">${message}</p>`;
+  }
+
+  function renderDone() {
+    root.className = "center";
+    root.innerHTML = `
+      <p class="q">${asked}문제 중 ${correct}개 맞혔어요</p>
+      <p class="sub">최고 기록 ${best}개</p>
+      <button class="btn" id="again">다시 하기</button>`;
+    document.getElementById("again").onclick = start;
+  }
+
+  function renderQuestion() {
+    if (asked >= Math.min(5, pool.length)) {
+      if (correct > best) {
+        best = correct;
+        // 자기 상태 저장은 권한이 필요 없다 — 호스트가 미니앱 키로 격리한다.
+        invoke("state.set", { key: STATE_KEY, state: { best } }).catch(() => {});
+      }
+      renderDone();
+      return;
+    }
+
+    const item = pool[asked];
+    const options = makeOptions(item.netTotal);
+    root.className = "";
+    root.innerHTML = `
+      <p class="q">${item.name}</p>
+      <p class="sub">이번까지 ${item.count}번 갔어요. 얼마 썼을까요?</p>
+      <div id="opts"></div>
+      <p class="score">${asked + 1} / ${Math.min(5, pool.length)} · 맞힌 개수 ${correct}</p>`;
+
+    const box = document.getElementById("opts");
+    for (const value of options) {
+      const button = document.createElement("button");
+      button.className = "opt";
+      button.textContent = won(value);
+      button.onclick = () => {
+        const buttons = box.querySelectorAll("button");
+        buttons.forEach((b) => (b.disabled = true));
+        const isRight = value === item.netTotal;
+        if (isRight) correct += 1;
+        buttons.forEach((b) => {
+          if (b.textContent === won(item.netTotal)) b.classList.add("correct");
+          else if (b === button && !isRight) b.classList.add("wrong");
+        });
+        asked += 1;
+        setTimeout(renderQuestion, 700);
+      };
+      box.appendChild(button);
+    }
+  }
+
+  function start() {
+    asked = 0;
+    correct = 0;
+    // 매 판 다른 문제가 나오도록 섞는다.
+    pool = pool.slice().sort(() => Math.random() - 0.5);
+    renderQuestion();
+  }
+
+  async function boot() {
+    try {
+      // 권한이 필요한 호출. manifest에 `merchant.list`를 선언하지 않았으면
+      // 호스트가 permission_denied로 거절한다.
+      const merchants = await invoke("merchant.list");
+      // 문제로 쓸 만한 것만 — 2번 이상 갔고 금액이 있는 곳.
+      pool = (merchants.items ?? []).filter((m) => m.count >= 2 && m.netTotal > 0);
+
+      if (pool.length < 3) {
+        renderEmpty("문제를 낼 만큼 기록이 쌓이지 않았어요.<br>같은 곳을 두 번 이상 가면 문제가 생겨요.");
+        return;
+      }
+
+      const saved = await invoke("state.get", { key: STATE_KEY }).catch(() => null);
+      best = saved?.state?.best ?? 0;
+      start();
+    } catch (error) {
+      // 호스트가 왜 거절했는지 사용자에게 그대로 말한다. 조용히 빈 화면을 두면
+      // 권한 문제인지 데이터 문제인지 알 수 없다.
+      const code = error?.message ?? "host_error";
+      renderEmpty(
+        code === "permission_denied"
+          ? "이 게임에 필요한 권한이 없어요."
+          : code === "timeout"
+            ? "앱이 응답하지 않아요. 잠시 후 다시 열어 주세요."
+            : "지출 정보를 불러오지 못했어요.",
+      );
+    }
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
