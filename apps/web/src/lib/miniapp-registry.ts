@@ -48,6 +48,22 @@ export const MINIAPPS: readonly MiniappManifest[] = [
     height: 470,
   },
   {
+    key: "snake",
+    name: "스네이크",
+    description: "먹이를 먹고 길어져요",
+    entry: "/miniapps/snake/index.html",
+    permissions: [],
+    height: 480,
+  },
+  {
+    key: "memory",
+    name: "기억력 카드",
+    description: "같은 그림 두 장을 찾아요",
+    entry: "/miniapps/memory/index.html",
+    permissions: [],
+    height: 470,
+  },
+  {
     key: "spend-quiz",
     name: "얼마 썼을까",
     description: "자주 가는 곳에서 얼마 썼는지 맞혀 봐요",

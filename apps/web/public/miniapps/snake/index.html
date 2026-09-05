@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>스네이크</title>
+<!--
+  스네이크 — 권한 0개. 지출을 보지 않고 최고 점수만 저장한다.
+
+  브릿지는 `../bridge.js`가 `window.MiniApp`으로 제공한다.
+
+  ## 2048과 다른 점: 시간이 흐른다
+
+  2048은 사용자가 움직일 때만 상태가 바뀌지만 스네이크는 타이머가 돈다. 그래서
+  **화면이 안 보일 때 멈추는 처리**가 필요하다 — 앱을 백그라운드로 보내고 돌아왔을 때
+  뱀이 벽에 박혀 죽어 있으면 게임이 아니라 사고다.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --board: #1f2937; --snake: #34d399; --head: #10b981; --food: #f87171; --fg: #e5e7eb;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overscroll-behavior: none; }
+  body {
+    display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+    background: transparent; color: inherit;
+    touch-action: none; user-select: none;
+  }
+  .bar { display: flex; gap: 8px; width: 100%; max-width: 340px; }
+  .box {
+    flex: 1; text-align: center; padding: 7px 10px; border-radius: 8px;
+    background: var(--board); color: var(--fg);
+  }
+  .box .k { font-size: 10px; opacity: .7; letter-spacing: .04em; }
+  .box .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .btn {
+    padding: 0 14px; font-size: 13px; font-weight: 700;
+    color: #fff; background: #10b981; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  #wrap { position: relative; width: 100%; max-width: 340px; }
+  canvas {
+    display: block; width: 100%; aspect-ratio: 1;
+    background: var(--board); border-radius: 10px;
+  }
+  .over {
+    position: absolute; inset: 0; border-radius: 10px;
+    background: rgba(17,24,39,.82); color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    font-size: 20px; font-weight: 800;
+  }
+  .hint { font-size: 12px; opacity: .6; margin: 0; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="box"><div class="k">점수</div><div class="v" id="score">0</div></div>
+    <div class="box"><div class="k">최고</div><div class="v" id="best">0</div></div>
+    <button class="btn" id="new">새 게임</button>
+  </div>
+  <div id="wrap"><canvas id="cv" width="400" height="400"></canvas></div>
+  <p class="hint">스와이프하거나 방향키로 움직여요</p>
+
+<script src="../bridge.js"></script>
+<script>
+(() => {
+  "use strict";
+  const { state } = window.MiniApp;
+
+  const N = 16;              // 격자 칸 수
+  const STATE_KEY = "best";
+  const TICK_START = 160;    // ms. 먹을수록 빨라진다
+  const TICK_MIN = 70;
+
+  const cv = document.getElementById("cv");
+  const ctx = cv.getContext("2d");
+  const wrap = document.getElementById("wrap");
+  const scoreEl = document.getElementById("score");
+  const bestEl = document.getElementById("best");
+
+  let snake, dir, nextDir, food, score, best = 0, dead, timer = null;
+
+  const eq = (a, b) => a.x === b.x && a.y === b.y;
+
+  function placeFood() {
+    // 뱀이 없는 칸에서만 고른다. 무작위로 찍고 겹치면 다시 찍는 방식은 뱀이 길어질수록
+    // 반복이 늘고, 판이 거의 찼을 때는 사실상 멈춘다.
+    const free = [];
+    for (let y = 0; y < N; y += 1)
+      for (let x = 0; x < N; x += 1)
+        if (!snake.some((s) => s.x === x && s.y === y)) free.push({ x, y });
+    return free.length ? free[Math.floor(Math.random() * free.length)] : null;
+  }
+
+  function reset() {
+    snake = [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }];
+    dir = { x: 1, y: 0 };
+    nextDir = dir;
+    score = 0;
+    dead = false;
+    food = placeFood();
+    draw();
+    schedule();
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    if (dead) return;
+    const speed = Math.max(TICK_MIN, TICK_START - score * 3);
+    timer = setTimeout(step, speed);
+  }
+
+  function step() {
+    // 한 틱에 방향을 한 번만 반영한다. 그러지 않으면 오른쪽→위→왼쪽을 한 틱 안에
+    // 눌러 자기 몸으로 들어갈 수 있다.
+    dir = nextDir;
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    const hitWall = head.x < 0 || head.y < 0 || head.x >= N || head.y >= N;
+    // 꼬리 끝은 이번 틱에 비워지므로 충돌로 보지 않는다 — 그렇지 않으면 꽉 붙어
+    // 따라가는 정상 플레이가 죽음이 된다.
+    const body = snake.slice(0, -1);
+    const hitSelf = body.some((s) => eq(s, head));
+
+    if (hitWall || hitSelf) {
+      dead = true;
+      if (score > best) {
+        best = score;
+        state.set(STATE_KEY, { best });
+      }
+      draw();
+      return;
+    }
+
+    snake.unshift(head);
+    if (food && eq(head, food)) {
+      score += 1;
+      food = placeFood();
+    } else {
+      snake.pop();
+    }
+    draw();
+    schedule();
+  }
+
+  function draw() {
+    const cell = cv.width / N;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+
+    if (food) {
+      ctx.fillStyle = getComputedStyle(document.documentElement)
+        .getPropertyValue("--food").trim() || "#f87171";
+      ctx.beginPath();
+      ctx.arc((food.x + 0.5) * cell, (food.y + 0.5) * cell, cell * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    snake.forEach((s, i) => {
+      ctx.fillStyle = i === 0 ? "#10b981" : "#34d399";
+      const pad = cell * 0.08;
+      const r = cell * 0.24;
+      const x = s.x * cell + pad;
+      const y = s.y * cell + pad;
+      const w = cell - pad * 2;
+      // roundRect은 최신 브라우저에만 있다 — 없으면 사각형으로 그린다(게임은 돌아야 한다).
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, w, r);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y, w, w);
+      }
+    });
+
+    scoreEl.textContent = String(score);
+    bestEl.textContent = String(best);
+
+    wrap.querySelector(".over")?.remove();
+    if (dead) {
+      const veil = document.createElement("div");
+      veil.className = "over";
+      veil.innerHTML = `<div>${score}점</div>`;
+      const again = document.createElement("button");
+      again.className = "btn";
+      again.style.padding = "10px 18px";
+      again.textContent = "다시 하기";
+      again.onclick = reset;
+      veil.appendChild(again);
+      wrap.appendChild(veil);
+    }
+  }
+
+  function turn(d) {
+    if (dead) return;
+    // 반대 방향으로는 돌 수 없다(즉사 방지). 현재 진행 방향(`dir`)과 비교해야 한다 —
+    // `nextDir`와 비교하면 한 틱에 두 번 눌러 뒤집을 수 있다.
+    if (d.x === -dir.x && d.y === -dir.y) return;
+    nextDir = d;
+  }
+
+  document.getElementById("new").onclick = reset;
+
+  window.addEventListener("keydown", (e) => {
+    const d = {
+      ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 },
+      ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 },
+    }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    turn(d);
+  });
+
+  let touch = null;
+  wrap.addEventListener("touchstart", (e) => {
+    touch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  wrap.addEventListener("touchend", (e) => {
+    if (!touch) return;
+    const dx = e.changedTouches[0].clientX - touch.x;
+    const dy = e.changedTouches[0].clientY - touch.y;
+    touch = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    turn(
+      Math.abs(dx) > Math.abs(dy)
+        ? { x: dx > 0 ? 1 : -1, y: 0 }
+        : { x: 0, y: dy > 0 ? 1 : -1 },
+    );
+  }, { passive: true });
+
+  // 화면이 가려지면 멈춘다. 앱을 백그라운드로 보내고 돌아왔을 때 뱀이 벽에 박혀
+  // 죽어 있으면 그건 게임이 아니라 사고다.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearTimeout(timer);
+    else schedule();
+  });
+
+  (async () => {
+    const saved = await state.get(STATE_KEY);
+    if (saved && typeof saved.best === "number") best = saved.best;
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>
