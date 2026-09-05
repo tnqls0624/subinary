@@ -71,7 +71,7 @@ import {
   currentMonth,
 } from "@/lib/format";
 import { isMonthKey, monthRange, recentMonths } from "@/lib/month";
-import { memberColorClass } from "@/lib/member-color";
+import { memberColorClass, sharedColorClass } from "@/lib/member-color";
 import { useHousehold } from "@/lib/household-context";
 import {
   invalidateTransactionScope,
@@ -79,6 +79,7 @@ import {
   useCategoryList,
   useCreateCategory,
   useHouseholdMembers,
+  useHouseholdSummary,
   useInfiniteTransactions,
 } from "@/lib/queries";
 import {
@@ -295,6 +296,17 @@ function TransactionsView() {
   const [excludedOnly, setExcludedOnly] = useState<boolean>(
     () => searchParams.get("excluded") === "only",
   );
+  /**
+   * 공용 카드 결제만 보기. 홈의 '공용' 행이 `?attribution=shared`로 들어온다.
+   *
+   * 구성원 Select에 '공용' 항목을 더하지 않는 이유: 공용은 `memberId` 값이 아니라
+   * **귀속을 보류한 묶음**이라 같은 Select에 넣으면 성격이 다른 두 값이 한 축에
+   * 섞인다(선택 후 상태를 URL로 표현할 때도 memberId가 아니어서 어긋난다).
+   * `excludedOnly`와 같은 이유로 URL 전용 + 해제 칩으로 둔다.
+   */
+  const [sharedOnly, setSharedOnly] = useState<boolean>(
+    () => searchParams.get("attribution") === "shared",
+  );
   /** 인라인 카테고리 변경 시 merchant_category_rules로 저장할지(applyRule). */
   const [applyRule, setApplyRule] = useState(false);
 
@@ -316,6 +328,7 @@ function TransactionsView() {
     setQInput("");
     setQ("");
     setExcludedOnly(false);
+    setSharedOnly(false);
   };
 
   const hasActiveFilter =
@@ -326,6 +339,7 @@ function TransactionsView() {
     status !== "" ||
     q !== "" ||
     excludedOnly ||
+    sharedOnly ||
     month !== currentMonth();
 
   // 타이핑마다 요청하면 한 단어에 대여섯 번 쿼리가 나간다 → 300ms 디바운스.
@@ -346,6 +360,7 @@ function TransactionsView() {
     if (status) params.set("status", status);
     if (q) params.set("q", q);
     if (excludedOnly) params.set("excluded", "only");
+    if (sharedOnly) params.set("attribution", "shared");
     const qs = params.toString();
     // replace: 필터를 다섯 번 바꿨다고 뒤로가기를 다섯 번 눌러야 하면 안 된다.
     router.replace(qs ? `/transactions?${qs}` : "/transactions", {
@@ -360,6 +375,7 @@ function TransactionsView() {
     status,
     q,
     excludedOnly,
+    sharedOnly,
     router,
   ]);
 
@@ -377,6 +393,9 @@ function TransactionsView() {
     for (const m of members) map.set(m.memberId, m.name);
     return map;
   }, [members]);
+
+  // 공용 카드 결제의 표시 색(가구 설정). null이면 중립 회색.
+  const sharedColor = useHouseholdSummary().data?.sharedColor ?? null;
 
   // 구성원이 직접 고른 색(memberId → 팔레트 키). 없으면 해시 색 폴백.
   const memberColorById = useMemo(() => {
@@ -446,11 +465,23 @@ function TransactionsView() {
       status: status || undefined,
       q: q || undefined,
       excluded: excludedOnly ? ("only" as const) : undefined,
+      attribution: sharedOnly ? ("shared" as const) : undefined,
       from,
       to,
       limit: PAGE_SIZE,
     }),
-    [memberId, cardId, categoryId, type, status, q, excludedOnly, from, to],
+    [
+      memberId,
+      cardId,
+      categoryId,
+      type,
+      status,
+      q,
+      excludedOnly,
+      sharedOnly,
+      from,
+      to,
+    ],
   );
   const listQuery = useInfiniteTransactions(filters);
 
@@ -701,7 +732,10 @@ function TransactionsView() {
    */
   const sharedIconClass = (txn: TransactionSummary): string => {
     const id = attributedMemberId(txn);
-    if (id === null) return "bg-muted text-muted-foreground";
+    // 공용은 사람 팔레트에서 **자동 배정하지 않는다** — 자동이면 색을 보고 사람을
+    // 떠올린 사용자가 이름에서 '공용'을 읽고 어긋난다. 사용자가 직접 고른 색만
+    // 쓰고(가구 설정), 고르지 않았으면 종전 회색 그대로다.
+    if (id === null) return sharedColorClass(sharedColor);
     return memberColorClass(id, memberColorById.get(id));
   };
 
@@ -917,6 +951,15 @@ function TransactionsView() {
             variant="ghost"
             onClick={() => setExcludedOnly(false)}
           >
+            전체 보기
+          </Button>
+        </div>
+      ) : null}
+
+      {sharedOnly ? (
+        <div className="bg-muted/50 flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
+          <p className="text-sm">함께 쓰는 카드로 결제한 내역만 보고 있어요</p>
+          <Button size="sm" variant="ghost" onClick={() => setSharedOnly(false)}>
             전체 보기
           </Button>
         </div>

@@ -421,6 +421,13 @@
       "when": 1788454800000,
       "tag": "0059_recurring_ended",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1788627600000,
+      "tag": "0060_household_shared_color",
+      "breakpoints": true
     }
   ]
 }

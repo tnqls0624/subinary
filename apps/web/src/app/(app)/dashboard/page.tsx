@@ -78,7 +78,7 @@ import {
 import { categoryIcon } from "@/lib/category-icon";
 import { budgetTransactionsHref, transactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
-import { memberColorClass } from "@/lib/member-color";
+import { memberColorClass, sharedColorClass } from "@/lib/member-color";
 import { addMonths, isMonthKey } from "@/lib/month";
 import {
   useAnalyticsMonths,
@@ -89,6 +89,7 @@ import {
   useCategoryList,
   useDevices,
   useHouseholdMembers,
+  useHouseholdSummary,
   useMembers,
   useMerchants,
   useMonthly,
@@ -185,6 +186,9 @@ function DashboardView() {
   const membersQuery = useMembers(month);
   // 구성원이 직접 고른 색(memberId → 팔레트 키). 없으면 해시 색 폴백.
   const householdMembersQuery = useHouseholdMembers();
+  // 공용 카드 결제의 표시 색(가구 설정). null이면 중립 회색.
+  const sharedColor = useHouseholdSummary().data?.sharedColor ?? null;
+
   const memberColorById = useMemo(() => {
     const map = new Map<string, MemberColor | null>();
     for (const m of householdMembersQuery.data ?? []) map.set(m.memberId, m.color);
@@ -234,16 +238,18 @@ function DashboardView() {
         .slice(0, BREAKDOWN_TOP_N)
         .map((m) => ({
           // memberId가 null이면 '공용' 버킷이다(공용 표시한 카드의 결제). 사람이 아니라
-          // 귀속을 보류한 묶음이므로 딥링크를 걸지 않는다 — memberId 필터로는 그 집합을
-          // 다시 만들 수 없고, 필터 없는 목록으로 보내면 누른 행과 무관한 화면이 된다.
+          // 귀속을 보류한 묶음이라 `memberId` 필터로는 그 집합을 만들 수 없다 — 그래서
+          // 오랫동안 링크가 없었다. 서버에 `attribution=shared` 필터가 생겨 이제 같은
+          // 규칙(`payment_cards.is_shared`)으로 목록을 다시 만들 수 있다.
           key: m.memberId ?? "__shared__",
           label: m.name,
           value: m.net,
           ratio: m.ratio,
           meta: `${m.count}건`,
-          ...(m.memberId === null
-            ? {}
-            : { href: transactionsHref({ month, memberId: m.memberId }) }),
+          href:
+            m.memberId === null
+              ? transactionsHref({ month, attribution: "shared" })
+              : transactionsHref({ month, memberId: m.memberId }),
         })),
     [membersQuery.data, month],
   );
@@ -749,10 +755,17 @@ function DashboardView() {
                         {initialOf(item.label)}
                       </span>
                     }
-                    iconClassName={memberColorClass(
-                      item.key,
-                      memberColorById.get(item.key),
-                    )}
+                    iconClassName={
+                      // 공용 버킷(`__shared__`)은 사람 팔레트의 해시 색을 쓰면 안 된다 —
+                      // 그 키는 memberId가 아니라 자리표시자라 임의의 색이 배정되고,
+                      // 거래 화면(회색)과 어긋나 같은 묶음이 두 색으로 보인다.
+                      item.key === "__shared__"
+                        ? sharedColorClass(sharedColor)
+                        : memberColorClass(
+                            item.key,
+                            memberColorById.get(item.key),
+                          )
+                    }
                     title={item.label}
                     subtitle={`전체의 ${percent(item.ratio)}`}
                     value={<Money amount={item.value} />}

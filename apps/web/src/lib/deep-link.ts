@@ -16,6 +16,16 @@ export interface TransactionFilterLink {
   categoryId?: string;
   /** 가맹점처럼 전용 필터가 없는 축은 검색어로 넘긴다. */
   q?: string;
+  /**
+   * 귀속 축 — `'shared'`(공용 표시한 카드의 결제)만 쓴다.
+   *
+   * 왜 `memberId`가 아닌가: 공용은 사람이 아니라 **귀속을 보류한 묶음**이라 어떤
+   * `memberId` 값으로도 그 집합을 만들 수 없다. 그래서 홈의 '공용' 행에는 오랫동안
+   * 링크가 없었다 — 필터 없는 전체 목록으로 보내면 누른 행과 무관한 화면이 되므로
+   * 링크를 거는 것보다 없는 편이 나았다. 서버에 `attribution` 필터가 생겨 그 제약이
+   * 풀렸다.
+   */
+  attribution?: "shared";
 }
 
 /** 필터가 걸린 거래 목록 경로. 값이 하나도 없으면 필터 없는 `/transactions`. */

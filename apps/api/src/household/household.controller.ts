@@ -24,6 +24,7 @@ import {
   householdCreateRequestSchema,
   householdUpdateRequestSchema,
   invitationCreateRequestSchema,
+  householdSharedColorUpdateRequestSchema,
   memberColorUpdateRequestSchema,
   memberRoleUpdateRequestSchema,
   type HouseholdSummary,
@@ -43,6 +44,9 @@ class HouseholdUpdateDto extends createZodDto(householdUpdateRequestSchema) {}
 class InvitationCreateDto extends createZodDto(invitationCreateRequestSchema) {}
 class MemberRoleUpdateDto extends createZodDto(memberRoleUpdateRequestSchema) {}
 class MemberColorUpdateDto extends createZodDto(memberColorUpdateRequestSchema) {}
+class HouseholdSharedColorUpdateDto extends createZodDto(
+  householdSharedColorUpdateRequestSchema,
+) {}
 
 @Controller('households')
 export class HouseholdController {
@@ -120,6 +124,21 @@ export class HouseholdController {
       memberId,
       dto,
     );
+  }
+
+  /**
+   * PATCH /v1/households/:id/shared-color — 공용 카드 결제의 표시 색(owner/admin).
+   *
+   * 공용은 특정 구성원의 것이 아니라 가구 전체가 보는 값이라, 구성원 색과 달리
+   * "본인이면 스스로" 예외가 없다.
+   */
+  @Patch(':id/shared-color')
+  updateSharedColor(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: HouseholdSharedColorUpdateDto,
+  ): Promise<HouseholdSummary> {
+    return this.householdService.updateSharedColor(id, user.userId, dto);
   }
 
   /** PATCH /v1/households/:id/members/:memberId/color — accent color (self or owner/admin). */

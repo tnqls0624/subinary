@@ -52,8 +52,11 @@ export class TransactionController {
 
   /**
    * GET /v1/transactions?householdId=&memberId=&cardId=&type=&status=&categoryId=
-   *   &from=&to=&minAmount=&maxAmount=&q=&limit=&cursor= — list transactions the
-   * caller may see (visibility scope applied), newest first.
+   *   &from=&to=&minAmount=&maxAmount=&q=&attribution=&limit=&cursor= — list
+   * transactions the caller may see (visibility scope applied), newest first.
+   *
+   * `attribution=shared`는 공용 표시한 카드의 결제만 남긴다. 이 집합은 `memberId`로
+   * 만들 수 없어서(공용은 사람이 아니라 귀속 보류 묶음) 별도 축이 필요하다.
    *
    * `q`는 가맹점(원문·정규화)과 메모의 부분 일치 검색어다. 타인의 `summary_only`
    * 거래는 검색 대상에서 제외된다 — 가려진 값에 매칭시키면 결과의 존재만으로
@@ -74,6 +77,7 @@ export class TransactionController {
     @Query('maxAmount') maxAmount?: string,
     @Query('q') q?: string,
     @Query('excluded') excluded?: string,
+    @Query('attribution') attribution?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ): Promise<TransactionListResponse> {
@@ -90,6 +94,7 @@ export class TransactionController {
       maxAmount,
       q,
       excluded,
+      attribution,
       limit,
       cursor,
     });

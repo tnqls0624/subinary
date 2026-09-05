@@ -137,6 +137,13 @@ export const userSessions = pgTable(
 export const households = pgTable('households', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
+  /**
+   * 공용 카드 결제의 표시 색(팔레트 키). NULL이면 중립 회색 — 기본 동작.
+   *
+   * 구성원 색과 같은 팔레트를 쓰되 저장 위치가 다르다: 공용은 구성원이 아니라
+   * 가구에 하나뿐인 귀속 보류 묶음이다. 값 검증은 `memberColorSchema`가 한다.
+   */
+  sharedColor: text('shared_color'),
   createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),

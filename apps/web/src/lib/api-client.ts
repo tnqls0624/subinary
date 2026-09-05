@@ -46,6 +46,7 @@ import type {
   LoginRequest,
   MemberBreakdown,
   MemberColorUpdateRequest,
+  HouseholdSharedColorUpdateRequest,
   MemberRoleUpdateRequest,
   MemberSummary,
   MeResponse,
@@ -358,6 +359,11 @@ export interface TransactionListParams {
   q?: string;
   /** 합계에서 빼놓은 거래만 — `'only'`만 서버가 인정한다. */
   excluded?: "only";
+  /**
+   * 귀속 축 — `'shared'`(공용 표시한 카드의 결제)만 서버가 인정한다.
+   * 공용은 `memberId` 값이 아니라 귀속 보류 묶음이라 별도 축이 필요하다.
+   */
+  attribution?: "shared";
   limit?: number;
   cursor?: string;
 }
@@ -473,6 +479,17 @@ export const api = {
         `/v1/households/${id}/members/${memberId}/color`,
         { method: "PATCH", body, accessToken },
       ),
+    /** 공용 카드 결제의 표시 색(owner/admin). null이면 중립 회색으로 되돌린다. */
+    updateSharedColor: (
+      accessToken: AccessToken,
+      id: string,
+      body: HouseholdSharedColorUpdateRequest,
+    ) =>
+      apiFetch<HouseholdSummary>(`/v1/households/${id}/shared-color`, {
+        method: "PATCH",
+        body,
+        accessToken,
+      }),
     removeMember: (accessToken: AccessToken, id: string, memberId: string) =>
       apiFetch<{ removed: true }>(
         `/v1/households/${id}/members/${memberId}`,

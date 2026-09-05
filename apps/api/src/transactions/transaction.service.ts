@@ -142,6 +142,22 @@ export interface TransactionListQuery {
    * 동작과 어긋난 상태가 URL에 남는다.
    */
   excluded?: string;
+  /**
+   * 귀속 축 필터 — `'shared'`만 인정한다(공용 표시한 카드의 결제만).
+   *
+   * 왜 `memberId`로 못 하는가: 공용은 **사람이 아니라 귀속을 보류한 묶음**이다.
+   * analytics가 `case when payment_cards.is_shared then null else member_id end`로
+   * 버킷을 가르므로, 그 집합은 어떤 `member_id` 값으로도 다시 만들 수 없다. 홈의
+   * '공용' 행에 딥링크가 없던 이유가 정확히 이것이었다(dashboard/page.tsx 주석).
+   *
+   * 판정은 analytics와 **같은 규칙**을 쓴다: `payment_cards.is_shared = true`.
+   * 두 곳이 갈리면 홈에서 본 건수와 목록 건수가 달라지고, 그 증상은 사용자가 숫자를
+   * 믿지 못하게 만든다.
+   *
+   * 카드 미연결 거래는 포함하지 않는다 — analytics에서도 `is_shared`가 NULL이라
+   * else 가지를 타 구성원에 귀속된다.
+   */
+  attribution?: string;
   limit?: string;
   cursor?: string;
 }
@@ -220,6 +236,9 @@ export class TransactionService {
     }
     if (query.categoryId) {
       conditions.push(eq(schema.cardTransactions.categoryId, query.categoryId));
+    }
+    if (query.attribution !== undefined) {
+      conditions.push(this.parseAttribution(query.attribution));
     }
     // 기간 필터는 승인시각(approvedAt) 기준이되, 미파싱으로 NULL인 거래는 SQL
     // 3치 논리상 `NULL >= from`이 항상 false라 어떤 달을 골라도 목록에서 빠진다.
@@ -1534,6 +1553,25 @@ export class TransactionService {
       throw new BadRequestException('invalid status filter');
     }
     return status as TxnStatus;
+  }
+
+  /**
+   * `attribution=shared` → "공용 표시한 카드의 결제" 조건.
+   *
+   * 조인 대신 **EXISTS 서브쿼리**로 쓴다. 목록 쿼리는 keyset 페이지네이션과
+   * visibility 조건이 얽혀 있어 조인을 하나 더 얹으면 행이 늘어날 위험이 있고
+   * (`payment_cards`는 1:1이라 지금은 안전하지만 그 안전이 스키마에 고정돼 있지
+   * 않다), 서브쿼리는 조건만 더하므로 기존 쿼리 모양을 건드리지 않는다.
+   */
+  private parseAttribution(value: string): SQL {
+    if (value !== 'shared') {
+      throw new BadRequestException('invalid attribution filter');
+    }
+    return sql`exists (
+      select 1 from ${schema.paymentCards}
+      where ${schema.paymentCards.id} = ${schema.cardTransactions.cardId}
+        and ${schema.paymentCards.isShared} = true
+    )`;
   }
 
   private parseDate(value: string | undefined, field: string): Date | undefined {

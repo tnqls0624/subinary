@@ -78,6 +78,20 @@ export const memberColorUpdateRequestSchema = z.object({
 });
 export type MemberColorUpdateRequest = z.infer<typeof memberColorUpdateRequestSchema>;
 
+/**
+ * `PATCH /v1/households/:id/shared-color` — 공용 카드 결제의 표시 색.
+ * `null`이면 중립 회색(기본)으로 되돌린다.
+ *
+ * 구성원 색과 같은 팔레트를 쓴다. 겹쳐도 막지 않는다 — 사용자가 "공용을 아내 색과
+ * 같게" 두고 싶을 수 있고, 그것을 시스템이 금지하면 이유를 설명할 수 없다.
+ */
+export const householdSharedColorUpdateRequestSchema = z.object({
+  color: memberColorSchema.nullable(),
+});
+export type HouseholdSharedColorUpdateRequest = z.infer<
+  typeof householdSharedColorUpdateRequestSchema
+>;
+
 // --- Responses ---
 
 /** Household summary as seen by the requesting member. */
@@ -86,6 +100,8 @@ export const householdSummarySchema = z.object({
   name: z.string(),
   createdAt: z.string(),
   myRole: householdRoleSchema,
+  /** 공용 카드 결제의 표시 색. null이면 중립 회색(기본). */
+  sharedColor: memberColorSchema.nullable(),
 });
 export type HouseholdSummary = z.infer<typeof householdSummarySchema>;
 

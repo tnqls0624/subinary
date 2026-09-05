@@ -28,6 +28,7 @@ import type {
   AcceptInvitationRequest,
   HouseholdCreateRequest,
   HouseholdRole,
+  HouseholdSharedColorUpdateRequest,
   HouseholdSummary,
   HouseholdUpdateRequest,
   InvitationCreateRequest,
@@ -90,6 +91,7 @@ function toHouseholdSummary(
     name: household.name,
     createdAt: household.createdAt.toISOString(),
     myRole,
+    sharedColor: (household.sharedColor as HouseholdSummary['sharedColor']) ?? null,
   };
 }
 
@@ -320,6 +322,31 @@ export class HouseholdService {
       .where(eq(schema.householdMembers.id, targetMemberId));
 
     return this.loadMemberSummary(targetMemberId);
+  }
+
+  /**
+   * 공용 카드 결제의 표시 색을 정한다(`null`이면 중립 회색으로 되돌린다).
+   *
+   * 권한은 owner/admin이다 — 구성원 색은 "본인 것이면 스스로"가 허용되지만 공용은
+   * 특정 구성원의 것이 아니라 **가구 전체가 보는 값**이라 자기 것이라 할 사람이 없다.
+   *
+   * 거래도 카드도 건드리지 않는다. 색은 화면이 조회 시 입히는 표시일 뿐이라
+   * 되돌리면 그대로 돌아온다.
+   */
+  async updateSharedColor(
+    householdId: string,
+    userId: string,
+    input: HouseholdSharedColorUpdateRequest,
+  ): Promise<HouseholdSummary> {
+    const actor = await this.requireMembership(householdId, userId);
+    if (actor.role !== 'owner' && actor.role !== 'admin') {
+      throw new ForbiddenException('insufficient role');
+    }
+    await this.db
+      .update(schema.households)
+      .set({ sharedColor: input.color, updatedAt: new Date() })
+      .where(eq(schema.households.id, householdId));
+    return this.get(householdId, userId);
   }
 
   /**

@@ -87,3 +87,19 @@ export function memberColorClass(
   }
   return MEMBER_ICON_CLASSES[HASH_PALETTE[hash % HASH_PALETTE.length]];
 }
+
+/**
+ * 공용(공동사용 카드) 버킷의 아이콘 색.
+ *
+ * 종전에는 언제나 중립 회색이었다. 그 선택에는 이유가 있었다 — "색이 곧 '누구'를
+ * 뜻하므로, 귀속을 보류한 거래에 특정 색을 주면 화면이 이름(공용)과 다른 답을
+ * 말한다". 그 우려는 **공용이 사람 팔레트에서 자동 배정될 때** 성립한다: 그러면
+ * 색을 보고 사람을 떠올린 사용자가 이름에서 '공용'을 읽고 어긋난다.
+ *
+ * 사용자가 직접 하나를 고르면 그 색은 "공용"이라는 **하나의 값**을 가리키므로 화면이
+ * 두 답을 말하지 않는다. 그래서 색을 여는 대신 **자동 배정을 열지 않는다** — 고르지
+ * 않았으면(`null`) 종전 회색 그대로다.
+ */
+export function sharedColorClass(color?: MemberColor | null): string {
+  return color ? MEMBER_ICON_CLASSES[color] : NEUTRAL;
+}

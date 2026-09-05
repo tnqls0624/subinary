@@ -26,6 +26,7 @@ import type {
   CategorySummary,
   DeviceSummary,
   MemberBreakdown,
+  HouseholdSummary,
   MemberSummary,
   MerchantBreakdown,
   AnalyticsMonths,
@@ -82,6 +83,8 @@ export const queryKeys = {
     ["card-sms-declines", householdId] as const,
   householdMembers: (householdId: string | null) =>
     ["household-members", householdId] as const,
+  household: (householdId: string | null) =>
+    ["household", householdId] as const,
   // 알림 계열은 household가 아니라 **user** 스코프다. 키에 userId를 넣어 같은 기기에서
   // 계정이 바뀌었을 때 캐시가 섞이지 않게 한다(로그아웃 시 clear가 1차 방어, 이건 2차).
   // 앞 요소를 유지하므로 ["notifications"] 같은 접두 무효화는 그대로 동작한다.
@@ -673,6 +676,23 @@ export function useHouseholdMembers(): UseQueryResult<MemberSummary[]> {
       authedFetch((token) =>
         api.households.members(token, householdId as string),
       ),
+  });
+}
+
+/**
+ * 가구 요약 — 공용 카드 표시 색(`sharedColor`)을 읽으려고 둔다.
+ *
+ * 색은 거의 바뀌지 않는데 홈·거래·카드 세 화면이 모두 읽으므로 `staleTime`을 길게
+ * 준다. 색을 바꾸면 mutation이 이 키를 무효화하므로 즉시 반영된다.
+ */
+export function useHouseholdSummary(): UseQueryResult<HouseholdSummary> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.household(householdId),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    queryFn: () =>
+      authedFetch((token) => api.households.get(token, householdId as string)),
   });
 }
 

@@ -93,8 +93,13 @@ import {
   MEMBER_COLOR_LABELS,
   MEMBER_COLOR_SWATCH_CLASSES,
   memberColorClass,
+  sharedColorClass,
 } from "@/lib/member-color";
-import { useHouseholdMembers } from "@/lib/queries";
+import {
+  queryKeys,
+  useHouseholdMembers,
+  useHouseholdSummary,
+} from "@/lib/queries";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { publicWebUrl } from "@/lib/web-url";
@@ -223,6 +228,32 @@ export default function HouseholdPage() {
     },
     onError: (error) =>
       toast.error(errorMessage(error, "색상을 변경하지 못했어요.")),
+  });
+
+  /**
+   * 공용 카드 결제의 표시 색.
+   *
+   * 구성원 색과 저장 위치가 다르다 — 공용은 구성원이 아니라 **가구에 하나뿐인 귀속
+   * 보류 묶음**이라 자기 것이라 할 사람이 없다. 그래서 권한도 owner/admin뿐이다.
+   */
+  const householdQuery = useHouseholdSummary();
+  const sharedColor = householdQuery.data?.sharedColor ?? null;
+  const sharedColorMutation = useMutation({
+    mutationFn: (color: MemberColor | null) =>
+      authedFetch((token) =>
+        api.households.updateSharedColor(token, householdId as string, {
+          color,
+        }),
+      ),
+    onSuccess: () => {
+      // 홈·거래·카드가 모두 이 값을 읽으므로 가구 요약 캐시를 무효화한다.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.household(householdId),
+      });
+      toast.success("공용 색상을 변경했어요.");
+    },
+    onError: (error) =>
+      toast.error(errorMessage(error, "공용 색상을 변경하지 못했어요.")),
   });
 
   const removeMutation = useMutation({
@@ -508,6 +539,69 @@ export default function HouseholdPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 공용 카드 색상 — 구성원이 아니라 가구 단위 설정이라 별도 카드로 둔다.
+          owner/admin만 바꿀 수 있다(자기 것이라 할 사람이 없는 값이다). */}
+      {canViewInvitations ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>공용 카드 색상</CardTitle>
+            <CardDescription>
+              함께 쓰는 카드로 결제한 내역에 쓸 색이에요. 고르지 않으면 회색으로
+              보여요.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+                  sharedColorClass(sharedColor),
+                )}
+              >
+                공용
+              </span>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {MEMBER_COLOR_KEYS.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-label={`공용 카드 ${MEMBER_COLOR_LABELS[key]} 색상 선택`}
+                    disabled={sharedColorMutation.isPending}
+                    onClick={() => {
+                      if (sharedColor !== key) sharedColorMutation.mutate(key);
+                    }}
+                    className="rounded-full p-0.5 disabled:opacity-50"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "block size-6 rounded-full",
+                        MEMBER_COLOR_SWATCH_CLASSES[key],
+                        sharedColor === key &&
+                          "ring-ring ring-offset-background ring-2 ring-offset-2",
+                      )}
+                    />
+                  </button>
+                ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground ml-1 h-7 px-2 text-[13px]"
+                  disabled={
+                    sharedColorMutation.isPending || sharedColor === null
+                  }
+                  onClick={() => sharedColorMutation.mutate(null)}
+                >
+                  회색으로
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 주 CTA — 초대 Dialog 열기 (소유자) */}
       {isOwner ? (

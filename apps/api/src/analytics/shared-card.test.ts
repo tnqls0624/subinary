@@ -67,3 +67,36 @@ describe('나만 보기와 공용은 함께 성립하지 않는다', () => {
     expect(block).toContain('BadRequestException');
   });
 });
+
+describe('공용 거래 목록 필터(attribution=shared)', () => {
+  const txnService = readFileSync(
+    resolve(SRC, 'transactions/transaction.service.ts'),
+    'utf8',
+  );
+
+  it('analytics와 같은 규칙(payment_cards.is_shared)으로 판정한다', () => {
+    // 두 곳이 갈리면 홈에서 본 건수와 목록 건수가 달라진다. 그 증상은 기능 고장이
+    // 아니라 **숫자를 믿지 못하게 되는 것**이라 사용자가 신고하지도 않는다.
+    const block = txnService.slice(txnService.indexOf('private parseAttribution'));
+    expect(block).toContain('paymentCards.isShared');
+    expect(analytics).toContain('paymentCards.isShared');
+  });
+
+  it("'shared' 외의 값을 거절한다 — 조용히 무시하면 전체 목록이 나온다", () => {
+    const block = txnService.slice(
+      txnService.indexOf('private parseAttribution'),
+      txnService.indexOf('private parseDate'),
+    );
+    expect(block).toContain("value !== 'shared'");
+    expect(block).toContain('BadRequestException');
+  });
+
+  it('조인이 아니라 EXISTS로 조건만 더한다 — 목록 행이 늘어나면 안 된다', () => {
+    const block = txnService.slice(
+      txnService.indexOf('private parseAttribution'),
+      txnService.indexOf('private parseDate'),
+    );
+    expect(block).toContain('exists (');
+    expect(block).not.toContain('.innerJoin(');
+  });
+});
