@@ -138,28 +138,6 @@ export {
   createMerchantCategoryTargetId,
   createMerchantIdentityTargetId,
 } from './merchant-label.js';
-export {
-  MINIAPP_BRIDGE_VERSION,
-  MINIAPP_METHODS,
-  MINIAPP_PERMISSIONS,
-  checkMiniappRequest,
-  isMiniappMethod,
-  isMiniappPermission,
-  isMiniappRequest,
-  miniappError,
-  miniappOk,
-  permissionForMethod,
-} from './miniapp-bridge.js';
-export type {
-  MiniappErrorCode,
-  MiniappMethod,
-  MiniappPermission,
-  MiniappRequest,
-  MiniappResponse,
-  MiniappResponseError,
-  MiniappResponseOk,
-  MiniappRouteCheck,
-} from './miniapp-bridge.js';
 
 export {
   BRANCH_MIN_PREFIX_LENGTH,
