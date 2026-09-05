@@ -23,13 +23,104 @@
 #   sh scripts/ops/deploy.sh                 # 빌드 + 마이그레이션 + 기동 + 검증
 #   sh scripts/ops/deploy.sh --skip-build    # 검증된 이미지 그대로 복구·재검증
 #
+#   DEPLOY_SKIP_MEMORY_CHECK=true sh scripts/ops/deploy.sh   # 메모리 가드 무시
+#
 # 종료 코드는 bootstrap의 것을 그대로 물려준다(0 = 성공).
+# 메모리 가드에 걸리면 bootstrap을 **시작하지 않고** exit 3.
 # =============================================================================
 set -eu
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$script_dir/../.." && pwd)"
 cd "$repository_root"
+
+# -----------------------------------------------------------------------------
+# 메모리 가드 — 배포 빌드가 DB를 죽이는 것을 막는다
+# -----------------------------------------------------------------------------
+# ## 실제로 당한 일
+#
+# 2026-09-05 16:54, **배포 중에 postgres가 죽었다.** 컨테이너는 살아 있었는데 내부
+# 프로세스가 비정상 종료했다:
+#
+#   16:46~16:54  autovacuum worker took too long to start   ← fork 지연 = 스래싱
+#   16:54:45     server process exited with exit code 2
+#   16:54:46     all server processes terminated; reinitializing
+#   16:54:53     redo done                                   ← WAL 자동 복구
+#
+# 데이터는 WAL 복구로 온전했지만 운이 좋았던 것이다. 그때 스왑은 11.3GB/12.3GB,
+# 여유 페이지는 90MB였다. postgres 자신은 92MB밖에 쓰지 않았다 — **호스트 전체가**
+# 부족했고, 그 부족을 만든 것은 이 스크립트가 돌린 빌드다.
+#
+# 전날에도 같은 원인으로 빌드가 **59분간 로그 한 줄 없이** 멈춰 섰다(스왑 12.1/13.3GB).
+# 스래싱은 실패로 끝나지 않고 멈춰 서기 때문에 증상이 "느리다"로만 보인다.
+#
+# ## 임계값의 근거 (전부 실측)
+#
+#   성공한 배포(13:08, 15:35)  스왑 used 3.9GB · 여유 페이지 36,411(570MB)
+#   빌드가 멈춘 배포(전날)      스왑 used 12.1GB · 여유 페이지 4,330(69MB)
+#   postgres가 죽은 배포        스왑 used 11.3GB · 여유 페이지 5,605(90MB)
+#
+# 스왑 8GB를 경계로 둔다. 성공 사례의 두 배이고 사고 사례보다 낮다.
+#
+# **스왑을 주 지표로 삼는 이유**: macOS는 여유 메모리를 공격적으로 캐시에 쓰므로
+# `Pages free`가 낮은 것은 정상이다. 반면 스왑이 GB 단위로 차는 것은 실제 압박이고,
+# 스왑 총량 자체가 늘어난 것(5GB→12GB)이 이미 시스템이 쫓기고 있다는 신호다.
+#
+# ## 왜 경고가 아니라 중단인가
+#
+# 경고는 사람의 주의력에 맡기는 것이고, 이 스크립트가 존재하는 이유가 바로 그것을
+# 하지 않기 위해서다(위 머리주석의 `| tail` 사고). 위험을 알고도 진행해야 할 때는
+# `DEPLOY_SKIP_MEMORY_CHECK=true`로 명시한다 — 그러면 기록에 의도가 남는다.
+check_memory() {
+  [ "${DEPLOY_SKIP_MEMORY_CHECK:-false}" = "true" ] && {
+    echo "[deploy] 메모리 가드 건너뜀 (DEPLOY_SKIP_MEMORY_CHECK=true)"
+    return 0
+  }
+
+  swap_used_mb=""
+  if command -v sysctl >/dev/null 2>&1 && sysctl -n vm.swapusage >/dev/null 2>&1; then
+    # macOS: "total = 12288.00M  used = 11297.12M  free = 990.88M"
+    swap_used_mb="$(sysctl -n vm.swapusage 2>/dev/null \
+      | sed -n 's/.*used = \([0-9.]*\)M.*/\1/p' | cut -d. -f1)"
+  elif command -v free >/dev/null 2>&1; then
+    # Linux: Swap 행의 used 열(MB)
+    swap_used_mb="$(free -m 2>/dev/null | awk '/^Swap:/ {print $3}')"
+  fi
+
+  if [ -z "$swap_used_mb" ]; then
+    # 못 재는 환경에서 배포를 막지 않는다 — 가드가 없던 것과 같은 상태일 뿐이고,
+    # 여기서 중단하면 CI 같은 곳에서 배포 자체가 불가능해진다.
+    echo "[deploy] 메모리를 측정할 수 없어 가드를 건너뜁니다(플랫폼 미지원)."
+    return 0
+  fi
+
+  limit_mb="${DEPLOY_SWAP_LIMIT_MB:-8192}"
+  echo "[deploy] 메모리 확인: 스왑 사용 ${swap_used_mb}MB (한계 ${limit_mb}MB)"
+  if [ "$swap_used_mb" -lt "$limit_mb" ]; then
+    return 0
+  fi
+
+  echo "" >&2
+  echo "==========================================================================" >&2
+  echo "[deploy] ✗ 중단 — 메모리 압박이 심해 지금 배포하면 위험합니다." >&2
+  echo "" >&2
+  echo "  스왑 사용 ${swap_used_mb}MB (한계 ${limit_mb}MB)" >&2
+  echo "" >&2
+  echo "  2026-09-05에 이 상태에서 배포하다 postgres가 죽었습니다(WAL로 복구됨)." >&2
+  echo "  그 전날에는 빌드가 59분간 진행 없이 멈춰 섰습니다." >&2
+  echo "" >&2
+  echo "  할 일:" >&2
+  echo "    1. 브라우저·에디터 등 큰 앱을 닫는다" >&2
+  echo "    2. 그래도 높으면 Docker Desktop을 재시작한다(VM이 스왑을 잡고 있다)" >&2
+  echo "    3. 다시 시도한다" >&2
+  echo "" >&2
+  echo "  위험을 알고 진행하려면:" >&2
+  echo "    DEPLOY_SKIP_MEMORY_CHECK=true sh scripts/ops/deploy.sh" >&2
+  echo "==========================================================================" >&2
+  exit 3
+}
+
+check_memory
 
 log_dir="${INFRA_DEPLOY_LOG_DIR:-$repository_root/.deploy-logs}"
 mkdir -p "$log_dir"
