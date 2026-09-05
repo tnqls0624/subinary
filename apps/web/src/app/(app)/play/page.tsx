@@ -2,7 +2,18 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 플레이그라운드 (/play)
  *
- * 지출 데이터로 노는 작은 화면들이 모이는 자리다.
+ * 게임과, 지출을 다르게 보는 화면들이 모이는 자리다.
+ *
+ * ## 둘은 다른 것이다 (2026-09-05 정정)
+ *
+ * 처음에 만든 넷(예측·페이스·도감·리듬)은 **게임이 아니라 정보성 화면**이다. 조작도
+ * 실패도 재도전도 없고, 지출을 다르게 배치해 보여줄 뿐이다. 사용자가 그것을 정확히
+ * 지적했고, 목록을 두 절로 나눴다.
+ *
+ * 왜 그렇게 됐나: "관측된 사실만 말한다"·"판정하지 않는다" 같은 원칙을 게임에까지
+ * 적용하면서 게임성을 계속 깎았다. 그 원칙은 **지출 화면**에 필요한 것이지 게임에
+ * 필요한 것이 아니다. 2048이 점수로 사람을 판정하는 것은 아무 문제가 없다 — 그 점수는
+ * 사용자의 지출이 아니라 게임 안의 사실이기 때문이다.
  *
  * ## 왜 별도 자리인가
  *
@@ -76,7 +87,7 @@ export default function PlayPage() {
     <div className="mx-auto w-full max-w-2xl space-y-5">
       <PageBackHeader
         title="플레이그라운드"
-        subtitle="쌓인 지출로 보는 작은 화면들이에요"
+        subtitle="게임과, 쌓인 지출을 다르게 보는 화면들이에요"
       />
 
       {/* 미니앱 — 앱 코드가 아니라 **별도 번들**로 격리 실행된다. 게임을 추가할 때
@@ -84,7 +95,7 @@ export default function PlayPage() {
       {MINIAPPS.length > 0 ? (
         <section className="space-y-2">
           <h2 className="text-muted-foreground px-1 text-[13px] font-semibold">
-            미니앱
+            게임
           </h2>
           <Card className="divide-border divide-y overflow-hidden p-0">
             {MINIAPPS.map((app) => (

@@ -37,6 +37,17 @@ export interface MiniappManifest {
 
 export const MINIAPPS: readonly MiniappManifest[] = [
   {
+    // **권한 0개.** 지출을 전혀 보지 않고 자기 점수만 저장한다(`state.*`는 권한
+    // 불필요). 권한 모델을 이렇게 쓰라고 만든 것이다 — 순수 게임은 아무것도 못
+    // 보게 두고, 데이터가 필요한 것만 선언하게 한다.
+    key: "2048",
+    name: "2048",
+    description: "같은 숫자를 밀어서 합쳐요",
+    entry: "/miniapps/2048/index.html",
+    permissions: [],
+    height: 470,
+  },
+  {
     key: "spend-quiz",
     name: "얼마 썼을까",
     description: "자주 가는 곳에서 얼마 썼는지 맞혀 봐요",
