@@ -18,6 +18,13 @@ export const merchantSummarySchema = z.object({
   netTotal: z.number().int(),
   /** 마지막 승인 시각. 거래가 없으면 null(별칭만 등록된 이름). */
   lastTransactionAt: z.string().nullable(),
+  /**
+   * **첫** 승인 시각. 거래가 없으면 null.
+   *
+   * 마지막 시각만으로는 "이번 달에 새로 간 곳"을 알 수 없다 — 지난달부터 다니던
+   * 단골도 마지막 방문은 이번 달이다. 발견 시점은 첫 방문이 정한다.
+   */
+  firstTransactionAt: z.string().nullable(),
   /** 이 이름이 별칭이면 대표 이름, 아니면 null. */
   aliasOf: z.string().nullable(),
   /**

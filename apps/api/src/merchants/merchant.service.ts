@@ -114,6 +114,9 @@ export class MerchantService {
         transactionCount: sql<string>`count(*)`,
         netTotal: sql<string>`coalesce(sum(${schema.cardTransactions.netAmount}), 0)`,
         lastTransactionAt: sql<Date | null>`max(${schema.cardTransactions.approvedAt})`,
+        // 첫 방문 — "이번 달에 새로 간 곳"을 가르는 기준. 마지막 방문으로는
+        // 지난달부터 다니던 단골과 구분되지 않는다.
+        firstTransactionAt: sql<Date | null>`min(${schema.cardTransactions.approvedAt})`,
       })
       .from(schema.cardTransactions)
       .where(
@@ -176,11 +179,13 @@ export class MerchantService {
       const agg = aggByName.get(name);
       const rule = ruleByPattern.get(name);
       const last = agg?.lastTransactionAt ?? null;
+      const first = agg?.firstTransactionAt ?? null;
       return {
         name,
         transactionCount: Number(agg?.transactionCount ?? 0),
         netTotal: Number(agg?.netTotal ?? 0),
         lastTransactionAt: last ? new Date(last).toISOString() : null,
+        firstTransactionAt: first ? new Date(first).toISOString() : null,
         aliasOf: aliasOf.get(name) ?? null,
         aliasId: aliasIdByAlias.get(name) ?? null,
         aliases: aliasesByCanonical.get(name) ?? [],

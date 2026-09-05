@@ -29,7 +29,7 @@
  * 것이 없다. 그 구조가 값을 하는 시점은 우리가 아닌 사람이 미니앱을 만들 때다.
  * 몇 개를 만들어 보고 **공통으로 필요했던 것만** 브릿지로 뽑는다.
  * ------------------------------------------------------------------------- */
-import { Gauge } from "lucide-react";
+import { CalendarDays, Gauge, Store } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { ListRow, PageBackHeader } from "@/components/widgets";
@@ -47,6 +47,18 @@ const ITEMS: ReadonlyArray<PlayItem> = [
     icon: Gauge,
     title: "이번 달 페이스",
     description: "지난달 같은 날짜까지와 나란히 견줘요",
+  },
+  {
+    href: "/play/atlas",
+    icon: Store,
+    title: "가맹점 도감",
+    description: "카드 문자로 발견한 곳을 모아 봐요",
+  },
+  {
+    href: "/play/rhythm",
+    icon: CalendarDays,
+    title: "주간 리듬",
+    description: "무슨 요일에 결제했는지 봐요",
   },
 ];
 
