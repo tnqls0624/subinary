@@ -28,6 +28,7 @@ import type {
   MemberBreakdown,
   HouseholdSummary,
   MemberSummary,
+  PlayStateListResponse,
   TransactionSummaryResponse,
   MerchantBreakdown,
   AnalyticsMonths,
@@ -86,6 +87,8 @@ export const queryKeys = {
     ["household-members", householdId] as const,
   household: (householdId: string | null) =>
     ["household", householdId] as const,
+  playStates: (householdId: string | null, appKey: string) =>
+    ["play-states", householdId, appKey] as const,
   // 알림 계열은 household가 아니라 **user** 스코프다. 키에 userId를 넣어 같은 기기에서
   // 계정이 바뀌었을 때 캐시가 섞이지 않게 한다(로그아웃 시 clear가 1차 방어, 이건 2차).
   // 앞 요소를 유지하므로 ["notifications"] 같은 접두 무효화는 그대로 동작한다.
@@ -728,6 +731,75 @@ export function useHouseholdSummary(): UseQueryResult<HouseholdSummary> {
     staleTime: 5 * 60 * 1000,
     queryFn: () =>
       authedFetch((token) => api.households.get(token, householdId as string)),
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* 플레이그라운드 미니앱 상태                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 한 미니앱의 저장된 상태 전부.
+ *
+ * 미니앱마다 훅을 만들지 않는다 — `appKey`만 다르고 나머지가 같아서, 게임을 붙일
+ * 때마다 훅이 늘면 저장소를 범용으로 만든 이유가 사라진다.
+ */
+export function usePlayStates(
+  appKey: string,
+): UseQueryResult<PlayStateListResponse> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.playStates(householdId, appKey),
+    enabled,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.play.list(token, householdId as string, appKey),
+      ),
+  });
+}
+
+/** 상태 저장(upsert). 성공하면 그 미니앱의 목록만 무효화한다. */
+export function useSavePlayState(appKey: string) {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      stateKey,
+      state,
+    }: {
+      stateKey: string;
+      state: Record<string, unknown>;
+    }) =>
+      authedFetch((token) =>
+        api.play.save(token, appKey, stateKey, {
+          householdId: householdId as string,
+          state,
+        }),
+      ),
+    onSuccess: () => {
+      // 미니앱 상태는 거래·집계와 무관하다 — 전역 무효화를 하면 아무것도 바뀌지
+      // 않은 대시보드가 통째로 다시 불려온다.
+      void qc.invalidateQueries({
+        queryKey: queryKeys.playStates(householdId, appKey),
+      });
+    },
+  });
+}
+
+/** 상태 삭제(멱등). */
+export function useDeletePlayState(appKey: string) {
+  const { householdId, authedFetch } = useHouseholdScope();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (stateKey: string) =>
+      authedFetch((token) =>
+        api.play.remove(token, householdId as string, appKey, stateKey),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: queryKeys.playStates(householdId, appKey),
+      });
+    },
   });
 }
 

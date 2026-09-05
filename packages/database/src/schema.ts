@@ -4567,3 +4567,46 @@ export type RecurringSeriesEvidence =
   typeof recurringSeriesEvidence.$inferSelect;
 export type NewRecurringSeriesEvidence =
   typeof recurringSeriesEvidence.$inferInsert;
+
+/**
+ * 플레이그라운드 미니앱의 진행 상태(`0061`).
+ *
+ * `/play`의 화면들은 전부 읽기 전용이라 사용자가 무언가를 정하거나 이어갈 수 없었다.
+ * 토스가 게임 미니앱의 최소 조건으로 요구하는 "재접속 시 데이터 복구"가 이 조각이다.
+ *
+ * **의미 검증은 미니앱 코드가 한다.** 이 테이블은 크기와 키 형식만 지킨다 — 저장소가
+ * 값의 뜻을 알면 미니앱을 추가할 때마다 저장소를 고쳐야 한다.
+ */
+export const playStates = pgTable(
+  'play_states',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    /** 미니앱 식별자(`monthly-forecast` 등). */
+    appKey: text('app_key').notNull(),
+    /** 미니앱 안의 키. 월별 상태면 `2026-09`. */
+    stateKey: text('state_key').notNull(),
+    state: jsonb('state').notNull(),
+    /** 마지막으로 바꾼 사람 — 격리 축이 아니라 기록이다. */
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique('play_states_scope_unique').on(
+      table.householdId,
+      table.appKey,
+      table.stateKey,
+    ),
+    index('play_states_household_app_idx').on(table.householdId, table.appKey),
+  ],
+);
+
+export type PlayState = typeof playStates.$inferSelect;
+export type NewPlayState = typeof playStates.$inferInsert;

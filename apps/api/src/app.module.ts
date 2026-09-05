@@ -14,6 +14,7 @@ import { CardSmsModule } from './card-sms/card-sms.module';
 import { CardsModule } from './cards/cards.module';
 import { CategoriesModule } from './categories/categories.module';
 import { MerchantsModule } from './merchants/merchants.module';
+import { PlayModule } from './play/play.module';
 import { DatabaseModule } from './database/database.module';
 import { DevModule } from './dev/dev.module';
 import { DevicesModule } from './devices/devices.module';
@@ -58,6 +59,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     CategoriesModule,
     // 가맹점 별칭 — 카테고리 규칙이 대표 이름 하나로 모이도록 파편을 병합한다.
     MerchantsModule,
+    PlayModule,
     TransactionsModule,
     AnalyticsModule,
     BudgetsModule,

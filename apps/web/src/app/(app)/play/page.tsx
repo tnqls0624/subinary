@@ -29,7 +29,7 @@
  * 것이 없다. 그 구조가 값을 하는 시점은 우리가 아닌 사람이 미니앱을 만들 때다.
  * 몇 개를 만들어 보고 **공통으로 필요했던 것만** 브릿지로 뽑는다.
  * ------------------------------------------------------------------------- */
-import { CalendarDays, Gauge, Store } from "lucide-react";
+import { CalendarDays, Gauge, Store, Target } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { ListRow, PageBackHeader } from "@/components/widgets";
@@ -42,6 +42,14 @@ interface PlayItem {
 }
 
 const ITEMS: ReadonlyArray<PlayItem> = [
+  {
+    // 유일하게 **상태를 가진** 화면이라 맨 위에 둔다 — 나머지는 볼 수만 있고
+    // 이건 사용자가 무언가를 정해 두고 이어간다.
+    href: "/play/forecast",
+    icon: Target,
+    title: "이번 달 예측",
+    description: "얼마 쓸지 먼저 적어 두고 실제와 견줘요",
+  },
   {
     href: "/play/pace",
     icon: Gauge,
