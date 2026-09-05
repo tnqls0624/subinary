@@ -79,6 +79,10 @@ import { categoryIcon } from "@/lib/category-icon";
 import { budgetTransactionsHref, transactionsHref } from "@/lib/deep-link";
 import { useHousehold } from "@/lib/household-context";
 import { memberColorClass, sharedColorClass } from "@/lib/member-color";
+import {
+  attributedMemberId,
+  sharedCardIdSet,
+} from "@/lib/transaction-attribution";
 import { addMonths, isMonthKey } from "@/lib/month";
 import {
   useAnalyticsMonths,
@@ -208,6 +212,11 @@ function DashboardView() {
     for (const c of cardListQuery.data ?? []) map.set(c.id, c.ownerMemberId);
     return map;
   }, [cardListQuery.data]);
+  // 공용으로 표시한 카드 — 최근 거래의 귀속 판정에 쓴다(거래 목록과 같은 규칙).
+  const sharedCardIds = useMemo(
+    () => sharedCardIdSet(cardListQuery.data ?? []),
+    [cardListQuery.data],
+  );
   const cardsQuery = useCards(month);
   const categoriesQuery = useCategories(month);
   const budgetsQuery = useBudgets(month);
@@ -851,14 +860,16 @@ function DashboardView() {
                   // status 배지보다 우선해 '제외됨'으로 표기하고 금액을 흐리게 처리한다.
                   const excluded = t.excludedAt != null;
                   const signed = cancelled ? -t.amount : t.netAmount;
-                  // 색·이름 기준 구성원 = 카드 소유자(연결된 카드가 있으면), 없으면
-                  // 거래 귀속 구성원. 카드 화면의 소유자 색과 일치시킨다.
-                  const attributedId =
-                    (t.cardId ? cardOwnerById.get(t.cardId) : undefined) ??
-                    t.memberId;
+                  // 색·이름 기준 구성원 — 규칙은 `lib/transaction-attribution`이
+                  // 단일 출처다. 종전에는 여기서만 **카드 소유자**를 썼고, 그래서
+                  // 공용 카드 결제가 소유자 이름으로 보였다(실측 88건 1,458,011원).
+                  // 공용 카드 소유자가 한 명이라 최근 거래 목록이 그 이름으로 덮였다.
+                  const attributedId = attributedMemberId(t, sharedCardIds);
                   const who =
-                    householdNameById.get(attributedId) ??
-                    memberNameById.get(attributedId);
+                    attributedId === null
+                      ? "공용"
+                      : (householdNameById.get(attributedId) ??
+                        memberNameById.get(attributedId));
                   // 카테고리 = 아이콘(모양), 구성원 = 배경색 — 거래 목록과 동일 규칙.
                   const Icon = cancelled
                     ? RotateCcw
@@ -872,10 +883,12 @@ function DashboardView() {
                       iconClassName={
                         cancelled || excluded
                           ? "bg-muted text-muted-foreground"
-                          : memberColorClass(
-                              attributedId,
-                              memberColorById.get(attributedId),
-                            )
+                          : attributedId === null
+                            ? sharedColorClass(sharedColor)
+                            : memberColorClass(
+                                attributedId,
+                                memberColorById.get(attributedId),
+                              )
                       }
                       title={merchantLabel(t)}
                       subtitle={

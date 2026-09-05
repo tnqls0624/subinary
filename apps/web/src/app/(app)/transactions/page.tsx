@@ -72,6 +72,11 @@ import {
 } from "@/lib/format";
 import { isMonthKey, monthRange, recentMonths } from "@/lib/month";
 import { memberColorClass, sharedColorClass } from "@/lib/member-color";
+import {
+  attributedMemberId,
+  attributedMemberName,
+  sharedCardIdSet,
+} from "@/lib/transaction-attribution";
 import { useHousehold } from "@/lib/household-context";
 import {
   invalidateTransactionScope,
@@ -404,27 +409,11 @@ function TransactionsView() {
     return map;
   }, [members]);
 
-  // 거래 색은 "카드 소유자" 기준(문자 전달자가 아니라 카드 주인). 카드 화면 색과 일치.
-  const cardOwnerById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of cards) map.set(c.id, c.ownerMemberId);
-    return map;
-  }, [cards]);
-  /**
-   * 공용으로 표시한 카드는 사람 이름을 붙이지 않는다.
-   *
-   * 그 외에는 **카드 소유자보다 거래의 구성원을 우선**한다. 서버 집계(`analytics/members`)가
-   * `card_transactions.member_id`를 정본으로 쓰므로, 화면이 카드 소유자를 우선하면 통계와
-   * 목록이 서로 다른 사람을 말한다 — 지금은 두 값이 우연히 같아 모순이 보이지 않지만,
-   * 거래의 구성원을 재지정할 수 있게 되는 순간 "바꿨는데 안 바뀐다"가 된다.
-   */
-  const sharedCardIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of cards) if (c.isShared) set.add(c.id);
-    return set;
-  }, [cards]);
-  const attributedMemberId = (txn: TransactionSummary): string | null =>
-    txn.cardId && sharedCardIds.has(txn.cardId) ? null : txn.memberId;
+  // 귀속 규칙은 `lib/transaction-attribution`이 단일 출처다 — 홈과 이 화면이 각자
+  // 구현했다가 갈렸다(공용 카드 88건이 홈에서 소유자 이름으로 보였다).
+  const sharedCardIds = useMemo(() => sharedCardIdSet(cards), [cards]);
+  const attributedMemberIdOf = (txn: TransactionSummary): string | null =>
+    attributedMemberId(txn, sharedCardIds);
 
   const cardById = useMemo(() => {
     const map = new Map<string, { alias: string; issuer: string }>();
@@ -731,7 +720,7 @@ function TransactionsView() {
    * 보류한 거래에 특정 색을 주면 화면이 이름(공용)과 다른 답을 말한다.
    */
   const sharedIconClass = (txn: TransactionSummary): string => {
-    const id = attributedMemberId(txn);
+    const id = attributedMemberIdOf(txn);
     // 공용은 사람 팔레트에서 **자동 배정하지 않는다** — 자동이면 색을 보고 사람을
     // 떠올린 사용자가 이름에서 '공용'을 읽고 어긋난다. 사용자가 직접 고른 색만
     // 쓰고(가구 설정), 고르지 않았으면 종전 회색 그대로다.
@@ -739,11 +728,8 @@ function TransactionsView() {
     return memberColorClass(id, memberColorById.get(id));
   };
 
-  const memberNameOf = (txn: TransactionSummary): string => {
-    const id = attributedMemberId(txn);
-    if (id === null) return "공용";
-    return memberNameById.get(id) ?? "구성원";
-  };
+  const memberNameOf = (txn: TransactionSummary): string =>
+    attributedMemberName(attributedMemberIdOf(txn), memberNameById);
 
   const subtitleOf = (txn: TransactionSummary): string => {
     const parts = [
