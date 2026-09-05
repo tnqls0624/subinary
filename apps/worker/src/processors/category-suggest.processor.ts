@@ -38,6 +38,13 @@ import type { Job } from 'bullmq';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 
+import {
+  CATEGORY_PROMPT_VERSION,
+  buildCategorySystemPrompt,
+  buildCategoryUserPrompt,
+  selectCategoryExamples,
+} from './category-suggest.prompt';
+
 import { DB } from '../database/database.module';
 import { LocalMerchantClassifierService } from '../model-serving/local-merchant-classifier.service';
 import { WorkerModelServingService } from '../model-serving/model-serving.service';
@@ -291,9 +298,31 @@ export class CategorySuggestProcessor extends WorkerHost {
       }
     } else {
       // LLM 호출 실패는 기존 정책대로 잡 실패가 아닌 결정적 폴백이다.
-      const slugList = candidates
-        .map((candidate) => `${candidate.slug}(${candidate.name})`)
-        .join(', ');
+      //
+      // v2: 이 가족이 확정한 규칙을 few-shot으로 함께 보낸다. "편의점을 식비로 볼지
+      // 장보기로 볼지"는 보편 정답이 없고 가족마다 다른 습관이라, v1의 최다 혼동이
+      // 정확히 그것이었다(장보기→식비 5건). 사람이 확정한 것만 쓴다 — 모델 추측을
+      // 예시로 주면 자기 오답을 학습한다.
+      const confirmedRules = await this.db
+        .select({
+          merchantPattern: schema.merchantCategoryRules.merchantPattern,
+          slug: schema.expenseCategories.slug,
+        })
+        .from(schema.merchantCategoryRules)
+        .innerJoin(
+          schema.expenseCategories,
+          eq(
+            schema.expenseCategories.id,
+            schema.merchantCategoryRules.categoryId,
+          ),
+        )
+        .where(
+          and(
+            eq(schema.merchantCategoryRules.householdId, householdId),
+            eq(schema.merchantCategoryRules.source, 'human_confirmed'),
+          ),
+        );
+      const examples = selectCategoryExamples(confirmedRules, merchantNormalized);
       let responseText: string;
       try {
         const response = await this.modelServing.generateLlm(
@@ -303,19 +332,18 @@ export class CategorySuggestProcessor extends WorkerHost {
           this.llm,
           this.candidateLlm,
           {
-            system:
-              '당신은 한국 가계부 카테고리 분류기입니다. 가맹점명을 보고 주어진 slug 목록에서 ' +
-              '가장 알맞은 카테고리 slug 하나를 고르세요. 반드시 JSON {"slug":"..."} 형식만 출력하세요.',
-            prompt: [
-              `가맹점명: ${merchantRaw || merchantNormalized}`,
-              `카테고리 slug 목록: ${slugList}`,
-              '위 목록에 있는 slug 하나만 골라 JSON {"slug":"..."}만 출력하세요.',
-            ].join('\n'),
+            system: buildCategorySystemPrompt(),
+            prompt: buildCategoryUserPrompt({
+              merchantName: merchantRaw || merchantNormalized,
+              candidates,
+              examples,
+            }),
             temperature: 0,
             maxTokens: SUGGEST_MAX_TOKENS,
             metadata: {
               task: 'category-suggest',
-              promptVersion: 'merchant-category-v1',
+              // 버전을 올려야 `ai_invocations`에서 v1/v2 정밀도를 나눠 셀 수 있다.
+              promptVersion: CATEGORY_PROMPT_VERSION,
               pipelineRunId,
             },
           },
