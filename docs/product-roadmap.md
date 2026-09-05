@@ -1,5 +1,8 @@
 # 제품 로드맵 — 2026-08 진단 기준 8주 계획
 
+> **상태: 8주 계획 실행 완료(2026-09-05 전수 재확인).** P0 11건 종료 · P1 22건 중 20건
+> 종료 · 남은 2건은 의도적 보류다. 지금 무엇이 남았는지는 바로 아래 「상태 갱신 이력」을 본다.
+
 > 2026-08-08에 5개 역할(PO · 프로덕트 디자인 · 프론트엔드/모바일 · 백엔드/아키텍처 · 데이터)이
 > 동시에 수행한 진단 결과를 하나의 실행 계획으로 합친 문서다.
 >
@@ -10,12 +13,53 @@
 > 모든 진단은 정적(코드·문서 정독)이며, 운영 데이터로 확인하지 못한 추정은 `[가설]`로 표시한다.
 > 기준 문서: [`PRD.md`](../PRD.md), `docs/phase0~10-build-spec.md`, [`docs/adr/`](./adr/).
 
+## 상태 갱신 이력
+
+| 날짜 | 무엇을 했나 |
+|---|---|
+| 2026-08-08 | 5개 역할 동시 진단 → 이 문서 최초 작성 |
+| **2026-09-05** | **전수 재확인.** P0 11건 전부 종료, P1 22건 중 20건 종료 |
+
+> **⚠️ 2026-09-05 갱신 시 확인된 것**: 이 문서의 상태 표기가 한 달 가까이 뒤처져 있었다.
+> `📝 초안`·`⬜ 미착수`로 남아 있던 항목 다수가 이미 배포돼 있었다(P0-4·7·8·10·11은
+> ADR-0027 한 건으로, P1은 9건이 개별 배포로). 문서를 믿고 계획을 세웠다면 끝난 일을
+> 다시 했을 것이다.
+>
+> **판정은 문서가 아니라 코드·DB로 했다.** 각 행의 상태 열에 무엇을 근거로 닫았는지
+> 적었으므로, 다음 갱신 때도 그 근거를 다시 확인하면 된다.
+
+### 2026-09-05 현재 — 남은 것은 2건뿐이다
+
+| # | 무엇 | 왜 남아 있나 |
+|---|---|---|
+| P1-8 | 문자 원문 보존·삭제 정책을 사용자가 선택·철회할 수 없다 | C-3을 "동의 기록 + 즉시 철회"로 축소하며 의도적으로 남긴 부분(5-1) |
+| P1-12 | Slack·RAG·장기기억·그래프가 사용자 동선에 미연결 | RICE 15.0 최하위 · owner 전용이라 Reach 최소. Memory·Graph 페이지네이션이 선행(5-1) |
+
+둘 다 **의도적 보류**이고 결함이 아니다. 즉 이 문서가 정의한 P0/P1 범위에서 고쳐야
+할 것은 남아 있지 않다.
+
+**대신 다른 종류의 잔여가 있다** — 이 문서의 축(P0/P1)으로는 표현되지 않는 것들이다.
+
+| 종류 | 항목 | 상태 |
+|---|---|---|
+| 화면 검증 미완 | 가맹점 병합 제안 · 공용 카드 색상/필터/최근거래 이름 | 서버·순수함수는 실측 검증, **인증 세션이 필요한 화면 경로는 미확인** |
+| 관찰 대기 | ADR-0027 9단계(롤백 창 닫기) | 시간이 지나야 닫힌다 |
+| 관찰 대기 | 정기 지출 첫 후보 | `ANTHROPIC*CLAUDESUB`가 3회째가 되는 2026-09-20경 |
+| 관찰 대기 | 가맹점 제안 정밀도 | 확정·거절 표본 0 |
+| 기존 실패 | `apps/web/src/lib/native.test.ts` 1건 | 2026-09-05 확인 시점에 이미 실패 중(원인 미조사) |
+
+다음에 만들 것은 3장(신규 콘셉트)이 아니라
+[`docs/concept-ai-merchant-identity-2026-09.md`](./concept-ai-merchant-identity-2026-09.md) §6이
+순서를 갖고 있다: 가맹점 아이덴티티(완료) → 카테고리 분류 정밀도 → 자연어 질의 축 확대.
+
+---
+
 ## 이 문서를 읽는 법
 
 | 장 | 무엇이 있나 | 언제 보나 |
 |---|---|---|
 | 1 | PRD/Phase 약속 대비 현재 위치 — 특히 **드리프트** | "이 기능 되는 거 아니었나?" 싶을 때 |
-| 2 | 확정된 P0 11건 / 주요 P1 22건 + **처리 상태** | 지금 무엇이 고쳐지는 중인지 확인할 때 |
+| 2 | 확정된 P0 11건 / 주요 P1 22건 + **처리 상태**(2026-09-05 전수 재확인) | 지금 무엇이 고쳐지는 중인지 확인할 때 |
 | 3 | 신규 제품 콘셉트 8건 (RICE 계산식 포함) | 다음에 뭘 만들지 정할 때 |
 | 4 | 8주 로드맵 — P0를 끼워 넣어 재배치 | 스프린트를 계획할 때 |
 | 5 | **지금 하지 않기로 한 것**과 그 이유 | "왜 이건 안 했지?" 라는 질문이 나올 때 |
@@ -84,7 +128,11 @@
 
 집계: 프론트 1 · 백엔드 3 · 데이터 6 · PO 1 = **11건**. 디자인 진단의 P0 1건(알림함 크래시)은 프론트 P0와 같은 건이라 하나로 합쳤다.
 
-상태 표기: **✅ 수정 완료(미커밋)** / **🔧 진행 중** / **📝 ADR 초안 작성 중** / **⬜ 미착수**
+상태 표기: **✅ 종료** / **⬜ 남음**
+
+> 2026-09-05 전수 재확인으로 `🔧 진행 중`·`📝 ADR 초안`은 전부 해소됐다. 상태 열에는
+> **무엇을 근거로 닫았는지**(파일·마이그레이션·ADR)를 적는다 — 다음 갱신 때 그 근거를
+> 다시 확인하면 되고, 근거 없는 ✅는 이번처럼 문서를 못 믿게 만든다.
 
 | # | 문제 | 유형 | 근거 | 공수 | 상태 |
 |---|---|---|---|---|---|
@@ -94,11 +142,11 @@
 | P0-4 | 동시 취소 연결이 승인 거래의 취소 누적액을 유실한다 | 금액 오계산 | `apps/api/src/transactions/transaction.service.ts:881-927` · `apps/worker/src/promotion/transaction-promotion.service.ts:548-594` | M | ✅ 3경로(수동 link·자동 승격·삭제 역산) 전부 승인 행 잠금 후 재계산. 잠금 순서 승인→취소 전역 고정(데드락 방지). **금액 계산 규칙 무변경** |
 | P0-5→P1 | Graph 관계 교체가 다른 workspace 엔티티를 받아 이름을 노출한다 (등급 조정 근거는 아래 각주) | 테넌트 경계 | `apps/api/src/graph/graph.service.ts:431-460`,`:606-627` · `packages/database/src/schema.ts:2015-2027` | M | ✅ supersede 시 source/target의 workspace 일치 검증 |
 | P0-6 | 가맹점 정리 API가 타인의 private·summary_only 가맹점명과 금액을 공개한다 | 공개범위 | `apps/api/src/merchants/merchant.service.ts:41`,`:47`,`:55` · `apps/web/src/app/(app)/more/merchants/page.tsx:176` | M | ✅ `visibilityScope`/`redactedMerchantLabel`을 `@family/database` 공용 헬퍼로 추출 — 누락된 merchants를 고치면서 이미 4벌로 복붙돼 있던 사본(analytics·budgets·transactions·finance-ai)도 한 정의로 통합 |
-| P0-7 | 사람 검토로 확정한 취소가 승인 거래를 상계하지 않는다 | 금액 오계산 | `apps/api/src/card-sms/card-sms-review.service.ts:216`,`:228`,`:244` · `apps/worker/src/promotion/transaction-promotion.service.ts:462` | L | 📝 검토취소 상계 ADR 초안 |
-| P0-8 | 외화 승인과 취소를 서로 다른 당일 환율로 환산해 전액취소도 잔액이 남는다 | 금액 오계산 | `apps/worker/src/promotion/transaction-promotion.service.ts:301`,`:316`,`:554` · `apps/worker/src/promotion/fx-rate.service.ts:54`,`:62` | L | 📝 환율 ADR 초안 |
-| P0-9 | 선택적 `eventId`+`receivedAt` 조합이 서로 다른 동일 본문 결제를 영구 중복 처리한다 | 데이터 유실 | `packages/contracts/src/card-sms.ts:45` · `apps/api/src/card-sms/card-sms-ingest.service.ts:30`,`:78`,`:91` | M | ⬜ |
-| P0-10 | 범용 파서가 거래 액션과 무관한 첫 금액을 승인액으로 승격한다 | 금액 오계산 | `packages/card-parsers/src/parsers/generic.parser.ts:26`,`:36`,`:104` · `packages/card-parsers/src/parsers/base.parser.ts:127` | M | 📝 파서 앵커링 ADR 초안 |
-| P0-11 | 수동·검토 외화가 KRW 환산 계약을 우회해 화면별 금액이 사라지거나 원화로 오표시된다 | 금액 오계산 | `apps/api/src/card-sms/manual-entry.service.ts:223`,`:232` · `apps/api/src/analytics/analytics.service.ts:495` · `packages/contracts/src/merchant.ts:17` | L | 📝 외화 통합 ADR 초안 |
+| P0-7 | 사람 검토로 확정한 취소가 승인 거래를 상계하지 않는다 | 금액 오계산 | `apps/api/src/card-sms/card-sms-review.service.ts:216`,`:228`,`:244` · `apps/worker/src/promotion/transaction-promotion.service.ts:462` | L | ✅ **ADR-0027**(2026-09) — `createCancellation`이 연결과 상계를 한 명령으로 한다. 자동 승격만 규약을 구현하고 사람 경로가 재사용하지 않던 구조를 `transaction-domain`으로 합쳤다 |
+| P0-8 | 외화 승인과 취소를 서로 다른 당일 환율로 환산해 전액취소도 잔액이 남는다 | 금액 오계산 | `apps/worker/src/promotion/transaction-promotion.service.ts:301`,`:316`,`:554` · `apps/worker/src/promotion/fx-rate.service.ts:54`,`:62` | L | ✅ **ADR-0027** — 취소는 취소일 환율이 아니라 승인의 원통화 잔액에서 유도한다. `plan.test.ts:110` "USD 100 전액취소는 취소일 환율과 무관하게 승인 순액 0"이 재현 시나리오를 고정 |
+| P0-9 | 선택적 `eventId`+`receivedAt` 조합이 서로 다른 동일 본문 결제를 영구 중복 처리한다 | 데이터 유실 | `packages/contracts/src/card-sms.ts:45` · `apps/api/src/card-sms/card-sms-ingest.service.ts:30`,`:78`,`:91` | M | ✅ `packages/database/src/card-sms-idempotency.ts` + `card_sms_ingest_suppressions`(중복 판정된 시도도 **원문째로** 남긴다). 지문 창을 키 창과 분리해 지연 재전송을 흡수한다(`4c1b595`) |
+| P0-10 | 범용 파서가 거래 액션과 무관한 첫 금액을 승인액으로 승격한다 | 금액 오계산 | `packages/card-parsers/src/parsers/generic.parser.ts:26`,`:36`,`:104` · `packages/card-parsers/src/parsers/base.parser.ts:127` | M | ✅ **ADR-0027 6단계**(2026-09-03) — action-grounded 금액 추출. 운영 문자 264건 전수 재생으로 검증 |
+| P0-11 | 수동·검토 외화가 KRW 환산 계약을 우회해 화면별 금액이 사라지거나 원화로 오표시된다 | 금액 오계산 | `apps/api/src/card-sms/manual-entry.service.ts:223`,`:232` · `apps/api/src/analytics/analytics.service.ts:495` · `packages/contracts/src/merchant.ts:17` | L | ✅ **ADR-0027 enforce**(`MONEY_CONTRACT_MODE=v2`) — 수동·검토 경로의 금액 쓰기를 `moneyWrite.commands`가 소유한다. 거래일 스냅샷이 없으면 저장하지 않고 422(조용히 틀린 값보다 반영을 미룬다). 실측 266건 **전량 v2** |
 
 > **P0-5 등급 조정 (P0 → P1)**: 백엔드 진단은 P0로 매겼고 경계 위반 자체는 사실이다. 다만 공격에
 > 피해 workspace의 entity UUID가 필요하고, Graph·Memory는 아직 일반 사용자 제품 동선에 연결돼
@@ -127,29 +175,29 @@
 | # | 문제 | 출처 | 근거 | 공수 | 상태 |
 |---|---|---|---|---|---|
 | P1-1 | App Router error 바운더리가 전무해 렌더 예외 하나가 앱 전체를 무너뜨린다 | 프론트 | `apps/web/src/app/**` 에 `error.tsx`/`global-error.tsx` 0건 | S | ✅ `(app)/error.tsx` 신설 |
-| P1-2 | 로그아웃 시 React Query 캐시를 비우지 않아 다음 사용자에게 이전 사용자의 알림이 보인다 | 프론트 | `apps/web/src/lib/auth-context.tsx:118-123` · `apps/web/src/lib/queries.ts:441`,`:456`,`:420` | S | 🔧 진행 중 |
-| P1-3 | 부트스트랩 중 네트워크 오류를 "미인증"으로 처리해 조용히 강제 로그아웃된다 | 프론트 | `apps/web/src/lib/auth-context.tsx:288-291` · `apps/web/src/app/(app)/layout.tsx:222` | M | 🔧 진행 중 |
-| P1-4 | 서버 영문 에러가 그대로 노출된다 (`invalid credentials` 등) | 디자인 | `apps/api/src/auth/auth.service.ts:178` → `apps/web/src/lib/api-client.ts:117-128` → `apps/web/src/app/(auth)/login/page.tsx:103` | S | 🔧 진행 중 (에러 한국어화) |
-| P1-5 | `/categories` 조회 실패 시 "카테고리 없음"이라는 거짓 정보를 보여준다 | 프론트 | `apps/web/src/app/(app)/categories/page.tsx:409-417` (`isError` 분기 없음) | S | 🔧 진행 중 |
+| P1-2 | 로그아웃 시 React Query 캐시를 비우지 않아 다음 사용자에게 이전 사용자의 알림이 보인다 | 프론트 | `apps/web/src/lib/auth-context.tsx:118-123` · `apps/web/src/lib/queries.ts:441`,`:456`,`:420` | S | ✅ `auth-context.tsx:163` `queryClient.clear()` |
+| P1-3 | 부트스트랩 중 네트워크 오류를 "미인증"으로 처리해 조용히 강제 로그아웃된다 | 프론트 | `apps/web/src/lib/auth-context.tsx:288-291` · `apps/web/src/app/(app)/layout.tsx:222` | M | ✅ 네트워크 오류와 미인증을 구분해 처리 |
+| P1-4 | 서버 영문 에러가 그대로 노출된다 (`invalid credentials` 등) | 디자인 | `apps/api/src/auth/auth.service.ts:178` → `apps/web/src/lib/api-client.ts:117-128` → `apps/web/src/app/(auth)/login/page.tsx:103` | S | ✅ `ApiError.message`가 **화면에 그대로 띄울 수 있는 한국어**다. 서버 원문은 로그용으로 별도 보존(`api-client.ts:100~`) |
+| P1-5 | `/categories` 조회 실패 시 "카테고리 없음"이라는 거짓 정보를 보여준다 | 프론트 | `apps/web/src/app/(app)/categories/page.tsx:409-417` (`isError` 분기 없음) | S | ✅ `isError` 분기 추가 |
 | P1-6 | 파싱 실패 문자가 3일 뒤 앱에서 영영 사라진다 | 디자인 | `apps/web/src/app/(app)/dashboard/page.tsx:107`,`:328-343` (다른 진입점 0개) | S | ✅ `/todo`가 **기간 제한 없이** 전 기간 백로그를 보여준다(`(app)/todo/page.tsx:9-13`). 홈의 3일 창은 그대로 두고 진입점을 하나 더 만들어 해소 |
 | P1-7 | 현재월 예산 수정이 과거월 계획을 소급 변경한다 (D-3) | PO | `apps/api/src/budgets/budget.service.ts:106`,`:190` · `packages/database/src/schema.ts:1146` | M | ✅ ADR-0030 월 원장 — `effective_month`로 달마다 계획을 분리(`0052_budget_month_ledger.sql`) |
-| P1-8 | 문자 원문 보존·삭제 정책을 사용자가 선택하거나 철회할 수 없다 | PO | `PRD.md:788`,`:1755` · `docs/phase3-build-spec.md:21` · `apps/web/src/app/join/page.tsx:145` | L | ⬜ |
-| P1-9 | 장치 등록이 자동수집 활성화로 이어지지 않고 토큰 발급 화면에서 끝난다 | PO+디자인 | `apps/web/src/app/(app)/devices/page.tsx:481` · `apps/web/src` 내 `MacroDroid` 언급 3곳 전부 라벨 | M~L | ⬜ |
-| P1-10 | 장치의 "마지막 수신"이 실제 수신이 아닌 인증 성공 시각이다 (D-2) | PO | `packages/contracts/src/device.ts:22` · `apps/api/src/devices/device.service.ts:61` | S | ⬜ |
-| P1-11 | 초대받은 기존 사용자의 로그인 동선이 초대 문맥을 잃는다 (D-4) | PO | `apps/web/src/app/join/page.tsx:114` · `apps/web/src/app/(auth)/login/page.tsx:83` | S | ⬜ |
-| P1-12 | Slack·RAG·장기 기억·그래프 자산이 사용자 동선에 연결되지 않았다 | PO | `apps/api/src/slack/slack.controller.ts:69` · `apps/api/src/memory/memory.controller.ts:99` · `apps/web/src/app/(app)/more/page.tsx:47` | L | ⬜ |
-| P1-13 | 거래·예산 알림이 큐 투입 실패/워커 크래시 때 영구 유실된다 | 백엔드+데이터 | `apps/worker/src/promotion/transaction-promotion.service.ts:237-263`,`:817-836`,`:895-912` · `apps/worker/src/processors/notification-dispatch.processor.ts:100-109` | L | ⬜ |
-| P1-14 | 가구 전체 예산이 동시 생성 시 중복될 수 있다 | 백엔드 | `apps/api/src/budgets/budget.service.ts:133-160`,`:477-503` · `packages/database/src/schema.ts:1146-1175` | M | ⬜ |
+| P1-8 | 문자 원문 보존·삭제 정책을 사용자가 선택하거나 철회할 수 없다 | PO | `PRD.md:788`,`:1755` · `docs/phase3-build-spec.md:21` · `apps/web/src/app/join/page.tsx:145` | L | ⬜ **남음 — 의도적 보류.** C-3을 "동의 기록 + 즉시 철회"로 축소하며 보존정책 선택·purge·export를 뺐다(5-1). 결함이 아니라 범위 결정이다 |
+| P1-9 | 장치 등록이 자동수집 활성화로 이어지지 않고 토큰 발급 화면에서 끝난다 | PO+디자인 | `apps/web/src/app/(app)/devices/page.tsx:481` · `apps/web/src` 내 `MacroDroid` 언급 3곳 전부 라벨 | M~L | ✅ `apps/web/src/lib/collect-setup.ts` + `devices/page.tsx` — 플랫폼별 수집 마법사(C-2) |
+| P1-10 | 장치의 "마지막 수신"이 실제 수신이 아닌 인증 성공 시각이다 (D-2) | PO | `packages/contracts/src/device.ts:22` · `apps/api/src/devices/device.service.ts:61` | S | ✅ `lastSeenAt`(인증)과 `first/lastEventAt`(문자 수신)을 다른 신호로 분리 — `device.service.ts:75~` |
+| P1-11 | 초대받은 기존 사용자의 로그인 동선이 초대 문맥을 잃는다 (D-4) | PO | `apps/web/src/app/join/page.tsx:114` · `apps/web/src/app/(auth)/login/page.tsx:83` | S | ✅ `safeInternalPath` + `returnTo`에서 초대 토큰을 꺼내 `/register?invite=`로 넘긴다(`login/page.tsx:60~`) |
+| P1-12 | Slack·RAG·장기 기억·그래프 자산이 사용자 동선에 연결되지 않았다 | PO | `apps/api/src/slack/slack.controller.ts:69` · `apps/api/src/memory/memory.controller.ts:99` · `apps/web/src/app/(app)/more/page.tsx:47` | L | ⬜ **남음 — 의도적 보류.** RICE 15.0 최하위, owner 전용이라 Reach 최소. Memory·Graph 페이지네이션이 선행(5-1) |
+| P1-13 | 거래·예산 알림이 큐 투입 실패/워커 크래시 때 영구 유실된다 | 백엔드+데이터 | `apps/worker/src/promotion/transaction-promotion.service.ts:237-263`,`:817-836`,`:895-912` · `apps/worker/src/processors/notification-dispatch.processor.ts:100-109` | L | ✅ `apps/worker/src/outbox/outbox-dispatcher.service.ts` — transactional outbox |
+| P1-14 | 가구 전체 예산이 동시 생성 시 중복될 수 있다 | 백엔드 | `apps/api/src/budgets/budget.service.ts:133-160`,`:477-503` · `packages/database/src/schema.ts:1146-1175` | M | ✅ unique 2겹: `budgets_household_month_scope_ref_unique` + household 스코프 부분 유니크 |
 | P1-15 | 장치 secret 동시 회전이 active credential을 둘로 만든다 | 백엔드 | `apps/api/src/devices/device.service.ts:241-305` · `0047_device_eligibility_and_credential_unique.sql` | M | ✅ 장치 행 `FOR UPDATE` 직렬화 + 부분 유니크 인덱스 2겹. 앱 밖 원인의 위반만 409로 올려 운영자가 정리한다 |
-| P1-16 | 반복 거절 알림이 별칭 적용 전 raw 가맹점으로 그룹화되어 2회 임계를 놓친다 | 데이터 | `apps/worker/src/notifications/notification-scheduler.service.ts:489`,`:513`,`:559` · `apps/api/src/card-sms/card-sms-query.service.ts:196` | M | ⬜ |
-| P1-17 | 가맹점 별칭 병합이 `model_prediction`을 남기고 `human_confirmed` 규칙을 삭제한다 | 데이터 | `apps/api/src/merchants/merchant.service.ts:228`,`:249`,`:261` · `docs/adr/0019-merchant-label-review-boundary.md:42` | M | ⬜ |
-| P1-18 | 토스뱅크 거절 문자의 가맹점이 거절 사유 문장으로 저장된다 | 데이터 | `packages/card-parsers/src/parsers/toss.parser.ts:70`,`:141` · `packages/card-parsers/src/parsers/base.parser.ts:267` | S | ⬜ |
+| P1-16 | 반복 거절 알림이 별칭 적용 전 raw 가맹점으로 그룹화되어 2회 임계를 놓친다 | 데이터 | `apps/worker/src/notifications/notification-scheduler.service.ts:489`,`:513`,`:559` · `apps/api/src/card-sms/card-sms-query.service.ts:196` | M | ✅ `regroupByCanonicalMerchant`를 **임계 판정 앞에** 둔다 — 별칭을 뒤에 적용하면 표기가 갈린 같은 가게가 각각 탈락한다(`notification-scheduler.service.ts:594`,`:684`) |
+| P1-17 | 가맹점 별칭 병합이 `model_prediction`을 남기고 `human_confirmed` 규칙을 삭제한다 | 데이터 | `apps/api/src/merchants/merchant.service.ts:228`,`:249`,`:261` · `docs/adr/0019-merchant-label-review-boundary.md:42` | M | ✅ `merchant-rule-merge.ts` — 판단을 순수 함수로 뽑아 `human_confirmed` 보존을 전 분기 테스트로 고정 |
+| P1-18 | 토스뱅크 거절 문자의 가맹점이 거절 사유 문장으로 저장된다 | 데이터 | `packages/card-parsers/src/parsers/toss.parser.ts:70`,`:141` · `packages/card-parsers/src/parsers/base.parser.ts:267` | S | ✅ `parseTossMerchant`가 별도 추출을 하고, 못 찾으면 값 없이 `merchant not found` 경고 — 거절 사유 문장을 가맹점으로 저장하지 않는다 |
 | P1-19 | 파서 안전정수 허용범위와 PostgreSQL `integer` 범위가 달라 잡이 반복 실패한다 | 데이터 | `packages/card-parsers/src/currency.ts:74` | L | ✅ `toMinorUnits`가 `Number.isSafeInteger` 밖·음수를 값 없이 warning으로 돌려보낸다 — 잡을 실패시키지 않고 사람 검토로 보낸다 |
-| P1-20 | 리마인더 딥링크가 "이번 달" 필터에 걸려 알림 대상 거래가 안 보인다 | 프론트 | `packages/shared/src/notifications.ts:113` · `apps/web/src/app/(app)/transactions/page.tsx:249-252` | S | ⬜ |
-| P1-21 | 대시보드 "확인이 필요한 거래 N건"의 N과 도착 화면 목록이 일치하지 않는다 | 프론트 | `apps/web/src/app/(app)/dashboard/page.tsx:206-213`,`:447` | S | ⬜ |
-| P1-22 | 예산 초과를 알린 뒤 할 수 있는 게 "예산 수정"과 "삭제"뿐이다 | 디자인 | `apps/web/src/app/(app)/budgets/page.tsx:401-422` · `apps/web/src/components/widgets/usage-bar.tsx:44-50` | S | ⬜ |
+| P1-20 | 리마인더 딥링크가 "이번 달" 필터에 걸려 알림 대상 거래가 안 보인다 | 프론트 | `packages/shared/src/notifications.ts:113` · `apps/web/src/app/(app)/transactions/page.tsx:249-252` | S | ✅ 딥링크가 `?txn=<id>`로 **거래 한 건**을 연다 — 월 필터에 걸리지 않는다(`notifications.ts:153`) |
+| P1-21 | 대시보드 "확인이 필요한 거래 N건"의 N과 도착 화면 목록이 일치하지 않는다 | 프론트 | `apps/web/src/app/(app)/dashboard/page.tsx:206-213`,`:447` | S | ✅ 홈과 `/todo`가 `useTodoCounts()` **같은 훅**을 쓴다 — 화면마다 따로 세면 숫자가 갈린다 |
+| P1-22 | 예산 초과를 알린 뒤 할 수 있는 게 "예산 수정"과 "삭제"뿐이다 | 디자인 | `apps/web/src/app/(app)/budgets/page.tsx:401-422` · `apps/web/src/components/widgets/usage-bar.tsx:44-50` | S | ✅ `budgetTransactionsHref` — 초과 행의 주 액션이 `어디서 썼는지 보기` 딥링크 |
 
-**진행 중 묶음의 정체**: P0-1 · P1-1 ~ P1-5는 전부 웹 1개 앱 안의 신뢰 문제이고 서로 파일이 겹치지 않는다. 그래서 한 배포로 함께 나간다.
+**~~진행 중~~ 묶음의 정체**(2026-09-05 전부 종료): P0-1 · P1-1 ~ P1-5는 전부 웹 1개 앱 안의 신뢰 문제이고 서로 파일이 겹치지 않아 한 배포로 함께 나갔다.
 `packages/contracts/src/notification.ts`의 `decline` 추가만 계약 변경이며, 웹보다 워커·API가 먼저 배포되는 정상 순서에서도 안전하도록 웹에 `kindMeta()` 폴백을 함께 넣었다 — 계약이 앞서 나가도 화면이 죽지 않는 구조가 이번 수정의 본질이다.
 
 ---
@@ -394,9 +442,29 @@ PO 원 점수의 Effort는 M이 2와 3에 걸쳐 있다 — 원문 값을 그대
 
 ## 4. 8주 로드맵
 
+> **2026-09-05 실행 결과**: 이 계획은 실행됐다. 아래 스프린트 서술은 **계획 시점의 기록**
+> 이므로 그대로 두고(왜 이 순서였는지가 이 문서의 값이다), 결과만 여기 적는다.
+>
+> | 스프린트 | 계획 | 결과 |
+> |---|---|---|
+> | S1 경계 | P0 경계 4건 + 프론트 신뢰 묶음 | ✅ 전부 종료 |
+> | S2 금액 | P0 금액 오계산 6건 | ✅ 전부 종료 — 다섯 건이 **ADR-0027 하나로** 닫혔다 |
+> | S3 활성화 | 수집 마법사 · 합류 여정 · 동의 기록 | ✅ `collect-setup.ts` · `/join` 미리보기 · ADR-0028. **보존정책 선택은 계획대로 제외**(P1-8) |
+> | S4 행동 | 예산 원장 · 딥링크 · 정기 지출 · outbox | ✅ ADR-0030 · `deep-link.ts` · ADR-0029 · `outbox-dispatcher` |
+>
+> **계획과 다르게 흘러간 것 하나**: S2의 P0-4·7·8·10·11을 개별 작업으로 잡았는데,
+> 실제로는 원인이 하나였다 — "금액을 누가 쓰는가"가 경로마다 달랐다. ADR-0027이 계약을
+> 하나로 만들고 `MONEY_CONTRACT_MODE=v2`로 enforce하자 다섯 증상이 함께 사라졌다.
+> 대신 9단계 롤아웃(shadow → 관찰 → repair → enforce → VALIDATE)이 필요해 S2 하나보다
+> 오래 걸렸다. **증상 단위로 센 P0 개수는 작업량도 작업 단위도 아니다.**
+>
+> 8주 계획 밖에서 추가로 나간 것: 정기 지출 금액 레이어(S1~S4+D7) · OTA 웹 번들 배포 ·
+> 가맹점 브랜드 아이덴티티 · 공용 카드 색상/필터. 다음 순서는
+> [`concept-ai-merchant-identity-2026-09.md`](./concept-ai-merchant-identity-2026-09.md) §6에 있다.
+
 **전제** `[가설]`: 백엔드 1명 · 웹/모바일 1명 · 제품·디자인 0.5명. 기존 자동 검증 자산 유지.
 
-**PO 원안과 무엇이 달라졌나**: PO는 진단 **전에** 로드맵을 짰기 때문에 P0가 반영돼 있지 않다. 확정된 P0 11건 중 10건이 미착수이고, 그중 6건이 **화면에 뜨는 금액을 직접 틀리게 만든다.** 그래서 원안의 Sprint 1~2를 P0로 채우고 활성화·기록 신뢰 작업을 2주씩 뒤로 밀었다.
+**PO 원안과 무엇이 달라졌나**: PO는 진단 **전에** 로드맵을 짰기 때문에 P0가 반영돼 있지 않다. 확정된 P0 11건 중 10건이 (당시) 미착수였고, 그중 6건이 **화면에 뜨는 금액을 직접 틀리게 만들었다.** 그래서 원안의 Sprint 1~2를 P0로 채우고 활성화·기록 신뢰 작업을 2주씩 뒤로 밀었다.
 
 ### 4-0. PO 원안 대비 변경점
 
@@ -494,7 +562,7 @@ PO 원 점수의 Effort는 M이 2와 3에 걸쳐 있다 — 원문 값을 그대
 
 **왜 이 순서인가**: P0-4·7·8·10·11은 전부 "화면에 뜬 금액이 틀리다"이고, 그 위에 얹는 모든 기능(예산 원장·정기 지출·주간 브리핑)의 입력값이다. **틀린 실지출 위에 계획 기능을 만들면 두 번 만든다.** P0-9(멱등 키)를 여기 넣는 이유는 S3의 수집 마법사 템플릿이 이 계약을 그대로 인쇄하기 때문이다.
 
-**잘라낼 순서**: P1-19 → P1-18 → P1-6. P0는 자르지 않는다. P0-7·8·11이 ADR 초안 단계이므로, ADR 확정이 늦어지면 P0-4·9·10을 먼저 배포한다.
+**잘라낼 순서**: P1-19 → P1-18 → P1-6. P0는 자르지 않는다. ~~P0-7·8·11이 ADR 초안 단계이므로, ADR 확정이 늦어지면 P0-4·9·10을 먼저 배포한다.~~ → 실제로는 셋이 **ADR-0027 하나로 함께** 닫혔다(원인이 같았다).
 
 ---
 
