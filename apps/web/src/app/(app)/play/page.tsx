@@ -90,7 +90,7 @@ export default function PlayPage() {
             {MINIAPPS.map((app) => (
               <ListRow
                 key={app.key}
-                href={`/play/app/${app.key}`}
+                href={`/play/app?key=${app.key}`}
                 icon={<Gamepad2 />}
                 title={app.name}
                 subtitle={app.description}

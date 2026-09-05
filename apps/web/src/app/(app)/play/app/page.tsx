@@ -16,8 +16,8 @@
  * `state.*`는 `play_states`에 `app_key = 미니앱 키`로 저장된다. 미니앱이 키를 지정할
  * 수 없으므로 다른 미니앱의 상태를 읽거나 덮을 수 없다. 권한을 요구하지 않는 이유다.
  * ------------------------------------------------------------------------- */
-import { useParams } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo } from "react";
 
 import { Card } from "@/components/ui/card";
 import { PageBackHeader } from "@/components/widgets";
@@ -28,9 +28,25 @@ import { useHousehold } from "@/lib/household-context";
 import { findMiniapp } from "@/lib/miniapp-registry";
 import type { MiniappMethod } from "@family/shared";
 
+/**
+ * `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함) — 이 저장소의
+ * 다른 화면과 같은 형태로 맞춘다.
+ */
 export default function MiniappPage() {
-  const params = useParams<{ key: string }>();
-  const manifest = findMiniapp(params.key);
+  return (
+    <Suspense fallback={null}>
+      <MiniappView />
+    </Suspense>
+  );
+}
+
+function MiniappView() {
+  // 동적 라우트(`/play/app/[key]`)를 쓰지 않는 이유: 정적 export가 그것을 만들려면
+  // `generateStaticParams()`가 필요하고, 그러면 미니앱을 추가할 때마다 라우트를
+  // 다시 생성해야 한다 — "번들만 올리면 된다"는 이 구조의 목적과 어긋난다.
+  // 쿼리 파라미터는 이 저장소가 이미 쓰는 방식이다(`?month=`, `?txn=`).
+  const key = useSearchParams().get("key") ?? "";
+  const manifest = findMiniapp(key);
   const { householdId } = useHousehold();
   const { authedFetch } = useAuth();
 
@@ -101,9 +117,6 @@ export default function MiniappPage() {
       },
     };
   }, [householdId, manifest, authedFetch]);
-
-  const noop = useCallback(() => undefined, []);
-  void noop;
 
   if (!manifest) {
     return (
