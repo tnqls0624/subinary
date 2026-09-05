@@ -442,15 +442,19 @@ export function useCreateMerchantAliases() {
     mutationFn: ({
       canonical,
       aliases,
+      categoryId,
     }: {
       canonical: string;
       aliases: string[];
+      /** 사람이 확정한 카테고리가 갈렸을 때 사용자가 고른 답(없으면 서버가 409). */
+      categoryId?: string;
     }) =>
       authedFetch((token) =>
         api.merchants.createAliases(token, {
           householdId: householdId as string,
           canonical,
           aliases,
+          ...(categoryId ? { categoryId } : {}),
         }),
       ),
     onSuccess: () => {

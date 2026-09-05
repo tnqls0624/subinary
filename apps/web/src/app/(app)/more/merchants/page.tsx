@@ -70,6 +70,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageBackHeader } from "@/components/widgets";
+import { ApiError } from "@/lib/api-client";
 import { formatWon } from "@/lib/format";
 import {
   useCreateMerchantAliases,
@@ -191,17 +192,47 @@ export default function MerchantsPage() {
     setPickOpen(true);
   };
 
+  /**
+   * 고른 이름들에 **사람이 확정한 카테고리가 갈렸는가.**
+   *
+   * 서버가 이 충돌을 409로 거부한다(시스템이 임의로 고르면 사용자 확정이 사라진다).
+   * 목록이 이미 각 이름의 카테고리를 들고 있으므로 **묶기 전에** 알 수 있고, 그러면
+   * 거부당한 뒤 "먼저 정리하세요"를 듣는 대신 여기서 한 번에 고를 수 있다.
+   *
+   * 실측 2026-09-05: 화면이 제안한 병합 3건이 **전부** 이 충돌이었다.
+   */
+  const categoryChoices = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const name of selected) {
+      const row = items.find((m) => m.name === name);
+      if (row?.categoryId && row.categoryName) {
+        seen.set(row.categoryId, row.categoryName);
+      }
+    }
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [selected, items]);
+  const needsCategoryChoice = categoryChoices.length > 1;
+  const [resolveCategoryId, setResolveCategoryId] = useState<string | null>(null);
+
   const submit = () => {
     if (!canonical) return;
     const aliases = [...selected].filter((n) => n !== canonical);
     if (aliases.length === 0) return;
+    if (needsCategoryChoice && !resolveCategoryId) return;
     createAliases.mutate(
-      { canonical, aliases },
+      {
+        canonical,
+        aliases,
+        ...(needsCategoryChoice && resolveCategoryId
+          ? { categoryId: resolveCategoryId }
+          : {}),
+      },
       {
         onSuccess: (res) => {
           setPickOpen(false);
           setSelected(new Set());
           setCanonical(null);
+          setResolveCategoryId(null);
           toast.success(
             `‘${res.canonical}’으로 묶었어요`,
             {
@@ -209,7 +240,14 @@ export default function MerchantsPage() {
             },
           );
         },
-        onError: () => toast.error("묶는 데 실패했어요. 잠시 후 다시 시도해 주세요"),
+        // 서버 메시지를 그대로 띄운다. "잠시 후 다시 시도"는 카테고리 충돌처럼
+        // 다시 시도해도 같은 결과인 실패에 대해 거짓말이 된다.
+        onError: (error) =>
+          toast.error(
+            error instanceof ApiError
+              ? error.message
+              : "묶는 데 실패했어요. 잠시 후 다시 시도해 주세요",
+          ),
       },
     );
   };
@@ -521,13 +559,43 @@ export default function MerchantsPage() {
               </button>
             ))}
           </div>
+          {needsCategoryChoice ? (
+            <div className="border-warning/40 bg-warning/10 space-y-2 rounded-xl border p-3">
+              <p className="text-sm font-medium">
+                카테고리가 서로 달라요. 어느 쪽으로 합칠까요?
+              </p>
+              <p className="text-muted-foreground text-xs">
+                고르지 않은 쪽 기록도 남아 있어요 — 나중에 되돌릴 수 있어요.
+              </p>
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {categoryChoices.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setResolveCategoryId(c.id)}
+                    className={`rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                      resolveCategoryId === c.id
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border hover:bg-muted/50"
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPickOpen(false)}>
               그만두기
             </Button>
             <Button
               onClick={submit}
-              disabled={!canonical || createAliases.isPending}
+              disabled={
+                !canonical ||
+                createAliases.isPending ||
+                (needsCategoryChoice && !resolveCategoryId)
+              }
             >
               {createAliases.isPending ? "묶는 중…" : "이걸로 묶기"}
             </Button>

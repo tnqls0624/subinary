@@ -305,13 +305,22 @@ export class RecurringService {
         // 갈리면 null — 실측(2026-09-03)에서 쿠팡은 3장, 영등포구청은 2장으로
         // 결제됐다. "정기 결제는 한 카드로 나간다"가 항상 참이 아니므로, 억지로
         // 하나 고르면 카드 예산에 틀린 금액을 얹는다(기획 D1: 관측에서만).
+        //
+        // ⚠️ 바깥 컬럼을 `${schema.recurringSeries.id}`로 참조하면 안 된다. Drizzle이
+        // 그것을 `"id"`로만 렌더링하는데 이 서브쿼리에는 `card_transactions t`가 있고
+        // 거기에도 `id`가 있어 `column reference "id" is ambiguous`로 **쿼리 전체가
+        // 실패한다.** 테이블명을 명시해 상관 참조를 분명히 한다.
+        //
+        // 이 고장이 오래 숨어 있었던 이유(2026-09-05 발견): series가 0건이라 홈의
+        // 예고 카드가 어차피 숨겨졌고, 그래서 500이 "보여줄 것이 없음"과 화면에서
+        // 구분되지 않았다. 빈 결과를 기대하는 화면은 에러도 빈 결과처럼 보인다.
         cardId: sql<string | null>`(
           select case when count(distinct t.card_id) = 1
                       then min(t.card_id::text)
                       else null end
             from recurring_series_evidence e
             join card_transactions t on t.id = e.transaction_id
-           where e.series_id = ${schema.recurringSeries.id}
+           where e.series_id = recurring_series.id
         )`,
         redacted: exists(this.summaryOnlyEvidence(actorMemberId)),
       })

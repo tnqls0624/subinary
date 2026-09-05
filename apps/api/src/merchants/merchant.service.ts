@@ -44,6 +44,7 @@ import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { DB } from '../database/database.constants';
 import {
+  CATEGORY_NOT_IN_CONFLICT,
   applyMerchantRuleMerge,
   planMerchantRuleMerge,
   type MerchantRuleSource,
@@ -445,6 +446,7 @@ export class MerchantService {
 
       const plan = planMerchantRuleMerge({
         canonical,
+        resolveCategoryId: input.categoryId,
         rules: rules.map((rule) => ({
           ...rule,
           source: rule.source as MerchantRuleSource,
@@ -459,8 +461,18 @@ export class MerchantService {
       if (plan.conflict) {
         // 사람이 서로 다른 카테고리로 확정한 규칙이 둘 이상이다. 시스템이 임의로
         // 고르면 그 판단이 틀렸을 때 되돌릴 근거가 남지 않는다(ADR-0029 merged 원칙).
+        //
+        // 사용자가 답을 고르면(`categoryId`) 이 분기에 오지 않는다 — 화면은 카테고리가
+        // 갈린 것을 **묶기 전에** 알 수 있으므로(`MerchantSummary.categoryId`) 대표를
+        // 고를 때 카테고리도 함께 묻는다. 실측 2026-09-05에 제안 3건이 전부 이 충돌에
+        // 걸려 있었고, 그때 화면은 "묶으세요"라고 한 뒤 거부만 했다.
+        if (plan.conflict.reason === CATEGORY_NOT_IN_CONFLICT) {
+          throw new ConflictException(
+            '고른 카테고리가 이 가맹점들에 확정된 것 중에 없어요.',
+          );
+        }
         throw new ConflictException(
-          '묶으려는 가맹점들에 서로 다른 카테고리가 확정돼 있어요. 먼저 하나로 정리해 주세요.',
+          '묶으려는 가맹점들에 서로 다른 카테고리가 확정돼 있어요. 어느 카테고리로 합칠지 골라 주세요.',
         );
       }
 

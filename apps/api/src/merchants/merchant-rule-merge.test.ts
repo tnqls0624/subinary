@@ -8,7 +8,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { planMerchantRuleMerge, type MerchantRuleRow } from './merchant-rule-merge';
+import {
+  CATEGORY_NOT_IN_CONFLICT,
+  planMerchantRuleMerge,
+  type MerchantRuleRow,
+} from './merchant-rule-merge';
 
 const AT = (iso: string): Date => new Date(iso);
 
@@ -138,5 +142,108 @@ describe('패턴 rename을 하지 않는다', () => {
     // 계획에는 "어느 패턴에서 왔는가"만 남고, 실제 쓰기는 대표 패턴 upsert다.
     expect(plan.canonicalUpsert?.fromPattern).toBe('gs25');
     expect(Object.keys(plan)).not.toContain('renamePattern');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('카테고리 충돌을 사용자가 푸는 경로 (resolveCategoryId)', () => {
+  /**
+   * 2026-09-05 실측: 병합 제안 3건이 **전부** 이 충돌에 걸려 있었다.
+   *
+   *   지에스25 영등포도림 → 장보기   GS25영등포도림 → 식비
+   *   다이소아성산업      → 기타     아성다이소     → 장보기
+   *   씨유영등포          → 식비     씨유영등포도림 → 장보기
+   *
+   * 화면은 "묶으세요"라고 제안하는데 누르면 409로 거부됐다. 거부 자체는 옳지만
+   * (시스템이 임의로 고르면 사용자 확정이 사라진다) 빠져나갈 길이 없었다.
+   */
+  const rules = [
+    rule({
+      id: 'r-canonical',
+      merchantPattern: '지에스25 영등포도림',
+      categoryId: 'cat-grocery',
+      source: 'human_confirmed',
+    }),
+    rule({
+      id: 'r-alias',
+      merchantPattern: 'GS25영등포도림',
+      categoryId: 'cat-food',
+      source: 'human_confirmed',
+    }),
+  ];
+
+  it('답이 없으면 종전대로 거부한다', () => {
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules,
+    });
+    expect(plan.conflict).not.toBeNull();
+    expect(plan.canonicalUpsert).toBeNull();
+    expect(plan.deleteRuleIds).toEqual([]);
+  });
+
+  it('사용자가 고른 카테고리로 통일한다', () => {
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules,
+      resolveCategoryId: 'cat-food',
+    });
+    expect(plan.conflict).toBeNull();
+    expect(plan.canonicalUpsert).toMatchObject({
+      categoryId: 'cat-food',
+      source: 'human_confirmed',
+      // 사람이 확정한 것이므로 특정 예측의 산물이 아니다.
+      predictionTraceId: null,
+      writeFeedbackEvent: true,
+    });
+  });
+
+  it('대표가 이미 그 카테고리면 덮어쓰지 않는다', () => {
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules,
+      resolveCategoryId: 'cat-grocery',
+    });
+    expect(plan.conflict).toBeNull();
+    expect(plan.canonicalUpsert).toBeNull();
+  });
+
+  it('충돌 후보 밖의 카테고리는 거부한다', () => {
+    // 사용자가 보지 못한 제3의 카테고리로 과거 거래가 옮겨가면 확정이 아니라 사고다.
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules,
+      resolveCategoryId: 'cat-transport',
+    });
+    expect(plan.conflict?.reason).toBe(CATEGORY_NOT_IN_CONFLICT);
+    expect(plan.canonicalUpsert).toBeNull();
+  });
+
+  it('진 쪽의 사람 확정 규칙을 지우지 않는다', () => {
+    // 그때 그렇게 판단했다는 사실은 학습 계보다. 지금 답이 갈렸다고 과거 판단을
+    // 없던 일로 만들지 않는다.
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules,
+      resolveCategoryId: 'cat-food',
+    });
+    expect(plan.deleteRuleIds).not.toContain('r-alias');
+    expect(plan.keptRules).toContainEqual({
+      id: 'r-alias',
+      merchantPattern: 'GS25영등포도림',
+      reason: 'human_lineage',
+    });
+  });
+
+  it('충돌이 없으면 resolveCategoryId를 무시한다', () => {
+    // 갈리지 않은 확정을 사용자 선택으로 덮으면 조용히 카테고리가 바뀐다.
+    const plan = planMerchantRuleMerge({
+      canonical: '지에스25 영등포도림',
+      rules: [rules[0] as MerchantRuleRow],
+      resolveCategoryId: 'cat-food',
+    });
+    expect(plan.conflict).toBeNull();
+    expect(plan.canonicalUpsert).toBeNull();
   });
 });

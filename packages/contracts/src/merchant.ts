@@ -100,6 +100,17 @@ export const merchantAliasCreateRequestSchema = z.object({
   householdId: z.string().uuid(),
   canonical: z.string().trim().min(1).max(200),
   aliases: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+  /**
+   * 묶는 이름들에 **사람이 확정한 카테고리가 갈렸을 때** 사용자가 고른 답.
+   *
+   * 없으면 서버가 409로 거부한다 — 시스템이 임의로 고르면 그 판단이 틀렸을 때
+   * 되돌릴 근거가 남지 않는다(ADR-0029). 이 값이 있으면 **사람이 고른 것**이므로
+   * 그 원칙을 지키면서 진행할 수 있다.
+   *
+   * 갈린 카테고리 중 하나여야 한다. 무관한 값이면 409 — 사용자가 보지 못한 제3의
+   * 카테고리로 과거 거래가 옮겨가면 확정이 아니라 사고다.
+   */
+  categoryId: z.string().uuid().optional(),
 });
 export type MerchantAliasCreateRequest = z.infer<
   typeof merchantAliasCreateRequestSchema

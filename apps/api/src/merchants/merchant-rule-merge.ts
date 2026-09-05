@@ -63,7 +63,26 @@ export interface MerchantRuleMergeInput {
   rules: readonly MerchantRuleRow[];
   /** `dataset_snapshot_items`가 참조 중인 규칙 id — 지우면 23503으로 롤백된다. */
   snapshotReferencedRuleIds?: ReadonlySet<string>;
+  /**
+   * 사람이 확정한 카테고리가 갈렸을 때 **사용자가 고른 답**.
+   *
+   * 이것이 있으면 충돌을 거부하지 않고 이 카테고리로 통일한다. 원칙을 깨지 않는 이유:
+   * 시스템이 임의로 고르는 것이 아니라 **사람이 고른 것**이다. ADR-0029가 금지한 것은
+   * 전자다 — 시스템이 고르면 그 판단이 틀렸을 때 되돌릴 근거가 남지 않는다.
+   *
+   * 충돌한 카테고리 중 하나여야 한다. 무관한 카테고리를 받으면 사용자가 보지 못한
+   * 제3의 답이 되므로 {@link CATEGORY_NOT_IN_CONFLICT}로 거부한다.
+   */
+  resolveCategoryId?: string;
 }
+
+/**
+ * `resolveCategoryId`가 충돌 목록에 없을 때의 표식.
+ *
+ * 충돌을 그대로 돌려주되 이 필드로 "고른 답이 후보 밖"임을 알린다 — 호출부가
+ * 일반 충돌과 구분해 다른 메시지를 낼 수 있어야 한다.
+ */
+export const CATEGORY_NOT_IN_CONFLICT = 'category_not_in_conflict' as const;
 
 /** "이 패턴은 이 카테고리다"라는 사람의 확정 하나. */
 export interface MerchantRuleClaim {
@@ -72,6 +91,11 @@ export interface MerchantRuleClaim {
 }
 
 export interface MerchantRuleMergeConflict {
+  /**
+   * 사용자가 고른 `resolveCategoryId`가 충돌 후보 밖이라 거부된 경우.
+   * 없으면 평범한 충돌(고른 답이 아직 없음)이다.
+   */
+  reason?: typeof CATEGORY_NOT_IN_CONFLICT;
   /** 충돌한 사람 확정 전부(패턴 오름차순) — 사용자에게 그대로 보여줄 근거다. */
   claims: MerchantRuleClaim[];
   /** 충돌한 카테고리 id(중복 제거). */
@@ -140,7 +164,17 @@ export function planMerchantRuleMerge(
   ];
   const humanCategoryIds = [...new Set(humanRules.map((r) => r.categoryId))];
 
-  if (humanCategoryIds.length > 1) {
+  // 사람 확정이 갈렸는데 사용자가 답을 골랐으면, 그 답으로 통일한다.
+  // 고른 답이 충돌 후보 밖이면 진행하지 않는다 — 사용자가 보지 못한 제3의 카테고리로
+  // 과거 거래가 옮겨가면 그것은 확정이 아니라 사고다.
+  const resolved =
+    humanCategoryIds.length > 1 && input.resolveCategoryId !== undefined
+      ? humanCategoryIds.includes(input.resolveCategoryId)
+        ? input.resolveCategoryId
+        : CATEGORY_NOT_IN_CONFLICT
+      : null;
+
+  if (humanCategoryIds.length > 1 && resolved === null) {
     // 규칙 2. 아무것도 지우지 않고, 아무것도 옮기지 않는다.
     return {
       conflict: {
@@ -158,8 +192,46 @@ export function planMerchantRuleMerge(
     };
   }
 
+  if (resolved === CATEGORY_NOT_IN_CONFLICT) {
+    return {
+      conflict: {
+        reason: CATEGORY_NOT_IN_CONFLICT,
+        claims: humanRules
+          .map((rule) => ({
+            merchantPattern: rule.merchantPattern,
+            categoryId: rule.categoryId,
+          }))
+          .sort((a, b) => a.merchantPattern.localeCompare(b.merchantPattern)),
+        categoryIds: [...humanCategoryIds].sort(),
+      },
+      canonicalUpsert: null,
+      deleteRuleIds: [],
+      keptRules: [],
+    };
+  }
+
   let canonicalUpsert: MerchantCanonicalRuleUpsert | null = null;
-  if (humanRules.length > 0) {
+  if (humanRules.length > 0 && typeof resolved === 'string') {
+    // 규칙 1-b. 충돌을 사용자가 풀었다 — 고른 카테고리를 대표에 확정한다.
+    //
+    // 다른 카테고리를 주장하던 별칭 규칙은 **지우지 않는다**(아래 `keptRules`의
+    // `human_lineage`). 사용자가 그때 그렇게 판단했다는 사실 자체는 학습 계보이고,
+    // 지금 답이 갈렸다고 과거 판단을 없던 일로 만들 이유가 없다.
+    const winner = pickLatest(
+      humanRules.filter((rule) => rule.categoryId === resolved),
+    );
+    if (winner && canonicalRule?.categoryId !== resolved) {
+      canonicalUpsert = {
+        categoryId: resolved,
+        source: 'human_confirmed',
+        predictionTraceId: null,
+        confirmedAt: winner.confirmedAt,
+        createdBy: winner.createdBy,
+        fromPattern: winner.merchantPattern,
+        writeFeedbackEvent: true,
+      };
+    }
+  } else if (humanRules.length > 0) {
     // 규칙 1. 대표가 이미 사람 확정을 들고 있으면(카테고리가 하나임은 위에서 확인)
     // 할 일이 없다. 아니면 별칭의 사람 확정으로 덮는다.
     if (canonicalRule?.source !== 'human_confirmed') {
