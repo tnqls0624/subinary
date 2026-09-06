@@ -38,6 +38,6 @@ export function MiniappHost({ appKey, src, permissions, handlers, height = 480, 
     runtimeRef.current?.loaded();
   }, []);
   return <iframe ref={frameRef} src={src} sandbox="allow-scripts" onLoad={onLoad}
-    title={title} className="bg-background w-full rounded-xl border" style={{ height }}
+    title={title} className="bg-background w-full rounded-xl border" style={{ height: appKey === "backyard" ? `min(${height}px, calc(100svh - 250px))` : height }}
     allow="" referrerPolicy="no-referrer" />;
 }

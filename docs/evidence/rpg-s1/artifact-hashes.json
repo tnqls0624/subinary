@@ -1,0 +1,9 @@
+{
+  "backyard/index.html": "79afc264018e59c8858518c3ac822b03b85596658604c12944f988ff9353759f",
+  "backyard/rpg-rules.js": "c7ce453e5b2eaa3239fb6a12e9b345bb3e1d631cc8bf98d5783ef6701573f32f",
+  "backyard/rpg-input.js": "f9d6c0960fdba26ca83a8ba26cfa93d234a93da1598c623b780ad047c1f65c08",
+  "backyard/rpg-engine.js": "d515d6ceb88e8dbf2332f5aed91f392065d703d84f04d80c3e86bde2a579b60c",
+  "backyard/rpg-style.css": "28b38e11e2c0c8af8851ef4945baf4eeeceded7d3f73f041b76122d797134850",
+  "vendor/phaser.min.js": "66348b1b5141e49b7d5ebbe688cddcb502eab1cb00f21c538686a5b2c5abe4de",
+  "vendor/PHASER-LICENSE.md": "d59c20a9deb5dc240614b428dce5246ae561d15efeeebea0e069d73f0a78fbff"
+}

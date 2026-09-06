@@ -1,0 +1,733 @@
+{
+  "browser": "149.0.7827.55",
+  "widths": [
+    {
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "bounds": {
+        "x": 16,
+        "y": 153,
+        "width": 288,
+        "height": 318
+      }
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 780
+      },
+      "bounds": {
+        "x": 16,
+        "y": 153,
+        "width": 328,
+        "height": 470
+      }
+    },
+    {
+      "viewport": {
+        "width": 430,
+        "height": 900
+      },
+      "bounds": {
+        "x": 16,
+        "y": 153,
+        "width": 398,
+        "height": 470
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    }
+  ],
+  "errors": [],
+  "checks": [
+    "실제 호스트 60초 이상 산책",
+    "월드 경계 노출 0",
+    "직선/대각 3초 거리 차이 ≤5%",
+    "pointercancel 후 이동 ≤1px",
+    "물·나무·물 모서리 충돌",
+    "저장 API 요청 0",
+    "blur 즉시 정지",
+    "엔진 로드 실패 HTML 오류·저장 요청 0"
+  ],
+  "start": {
+    "x": 240,
+    "y": 592,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 42,
+      "y": 428,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 233,
+      "y": 582,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-6-0"
+  },
+  "walk": [
+    {
+      "x": 529.6000000000038,
+      "y": 592,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 298.7116817797239,
+        "y": 428,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 522.6000000000038,
+        "y": 582,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-0-0"
+    },
+    {
+      "x": 529.6000000000038,
+      "y": 303.9999999999959,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 299.60000000000366,
+        "y": 164.72229794419425,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 522.6000000000038,
+        "y": 293.9999999999959,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-6-0"
+    },
+    {
+      "x": 616.000000000005,
+      "y": 303.9999999999959,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 385.1113565783426,
+        "y": 164.00000000002427,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 609.000000000005,
+        "y": 293.9999999999959,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-0-0"
+    },
+    {
+      "x": 616.000000000005,
+      "y": 26,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 386.0000000000049,
+        "y": 0,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 609.000000000005,
+        "y": 16,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-6-0"
+    },
+    {
+      "x": 134.40000000000035,
+      "y": 26,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 127.40000000000035,
+        "y": 16,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-4-0"
+    },
+    {
+      "x": 134.40000000000035,
+      "y": 506.00000000000284,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 0,
+        "y": 317.11205281844826,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 127.40000000000035,
+        "y": 496.00000000000284,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-2-0"
+    },
+    {
+      "x": 23,
+      "y": 506.00000000000284,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 0,
+        "y": 318.00000000000273,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 16,
+        "y": 496.00000000000284,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-4-0"
+    },
+    {
+      "x": 23,
+      "y": 752,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 0,
+        "y": 440,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 16,
+        "y": 742,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-2-0"
+    },
+    {
+      "x": 984.6000000000097,
+      "y": 752,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 628,
+        "y": 440,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 977.6000000000097,
+        "y": 742,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-0-0"
+    },
+    {
+      "x": 984.6000000000097,
+      "y": 26,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 628,
+        "y": 0,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 977.6000000000097,
+        "y": 16,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-6-0"
+    },
+    {
+      "x": 23,
+      "y": 26,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 16,
+        "y": 16,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-4-0"
+    }
+  ],
+  "pond": {
+    "x": 616.000000000005,
+    "y": 303.9999999999959,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 385.7170002385977,
+      "y": 164.00000000000495,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 609.000000000005,
+      "y": 293.9999999999959,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-0-0"
+  },
+  "walkElapsedMs": 61603,
+  "cameraViolations": [],
+  "distances": {
+    "straight": 288.0000000000041,
+    "diagonal": 289.60000000000434
+  },
+  "distanceDifferencePercent": 0.5555555555556345,
+  "water": {
+    "x": 633,
+    "y": 300,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 402.99999998653607,
+      "y": 136,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 626,
+      "y": 290,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-0-0"
+  },
+  "tree": {
+    "x": 112,
+    "y": 286,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 0,
+      "y": 146,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 105,
+      "y": 276,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-6-0"
+  },
+  "corner": {
+    "x": 681.4587011926942,
+    "y": 426,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 450.8285458254665,
+      "y": 286.0000006428198,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 674.4587011926942,
+      "y": 416,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-7-0"
+  },
+  "cancelDrift": 0,
+  "blurDrift": 0,
+  "playRequests": [],
+  "expectedBootFailureErrors": [
+    "Failed to load resource: net::ERR_FAILED"
+  ]
+}

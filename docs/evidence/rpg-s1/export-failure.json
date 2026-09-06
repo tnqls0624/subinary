@@ -1,0 +1,165 @@
+{
+  "browser": "149.0.7827.55",
+  "widths": [],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    }
+  ],
+  "errors": [],
+  "checks": [],
+  "start": {
+    "x": 240,
+    "y": 592,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 42,
+      "y": 428,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 233,
+      "y": 582,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-6-0"
+  },
+  "walk": [
+    {
+      "x": 529.6000000000038,
+      "y": 592,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 298.70861907368,
+        "y": 428,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 522.6000000000038,
+        "y": 582,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-0-0"
+    },
+    {
+      "x": 529.6000000000038,
+      "y": 303.9999999999959,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 299.60000000000366,
+        "y": 164.72030694855297,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 522.6000000000038,
+        "y": 293.9999999999959,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-6-0"
+    },
+    {
+      "x": 616.000000000005,
+      "y": 303.9999999999959,
+      "vx": 0,
+      "vy": 0,
+      "camera": {
+        "x": 385.11228057956436,
+        "y": 164.00000000002424,
+        "width": 396,
+        "height": 328
+      },
+      "body": {
+        "x": 609.000000000005,
+        "y": 293.9999999999959,
+        "width": 14,
+        "height": 10
+      },
+      "texture": "walker-0-0-0"
+    }
+  ],
+  "pond": {
+    "x": 616.000000000005,
+    "y": 303.9999999999959,
+    "vx": 0,
+    "vy": 0,
+    "camera": {
+      "x": 385.7459183365295,
+      "y": 164.00000000000404,
+      "width": 396,
+      "height": 328
+    },
+    "body": {
+      "x": 609.000000000005,
+      "y": 293.9999999999959,
+      "width": 14,
+      "height": 10
+    },
+    "texture": "walker-0-0-0"
+  }
+}
