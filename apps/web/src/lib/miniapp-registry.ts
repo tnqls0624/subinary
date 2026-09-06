@@ -37,7 +37,7 @@ export interface MiniappManifest {
 
 export const MINIAPPS: readonly MiniappManifest[] = [{
   key: "backyard", name: "뒷마당", description: "함께 작은 마당을 꾸며요",
-  entry: "/miniapps/backyard/index.html", permissions: [], height: 470,
+  entry: "/miniapps/backyard/index.html", permissions: [], height: 520,
 }];
 
 /** 등록된 미니앱을 키로 찾는다. */

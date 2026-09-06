@@ -10,10 +10,11 @@ export interface MiniappHostProps {
   handlers: MiniappHandlers;
   height?: number;
   title: string;
+  paused?: boolean;
 }
 
 /** allow-scripts만 허용하는 미니앱 호스트. 가구·앱 경계는 부모의 key로 재생성한다. */
-export function MiniappHost({ appKey, src, permissions, handlers, height = 480, title }: MiniappHostProps) {
+export function MiniappHost({ appKey, src, permissions, handlers, height = 480, title, paused = false }: MiniappHostProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -33,11 +34,16 @@ export function MiniappHost({ appKey, src, permissions, handlers, height = 480, 
       window.removeEventListener("message", onMessage);
     };
   }, [appKey, permissions, src]);
+  const sendViewport = useCallback((): void => {
+    if (appKey === "backyard") frameRef.current?.contentWindow?.postMessage({ type: "backyard.viewport", paused }, "*");
+  }, [appKey, paused]);
+  useEffect(sendViewport, [sendViewport]);
   const onLoad = useCallback(() => {
     hasLoaded.current = true;
     runtimeRef.current?.loaded();
-  }, []);
+    sendViewport();
+  }, [sendViewport]);
   return <iframe ref={frameRef} src={src} sandbox="allow-scripts" onLoad={onLoad}
-    title={title} className="bg-background w-full rounded-xl border" style={{ height: appKey === "backyard" ? `min(${height}px, calc(100svh - 250px))` : height }}
+    title={title} className="bg-background w-full rounded-xl border" style={{ height, visibility: paused ? "hidden" : "visible" }}
     allow="" referrerPolicy="no-referrer" />;
 }

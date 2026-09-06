@@ -19,6 +19,7 @@ import { Suspense, useMemo } from "react";
 
 import { Card } from "@/components/ui/card";
 import { PageBackHeader } from "@/components/widgets";
+import { BackyardViewport } from "@/components/miniapp/backyard-viewport";
 import { MiniappHost } from "@/components/miniapp/miniapp-host";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -70,8 +71,13 @@ function MiniappView() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
-      <PageBackHeader title={manifest.name} subtitle={manifest.description} />
-      {householdId && status === "authenticated" ? <MiniappHost
+      {manifest.key !== "backyard" && <PageBackHeader title={manifest.name} subtitle={manifest.description} />}
+      {householdId && status === "authenticated" ? manifest.key === "backyard" ? <BackyardViewport
+        key={`${householdId}:${manifest.key}`}
+        appKey={manifest.key} src={manifest.entry} permissions={manifest.permissions}
+        handlers={handlers} title={manifest.name} subtitle={manifest.description}
+        height={manifest.height}
+      /> : <MiniappHost
         key={`${householdId}:${manifest.key}`}
         appKey={manifest.key}
         src={manifest.entry}

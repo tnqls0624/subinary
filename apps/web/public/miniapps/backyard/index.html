@@ -7,6 +7,8 @@
 </head><body>
 <main><header><strong>우리 뒷마당</strong><span id="place" role="status">집 앞 마당</span></header>
 <div id="world" aria-label="산책하는 마당"></div>
-<footer><button id="pad" aria-label="방향 패드. 끌어서 걷기, 방향키 또는 WASD"><span></span><b>↑<br>←　→<br>↓</b></button><p>발길 닿는 대로<br><small>산책은 저장되지 않아요</small></p></footer>
+<footer><button id="pad" aria-label="방향 패드. 끌어서 걷기, 방향키 또는 WASD"><span></span><b>↑<br>←　→<br>↓</b></button><div class="actions"><button id="action" aria-disabled="true">다가가 보기</button><small>이번 산책은 저장되지 않아요</small></div></footer>
+<section id="editor" hidden aria-label="꾸미기"><div class="choices"><button data-kind="pot" aria-pressed="true">화분</button><button data-kind="well" aria-pressed="false">우물</button><button data-kind="chair" aria-pressed="false">의자</button><button id="store">보관</button><button id="cancel">닫기</button></div><p id="placement" role="status"></p></section>
+<p id="feedback" role="status" aria-live="polite">가까이 다가가 바라봐 주세요</p>
 <section id="failure" hidden role="alert"><p>마당을 열지 못했어요</p><button id="retry">다시</button></section>
 </main></body></html>
