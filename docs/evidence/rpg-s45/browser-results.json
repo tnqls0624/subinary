@@ -1,0 +1,308 @@
+{
+  "browser": "149.0.7827.55",
+  "widths": [],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_world"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_collection"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_residents"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_player"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_meta"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_world"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_player"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "checks": [
+    "실제 export·opaque iframe에서 신규 4키 ACK→meta ACK→엔진 부팅",
+    "실제 패드 키보드·꾸미기 이동→world ACK→재진입 일치 및 collection 시각 보존",
+    "초기 GET 503의 브라우저 네트워크 PUT=0·엔진 부팅 없음"
+  ],
+  "failedGetNetwork": [
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    }
+  ],
+  "saved": {
+    "rpg_world": {
+      "v": 2,
+      "legacyFruit": 0,
+      "items": [
+        "1:w:4:20",
+        "2:c:5:20",
+        "0:p:6:21"
+      ]
+    },
+    "rpg_collection": {
+      "v": 2,
+      "species": [],
+      "nodes": [
+        "pot-0:1234567890"
+      ],
+      "fishing": [
+        0,
+        0,
+        0
+      ]
+    },
+    "rpg_residents": {
+      "v": 2,
+      "items": []
+    },
+    "rpg_player": {
+      "v": 2,
+      "mapVersion": 1,
+      "x": 106,
+      "y": 322,
+      "direction": 2,
+      "outfit": 1,
+      "t": 1788737314
+    },
+    "rpg_meta": {
+      "v": 2,
+      "mapVersion": 1,
+      "seed": 4821,
+      "initialized": true,
+      "migrated": false
+    }
+  },
+  "normalErrors": []
+}

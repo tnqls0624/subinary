@@ -1,6 +1,6 @@
 // @ts-check
 /// <reference path="../../../types/phaser/phaser.d.ts" />
-/** Phaser 객체는 이 어댑터 안에서만 소유한다. 저장 브리지는 연결하지 않는다. */
+/** Phaser 객체는 이 어댑터 안에서만 소유한다. 세션의 검증된 논리 상태만 사용한다. */
 (() => {
   const host = document.getElementById('world');
   const pad = document.getElementById('pad');
@@ -13,8 +13,34 @@
   const editor = /** @type {HTMLElement} */(document.getElementById('editor'));
   const feedback = /** @type {HTMLElement} */(document.getElementById('feedback'));
   const placement = /** @type {HTMLElement} */(document.getElementById('placement'));
-  let paused = window.innerHeight < 300, editing = false, chosen = 'pot', nextId = 0;
-  let decorations = rules.decorationFixture();
+  let paused = window.innerHeight < 300, editing = false, chosen = 'pot';
+  /** @type {RpgDecoration[]} */ let decorations = [];
+  /** @type {RpgOwned[]} */ let owned = [];
+  /** @type {RpgPlayer} */ let restored = BackyardRpgCodec.initial().rpg_player;
+  /** @type {RpgWriter|undefined} */ let currentWriter;
+  /** @type {string|null} */ let movingId = null;
+  let loaded=false;
+  const saveLabel=/** @type {HTMLElement} */(document.getElementById('save'));
+  /** 저장 ACK 전에는 의미 있는 편집을 잠근다. */
+  function writable() {return loaded&&!!currentWriter&&!currentWriter.getSaveState().locked;}
+  /** 검증 후 world 한 키만 저장한다. @param {RpgOwned[]} next */
+  function saveWorld(next) {
+    const state=session.getState();
+    if(state.status!=='playable'||!writable())return false;
+    return state.writer.commit('rpg_world',BackyardRpgCodec.world(next,state.data.rpg_world.legacyFruit));
+  }
+  /** 막힌 저장 위치는 가까운 통행 타일로만 복원한다. @param {RpgPlayer} saved */
+  function safePosition(saved) {
+    const point={x:saved.x*2,y:saved.y*2};
+    if(rules.canStand(point.x,point.y,decorations))return point;
+    const cells=[];
+    for(let row=0;row<24;row++)for(let col=0;col<32;col++){
+      const cell={x:col*32+16,y:row*32+16};
+      if(rules.canStand(cell.x,cell.y,decorations))cells.push(cell);
+    }
+    cells.sort((a,b)=>Math.hypot(a.x-point.x,a.y-point.y)-Math.hypot(b.x-point.x,b.y-point.y));
+    return cells[0]??{x:240,y:592};
+  }
   /** @type {World|null} */ let worldScene = null;
   /** @type {Phaser.Physics.Arcade.StaticGroup|null} */ let furnitureSolids = null;
   /** @type {Phaser.GameObjects.Image[]} */ let furnitureImages = [];
@@ -34,12 +60,17 @@
   }
   /** 행동 순간에 대상/배치를 재검증한다. 먼 곳에서의 획득은 없다. */
   function act() {
-    if(paused||!player||!worldScene)return;
+    if(paused||!loaded||!player||!worldScene)return;
     if(editing) {
-      const cell=rules.preview(player,direction),reason=rules.placementReason(decorations,cell,[player]);
+      if(!writable()){feedback.textContent='저장 완료를 기다려 주세요';return;}
+      const cell=rules.preview(player,direction),reason=rules.placementReason(decorations.filter(d=>d.id!==movingId),cell,[player]);
       if(reason){feedback.textContent=reason;return;}
-      decorations=[...decorations,{id:`placed-${nextId++}`,kind:chosen,...cell}];renderFurniture();
-      feedback.textContent='앞에 놓았어요 · 이번 산책에서만 유지돼요';return;
+      const reused=owned.find(i=>i.id===movingId)??owned.find(i=>i.stored&&i.kind===chosen);
+      if(!reused&&owned.length>=48){feedback.textContent='보관 포함 48개예요 · 보관한 물건을 다시 놓아 주세요';return;}
+      const id=reused?.id??String(Array.from({length:48},(_,i)=>i).find(i=>!owned.some(o=>o.id===String(i))));
+      const next={id,kind:reused?.kind??chosen,...cell,stored:false};
+      if(saveWorld([...owned.filter(i=>i.id!==id),next])){movingId=null;feedback.textContent='앞에 놓았어요';}
+      return;
     }
     const current=rules.target(player,direction,[...rules.sites,...rules.decorationTargets(decorations)],decorations);
     if(!current){feedback.textContent='조금 더 다가가 바라봐 주세요';return;}
@@ -49,21 +80,27 @@
     input?.reset();
   }
   action.addEventListener('click',act);
-  document.getElementById('cancel')?.addEventListener('click',()=>{editing=false;editor.hidden=true;feedback.textContent='산책을 계속해요';pad?.focus({preventScroll:true});});
+  document.getElementById('cancel')?.addEventListener('click',()=>{editing=false;movingId=null;editor.hidden=true;feedback.textContent='산책을 계속해요';pad?.focus({preventScroll:true});});
   document.querySelectorAll('[data-kind]').forEach(button=>button.addEventListener('click',()=>{
-    chosen=/** @type {HTMLElement} */(button).dataset.kind||'pot';
+    movingId=null;chosen=/** @type {HTMLElement} */(button).dataset.kind||'pot';
     document.querySelectorAll('[data-kind]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
   }));
   document.getElementById('store')?.addEventListener('click',()=>{
-    if(paused||!player)return;
+    if(paused||!player||!writable())return;
     const current=rules.target(player,direction,rules.decorationTargets(decorations),decorations);
     if(!current){feedback.textContent='보관할 물건 가까이 다가가 바라봐 주세요';return;}
-    decorations=decorations.filter(d=>d.id!==current.id);renderFurniture();feedback.textContent='보관했어요 · 원하는 곳에 다시 놓을 수 있어요';
+    if(saveWorld(owned.map(i=>i.id===current.id?{...i,stored:true}:i)))feedback.textContent='보관했어요 · 같은 종류를 고르면 다시 놓아요';
+  });
+  document.getElementById('move')?.addEventListener('click',()=>{
+    if(paused||!player||!writable())return;
+    const current=rules.target(player,direction,rules.decorationTargets(decorations),decorations);
+    if(!current){feedback.textContent='옮길 물건 가까이 다가가 바라봐 주세요';return;}
+    movingId=current.id;chosen=current.kind;editing=true;editor.hidden=false;feedback.textContent='걸어서 새 자리를 골라 주세요';
   });
   /** 부모 신원 확인 후 숨겨진 게임의 물리와 입력을 함께 멈춘다. */
   function syncPause() {
     input?.reset();
-    if(paused)worldScene?.physics.world.pause();else worldScene?.physics.world.resume();
+    if(paused||!loaded)worldScene?.physics.world.pause();else worldScene?.physics.world.resume();
   }
   window.addEventListener('message',event=>{
     if(event.source!==window.parent || event.data?.type!=='backyard.viewport' || typeof event.data.paused!=='boolean')return;
@@ -161,7 +198,7 @@
           solids.add(solid);
         }
         worldScene=this;furnitureSolids=this.physics.add.staticGroup();renderFurniture();
-        const fixture=rules.fixture();direction=fixture.direction;
+        const fixture={...safePosition(restored),direction:restored.direction,outfit:restored.outfit};direction=fixture.direction;
         player=this.physics.add.sprite(fixture.x,fixture.y,`walker-${fixture.outfit}-${direction}-0`).setOrigin(0.5,0.9);
         player.setSize(14,10).setOffset(9,26).setCollideWorldBounds(true);
         this.physics.add.collider(player,solids);
@@ -173,7 +210,7 @@
         camera.centerOn(player.x,player.y);
         input=BackyardRpgInput.create(/** @type {HTMLElement} */(pad), velocity=>{
           intent=velocity;player?.setVelocity(velocity.x,velocity.y);
-        },()=>!paused,act);
+        },()=>!paused&&loaded,act);
         syncPause();
         this.events.once('shutdown',()=>{input?.destroy();input=null;player=null;intent={x:0,y:0};});
         worldHost.dataset.ready='true';
@@ -181,20 +218,22 @@
     }
     /** 프레임 복귀 시 입력을 버려 큰 delta 이동을 막는다. @param {number} time @param {number} delta */
     update(time,delta){
-      if(!player||paused) return;
+      if(!player||paused||!loaded) return;
       if(delta>100) input?.reset();
       const moving=!!(player.body && (Math.abs(player.body.velocity.x)>0.01||Math.abs(player.body.velocity.y)>0.01));
       if(intent.x||intent.y) direction=(Math.round(Math.atan2(intent.y,intent.x)/(Math.PI/4))+8)%8;
+      currentWriter?.observePlayer({v:2,mapVersion:1,x:Math.max(0,Math.min(511,Math.round(player.x/2))),y:Math.max(0,Math.min(383,Math.round(player.y/2))),direction,outfit:restored.outfit,t:Math.floor(Date.now()/1000)},moving);
+      if(currentWriter){const status=currentWriter.getSaveState();saveLabel.textContent=status.message;saveLabel.dataset.dirty=String(status.dirty);}
       walkingTime=moving?walkingTime+Math.min(delta,50):0;
-      player.setTexture(`walker-0-${direction}-${moving?1+Math.floor(walkingTime/125)%4:0}`).setDepth(player.y);
+      player.setTexture(`walker-${restored.outfit}-${direction}-${moving?1+Math.floor(walkingTime/125)%4:0}`).setDepth(player.y);
       player.setScale(1,!moving && time<reactionUntil && nearest?.kind==='chair'?0.78:1);
       berries.forEach(item=>item.image.y=item.y+Math.sin(time/1400*Math.PI*2)*2);
       nearest=rules.target(player,direction,[...rules.sites,...rules.decorationTargets(decorations)],decorations);
       if(editing) {
-        const cell=rules.preview(player,direction),reason=rules.placementReason(decorations,cell,[player]);
+        const cell=rules.preview(player,direction),reason=rules.placementReason(decorations.filter(d=>d.id!==movingId),cell,[player]);
         outline?.setVisible(true).setPosition(cell.col*32+16,cell.row*32+16).setStrokeStyle(2,reason?0xb46555:0x536e49);
         ghost?.setVisible(true).setTexture(chosen).setPosition(cell.col*32+16,cell.row*32+32);
-        const message=`${decorations.length}/48 · ${reason||'앞 칸에 놓을 수 있어요'}`;
+        const message=`${owned.length}/48 (보관 포함) · ${reason||'앞 칸에 놓을 수 있어요'}`;
         if(placement.textContent!==message)placement.textContent=message;
         action.textContent='여기 놓기';
       }else {
@@ -213,10 +252,43 @@
     if(game) game.scale.resize(Math.max(1,Math.min(rules.width,worldHost.clientWidth)),Math.max(1,Math.min(rules.height,worldHost.clientHeight)));
     paused=window.innerHeight<300;syncPause();
   });
+  /** 초기화 ACK와 전체 검증 후에만 엔진을 연다. */
+  function startGame() {
   try {
     if(typeof Phaser==='undefined' || Phaser.VERSION!=='4.2.1') throw Error('Phaser 4.2.1을 불러오지 못했어요');
     game=new Phaser.Game({type:Phaser.AUTO,parent:worldHost,width:Math.min(rules.width,worldHost.clientWidth),height:Math.min(rules.height,worldHost.clientHeight),backgroundColor:'#adbf88',banner:false,audio:{noAudio:true},physics:{default:'arcade',arcade:{gravity:{x:0,y:0},fixedStep:true}},scene:[Boot,World]});
     observer.observe(worldHost);
-    window.addEventListener('pagehide',()=>{observer.disconnect();input?.destroy();game?.destroy(true);game=null;},{once:true});
+
   }catch(error){console.error(error);fail();}
+  }
+  const bridge=(/** @type {typeof globalThis & {MiniApp?: RpgSessionDeps['bridge']}} */(globalThis)).MiniApp;
+  if(!bridge){fail();return;}
+  const session=BackyardRpgSession.createSession({bridge,setTimer:(fn,ms)=>window.setTimeout(fn,ms),clearTimer:id=>window.clearTimeout(id),
+    onChange:state=>{
+      loaded=state.status==='playable';
+      errorPanel.hidden=loaded;
+      if(state.status!=='playable'){
+        const message=errorPanel.querySelector('p');
+        if(message)message.textContent='message' in state?state.message:state.status==='initializing'?'처음 마당을 저장하고 있어요':'마당을 불러오고 있어요';
+        editor.hidden=true;syncPause();return;
+      }
+      const fresh=currentWriter!==state.writer;currentWriter=state.writer;
+      const next=BackyardRpgCodec.owned(state.data.rpg_world),visible=next.filter(i=>!i.stored);
+      const changed=JSON.stringify(decorations)!==JSON.stringify(visible);
+      owned=next;decorations=visible;
+      saveLabel.textContent=currentWriter.getSaveState().message;
+      if(fresh){
+        restored=state.data.rpg_player;editing=false;movingId=null;
+        if(player){const point=safePosition(restored);player.setPosition(point.x,point.y);direction=restored.direction;}
+        feedback.textContent=state.data.rpg_world.legacyFruit?'예전 마당에서 모은 열매 '+state.data.rpg_world.legacyFruit+'개':'같은 마당을 공유해요. 동시에 바꾸면 마지막 저장이 남아요';
+      }
+      if(!game)startGame();else if(changed)renderFurniture();
+      if(fresh)syncPause();
+    }});
+  document.addEventListener('visibilitychange',()=>{
+    input?.reset();
+    if(document.hidden)currentWriter?.flush();else void session.load();
+  });
+  window.addEventListener('pagehide',()=>{currentWriter?.flush();session.destroy();observer.disconnect();input?.destroy();game?.destroy(true);game=null;},{once:true});
+  void session.load();
 })();

@@ -16,6 +16,8 @@
     "public/miniapps/backyard/rules.js",
     "public/miniapps/backyard/codec.js",
     "public/miniapps/backyard/session.js",
-    "public/miniapps/backyard/rpg-rules.js"
+    "public/miniapps/backyard/rpg-rules.js",
+    "public/miniapps/backyard/rpg-codec.js",
+    "public/miniapps/backyard/rpg-session.js"
   ]
 }
