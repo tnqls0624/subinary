@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>Sandbox 엔진 검증</title>
+<style>iframe{width:420px;height:300px}pre{white-space:pre-wrap}</style>
+<h1>allow-scripts 전용 sandbox</h1>
+<iframe id="phaser" title="Phaser" sandbox="allow-scripts" src="phaser.html?v=2"></iframe>
+<iframe id="excalibur" title="Excalibur" sandbox="allow-scripts" src="excalibur.html?v=2"></iframe>
+<pre id="results"></pre>
+<script>
+const results = [];
+addEventListener('message', event => {
+  const frame = [...document.querySelectorAll('iframe')].find(frame => frame.contentWindow === event.source);
+  if (!frame || event.data?.session !== 'sandbox-verify') return;
+  const row = {frame: frame.id, origin: event.origin, ...event.data};
+  results.push(row);
+  document.querySelector('#results').textContent = JSON.stringify(results, null, 2);
+  console.log('VERIFY', JSON.stringify(row));
+  if (event.data.test === 'ping') frame.contentWindow.postMessage({session:'sandbox-verify', test:'ack', revision:7}, '*');
+});
+</script>
