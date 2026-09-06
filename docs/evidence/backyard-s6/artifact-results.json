@@ -1,0 +1,66 @@
+{
+  "files": 324,
+  "rawBytes": 4030572,
+  "zipBytes": 1179233,
+  "baselineRawBytes": 3864248,
+  "baselineZipBytes": 1123874,
+  "rawDeltaBytes": 166324,
+  "zipDeltaBytes": 55359,
+  "rawDeltaPercent": 4.3,
+  "zipDeltaPercent": 4.93,
+  "gameAndBridgeRawBytes": 55574,
+  "zipPath": "/tmp/backyard-s6-ota.zip",
+  "zipSha256": "d61a049e93fe0142819236ee8fc72c187820b1541164cb6d6639b27f2dcfb3dc",
+  "publicByteEquality": [
+    {
+      "path": "miniapps/backyard/index.html",
+      "bytes": 1807,
+      "sha256": "0cea28dde81bd10f35c32077ff44f543c0e911ee33cedb39063f69c5eaeed64b"
+    },
+    {
+      "path": "miniapps/backyard/style.css",
+      "bytes": 1656,
+      "sha256": "6023362d07ee3b99cd9171f3b8f023261041adce1933b60dc2a7bad678f11b38"
+    },
+    {
+      "path": "miniapps/bridge.js",
+      "bytes": 7846,
+      "sha256": "eddf1fd206ef77782402be24f7942cdd88f2ce15cc796a1c2998cef91122c2b3"
+    },
+    {
+      "path": "miniapps/backyard/balance.js",
+      "bytes": 671,
+      "sha256": "e22a31acf4bb58320a0605d1b253f27f5904cff75f50166bde94d0e39e9b129c"
+    },
+    {
+      "path": "miniapps/backyard/rules.js",
+      "bytes": 8695,
+      "sha256": "942c11fa926286b3103f58bf47abd819e77f4ae96a86614723651cb13e78f86a"
+    },
+    {
+      "path": "miniapps/backyard/codec.js",
+      "bytes": 7219,
+      "sha256": "22b2ae06943c5a1e9efe7696e3a2ba5c6ccf1fec889338b3d03bcefd3d3cd272"
+    },
+    {
+      "path": "miniapps/backyard/session.js",
+      "bytes": 9651,
+      "sha256": "26adf6e79a2dd670f4de39906837473cfe912a40933ef1ca368b3f18953c15ab"
+    },
+    {
+      "path": "miniapps/backyard/renderer.js",
+      "bytes": 6024,
+      "sha256": "1ab77be11a88835d4f539ecc8e8e8c13b2a964b583d9328e0aeeb50bb1a5c1c7"
+    },
+    {
+      "path": "miniapps/backyard/input.js",
+      "bytes": 2285,
+      "sha256": "a67909e3cd3958b63cc7ffd757bd326b0e2152fc6b9f3b6d18226eceaa14aa91"
+    },
+    {
+      "path": "miniapps/backyard/app.js",
+      "bytes": 9720,
+      "sha256": "f453b8133023d6d6ac0c87b7e8b7b7508d16044fce8fa1a8bbd68ddd2c59c8ec"
+    }
+  ]
+}

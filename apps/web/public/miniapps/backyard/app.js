@@ -34,6 +34,8 @@ var BackyardApp = (() => {
       const playable=state.status==='playable';
       const wasCompleteHidden=complete.hidden;
       complete.hidden=!playable||completedDismissed||(playable&&!rules.isComplete(state.garden));
+      // 완료 대화상자가 열린 동안 뒤쪽 마당에 키보드 초점이 들어가지 않게 한다.
+      play.inert=!complete.hidden;
       if(wasCompleteHidden&&!complete.hidden) closeComplete.focus(); play.hidden=!playable; loading.hidden=playable;
       retry.hidden=state.status==='loading'||state.status==='waiting_host';
       if(state.status!=='playable') {
@@ -78,7 +80,7 @@ var BackyardApp = (() => {
     /** @param {HTMLElement} target @param {string} type @param {EventListener} handler 연결 수명에 속한 DOM 이벤트를 등록한다. */
     function listen(target,type,handler) { target.addEventListener(type,handler,{signal:controller.signal}); }
     function reset() { input.cancel(); mode='harvest'; selected=null; preview=null; message='익은 화분을 눌러 열매를 거두세요'; paint(session.getState()); }
-    listen(closeComplete,'click',()=>{completedDismissed=true;complete.hidden=true;moveButton.focus();});
+    listen(closeComplete,'click',()=>{completedDismissed=true;complete.hidden=true;play.inert=false;moveButton.focus();});
     listen(complete,'keydown',event=>{
       if(event instanceof KeyboardEvent && (event.key==='Escape'||event.key==='Tab')) {
         event.preventDefault();

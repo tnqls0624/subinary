@@ -1,0 +1,740 @@
+{
+  "browser": "149.0.7827.55",
+  "widths": [
+    {
+      "width": 320,
+      "bounds": [
+        {
+          "id": "yard",
+          "x": 19,
+          "right": 299,
+          "y": 42,
+          "bottom": 322,
+          "height": 280
+        },
+        {
+          "id": "hint",
+          "x": 8,
+          "right": 310,
+          "y": 326,
+          "bottom": 358,
+          "height": 32
+        },
+        {
+          "id": "buy-p",
+          "x": 8,
+          "right": 104.65625,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-w",
+          "x": 110.65625,
+          "right": 207.328125,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-c",
+          "x": 213.328125,
+          "right": 310,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "move",
+          "x": 8,
+          "right": 63.75,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        },
+        {
+          "id": "cancel",
+          "x": 69.75,
+          "right": 114.25,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "bounds": [
+        {
+          "id": "yard",
+          "x": 39,
+          "right": 319,
+          "y": 42,
+          "bottom": 322,
+          "height": 280
+        },
+        {
+          "id": "hint",
+          "x": 12,
+          "right": 346,
+          "y": 326,
+          "bottom": 358,
+          "height": 32
+        },
+        {
+          "id": "buy-p",
+          "x": 12,
+          "right": 119.328125,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-w",
+          "x": 125.328125,
+          "right": 232.671875,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-c",
+          "x": 238.671875,
+          "right": 346,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "move",
+          "x": 12,
+          "right": 67.75,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        },
+        {
+          "id": "cancel",
+          "x": 73.75,
+          "right": 118.25,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        }
+      ]
+    },
+    {
+      "width": 430,
+      "bounds": [
+        {
+          "id": "yard",
+          "x": 74,
+          "right": 354,
+          "y": 42,
+          "bottom": 322,
+          "height": 280
+        },
+        {
+          "id": "hint",
+          "x": 12,
+          "right": 416,
+          "y": 326,
+          "bottom": 358,
+          "height": 32
+        },
+        {
+          "id": "buy-p",
+          "x": 12,
+          "right": 142.65625,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-w",
+          "x": 148.65625,
+          "right": 279.328125,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "buy-c",
+          "x": 285.328125,
+          "right": 416,
+          "y": 362,
+          "bottom": 406,
+          "height": 44
+        },
+        {
+          "id": "move",
+          "x": 12,
+          "right": 67.75,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        },
+        {
+          "id": "cancel",
+          "x": 73.75,
+          "right": 118.25,
+          "y": 411,
+          "bottom": 455,
+          "height": 44
+        }
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/garden"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "checks": [
+    "실제 export 쿼리 직진입 + allow-scripts + ready/GET 복원",
+    "수확 3→구매→이동→swap→페이지 재진입 DTO 일치",
+    "가짜 시각 8100/10800초 경계·익은 채 유지·우물 이동 시 readyAt 불변",
+    "완료 대화상자·배경 inert·닫은 뒤 16칸 swap·완료 플래그 없음",
+    "정상 통합 과정 JS/CORS/리소스 로드 오류 0",
+    "초기 GET 503에서 PUT 0",
+    "실제 Chromium에서 20회 생성/해제 후 리스너·RAF·timer·observer 모두 0"
+  ],
+  "normalErrors": [],
+  "injectedFailureErrors": [
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "lifecycle": [
+    {
+      "cycle": 1,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 2,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 3,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 4,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 5,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 6,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 7,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 8,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 9,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 10,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 11,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 12,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 13,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 14,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 15,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 16,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 17,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 18,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 19,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    },
+    {
+      "cycle": 20,
+      "active": {
+        "listeners": 18,
+        "raf": 1,
+        "timers": 1,
+        "observers": 1
+      },
+      "destroyed": {
+        "listeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "observers": 0
+      }
+    }
+  ]
+}
