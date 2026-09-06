@@ -35,6 +35,7 @@ export const TODO_PATHS: ReadonlyArray<string> = ["/todo", "/declines"];
  */
 export const ACCOUNT_PATHS: ReadonlyArray<string> = [
   "/more",
+  "/play",
   "/household",
   "/cards",
   "/devices",

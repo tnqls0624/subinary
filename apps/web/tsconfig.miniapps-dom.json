@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM"], "types": [],
+    "allowJs": true, "checkJs": true, "strict": true, "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["public/miniapps/bridge.js", "public/miniapps/backyard/*.js"]
+}

@@ -185,3 +185,27 @@ export type {
 } from './recurring-forecast.js';
 export { nowUtc, toSeoulString } from './time.js';
 export type { Visibility, Sensitivity, WorkspaceKind } from './types.js';
+
+export {
+  MINIAPP_BRIDGE_VERSION,
+  MINIAPP_METHODS,
+  MINIAPP_PERMISSIONS,
+  checkMiniappRequest,
+  isMiniappMethod,
+  isMiniappPermission,
+  isMiniappRequest,
+  miniappError,
+  miniappOk,
+  permissionForMethod,
+} from './miniapp-bridge.js';
+export type {
+  MiniappErrorCode,
+  MiniappMethod,
+  MiniappPermission,
+  MiniappRequest,
+  MiniappResponse,
+  MiniappResponseError,
+  MiniappResponseOk,
+  MiniappRouteCheck,
+} from './miniapp-bridge.js';
+export { isMiniappResponse } from "./miniapp-bridge.js";

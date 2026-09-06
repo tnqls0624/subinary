@@ -24,6 +24,7 @@ import {
   ChevronRight,
   CreditCard,
   Fingerprint,
+  Gamepad2,
   KeyRound,
   LogOut,
   Repeat,
@@ -65,6 +66,8 @@ interface MoreGroup {
 }
 
 const GROUPS: ReadonlyArray<MoreGroup> = [
+  { key: "play", title: "함께 놀기", items: [{ href: "/play", icon: Gamepad2,
+    title: "뒷마당", description: "함께 작은 마당을 꾸며요" }] },
   {
     key: "household",
     title: "가계 설정",

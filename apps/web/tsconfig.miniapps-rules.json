@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": [],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "module": "none"
+  },
+  "include": ["public/miniapps/backyard/balance.js", "public/miniapps/backyard/rules.js", "public/miniapps/backyard/codec.js", "public/miniapps/backyard/session.js"]
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>뒷마당</title><link rel="stylesheet" href="style.css">
+<script defer src="../bridge.js"></script><script defer src="balance.js"></script><script defer src="rules.js"></script><script defer src="codec.js"></script><script defer src="session.js"></script><script defer src="renderer.js"></script><script defer src="input.js"></script><script defer src="app.js"></script>
+</head>
+<body>
+<main id="garden-app">
+<header><strong>우리 뒷마당</strong><span id="fruit" aria-label="보유 열매">열매 0</span><span id="save" role="status"></span></header>
+<section id="loading" aria-live="polite"><p id="load-message">마당을 불러오고 있어요</p><button id="retry" hidden>다시</button></section>
+<section id="play" hidden aria-label="마당 꾸미기">
+<div class="yard"><canvas id="yard" tabindex="0" role="group" aria-label="4행 4열 마당. 방향키로 칸 선택, Enter로 확정"></canvas></div>
+<p id="hint" role="status">익은 화분을 눌러 열매를 거두세요</p>
+<div class="shop" aria-label="상점"><button id="buy-p">화분</button><button id="buy-w">우물</button><button id="buy-c">의자</button></div>
+<div class="tools"><button id="move" aria-pressed="false">옮기기</button><button id="cancel">취소</button><span id="warning" role="status"></span></div>
+</section>
+<section id="complete" role="dialog" aria-modal="true" aria-labelledby="complete-title" hidden><div><h2 id="complete-title">우리 마당이 가득 찼어요</h2><p>열여섯 칸에 함께 채운 작은 마당.<br>앞으로도 거두고, 자리를 바꿔 보세요.</p><button id="close-complete" autofocus>계속 꾸미기</button></div></section>
+</main>
+</body></html>
