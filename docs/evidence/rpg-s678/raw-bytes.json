@@ -1,0 +1,14 @@
+{
+  "method": "Buffer.byteLength(JSON.stringify(dto), utf8)",
+  "bytes": {
+    "rpg_meta": 76,
+    "rpg_world": 662,
+    "rpg_collection": 2005,
+    "rpg_residents": 101,
+    "rpg_player": 84
+  },
+  "total": 2928,
+  "maxSpecies": 16,
+  "maxNodes": 60,
+  "residentLastLineMax": 23
+}

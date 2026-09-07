@@ -21,7 +21,7 @@ describe('RPG 5키 codec', () => {
         v: 2, species: Array.from({ length: 16 }, (_, i) => `s${i}:99:${max}`),
         nodes: [...Array.from({ length: 12 }, (_, i) => `node-${i}:${max}`), ...Array.from({ length: 48 }, (_, i) => `pot-${i}:${max}`)], fishing: [7, 7, 7],
       },
-      rpg_residents: { v: 2, items: Array.from({ length: 3 }, (_, i) => `r${i}:4095:15:4294967295:s15`) },
+      rpg_residents: { v: 2, items: Array.from({ length: 3 }, (_, i) => `r${i}:4095:23:4294967295:s15`) },
       rpg_player: { v: 2, mapVersion: 1, x: 511, y: 383, direction: 7, outfit: 1, t: max },
     };
     const bytes = Object.fromEntries(codec.keys.map(key => [key, Buffer.byteLength(JSON.stringify(data[key]), 'utf8')]));
@@ -42,6 +42,7 @@ describe('RPG 5키 codec', () => {
     ['rpg_collection', { v: 2, species: [], nodes: ['pot-48:0'], fishing: [0, 0, 0] }],
     ['rpg_collection', { v: 2, species: [], nodes: ['pot-0:0', 'pot-0:1'], fishing: [0, 0, 0] }],
     ['rpg_residents', { v: 2, items: ['r0:4096:0:0:b'] }],
+    ['rpg_residents', { v: 2, items: ['r0:0:24:0:b'] }],
     ['rpg_residents', { v: 2, items: ['r0:0:0:0:b', 'r0:1:0:0:b'] }],
     ['rpg_player', { v: 2, mapVersion: 1, x: 512, y: 0, direction: 0, outfit: 0, t: 0 }],
     ['rpg_meta', { v: 2, mapVersion: 1, seed: 4821, initialized: false, migrated: false }],

@@ -1,3 +1,4 @@
+/// <reference path="../../public/miniapps/backyard/rpg-rules.js" />
 /// <reference path="../../public/miniapps/backyard/rpg-codec.js" />
 /// <reference path="../../public/miniapps/backyard/rpg-session.js" />
 import { readFileSync } from 'node:fs';
@@ -12,6 +13,8 @@ export function loadRpg() {
     runInContext(readFileSync(filename, 'utf8'), context, { filename });
   }
   return {
+    life: runInContext('BackyardRpgLife', context) as typeof BackyardRpgLife,
+    rules: runInContext('BackyardRpgRules', context) as typeof BackyardRpgRules,
     codec: runInContext('BackyardRpgCodec', context) as typeof BackyardRpgCodec,
     session: runInContext('BackyardRpgSession', context) as typeof BackyardRpgSession,
   };

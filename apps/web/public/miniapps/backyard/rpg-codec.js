@@ -54,7 +54,7 @@ var BackyardRpgCodec = (() => {
           tuples(raw.nodes,60,p=>p.length===2&&(/^(node-([0-9]|1[01])|pot-([0-9]|[1-3][0-9]|4[0-7]))$/.test(p[0]))&&token(p[1]))&&
           Array.isArray(raw.fishing)&&raw.fishing.length===3&&raw.fishing.every(n=>integer(n,7));break;
       case 'rpg_residents':
-        valid=tuples(raw.items,3,p=>p.length===5&&/^r[0-2]$/.test(p[0])&&token(p[1],4095)&&token(p[2],15)&&token(p[3],4294967295)&&(p[4]==='b'||/^s([0-9]|1[0-5])$/.test(p[4])));break;
+        valid=tuples(raw.items,3,p=>p.length===5&&/^r[0-2]$/.test(p[0])&&token(p[1],4095)&&token(p[2],23)&&token(p[3],4294967295)&&(p[4]==='b'||/^s([0-9]|1[0-5])$/.test(p[4])));break;
       case 'rpg_player':
         valid=raw.mapVersion===1&&integer(raw.x,511)&&integer(raw.y,383)&&integer(raw.direction,7)&&integer(raw.outfit,1)&&integer(raw.t);break;
     }

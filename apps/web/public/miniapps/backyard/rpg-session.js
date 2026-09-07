@@ -82,6 +82,16 @@ var BackyardRpgSession = (() => {
           // 보관 중인 화분도 이미 기록한 시각을 지울 수 없다.
           if(data.rpg_collection.nodes.some(n=>n.startsWith('pot-')&&!next.nodes.some(v=>v.split(':')[0]===n.split(':')[0]&&Number(v.split(':')[1])>=Number(n.split(':')[1]))))return false;
         }
+        if(key==='rpg_collection'){
+          const next=/** @type {RpgCollection} */(checked.value);
+          // 채집·보여주기는 기존 표본과 최초 발견 시각을 줄이거나 바꾸지 않는다.
+          if(data.rpg_collection.species.some(old=>{const [id,count,first]=old.split(':');return !next.species.some(value=>{const p=value.split(':');return p[0]===id&&Number(p[1])>=Number(count)&&p[2]===first;});}))return false;
+          if(data.rpg_collection.nodes.some(old=>{const [id,time]=old.split(':');return !next.nodes.some(value=>{const p=value.split(':');return p[0]===id&&Number(p[1])>=Number(time);});}))return false;
+        }
+        if(key==='rpg_residents'){
+          const next=/** @type {RpgResidents} */(checked.value);
+          if(data.rpg_residents.items.some(old=>{const [id,mask]=old.split(':');return !next.items.some(value=>{const p=value.split(':');return p[0]===id&&(Number(p[1])&Number(mask))===Number(mask);});}))return false;
+        }
         if(JSON.stringify(data[key])===JSON.stringify(checked.value))return true;
         data={...data,[key]:checked.value};writes[key].localSequence++;emit();send(key);return true;
       }

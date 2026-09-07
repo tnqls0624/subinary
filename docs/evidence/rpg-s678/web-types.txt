@@ -1,0 +1,4 @@
+
+> @family/web@0.0.0 typecheck /Users/soobeen/Desktop/Project/subinary/apps/web
+> tsc --noEmit
+

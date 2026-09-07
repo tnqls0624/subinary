@@ -82,6 +82,31 @@ describe('실제 HTTP·브릿지·부모 큐·세션 통합', () => {
       process.stdout.write('RPG 초기 GET 실패 네트워크: ' + JSON.stringify(h.network) + ' PUT=0\n');
     } finally { connection.destroy(); await close(h.server); }
   });
+  it('채집과 낚시가 각 PUT 하나로 발견·수량·재생성을 함께 저장하고 중복을 잠근다', async () => {
+    const h=await httpStore(false);const connection=connect(h.store),life=loadRpg().life;
+    try{
+      await connection.session.load();await saved(connection);
+      const start=h.network.length,state=playable(connection.session);
+      const gathered=life.gather(state.data.rpg_collection,'node-0',1000);
+      if(!gathered)throw Error('채집 fixture 실패');
+      expect(state.writer.commit('rpg_collection',gathered)).toBe(true);
+      expect(state.writer.commit('rpg_collection',gathered)).toBe(false);
+      await saved(connection);
+      expect(h.network.slice(start)).toEqual(['PUT /states/rpg_collection']);
+      // node-0은 열매라 재생성이 3시간(1000+10800)이다. 버섯·솔방울·벌레는 60초다 —
+      // 그 구분은 game-backyard-rpg-life.test.ts에서 고정한다.
+      expect(h.getSaved().rpg_collection).toEqual({v:2,species:['s0:1:1000'],nodes:[`node-0:${1000+life.regrowSeconds('node-0')}`],fishing:[0,0,0]});
+      const caught=life.catchFish(playable(connection.session).data.rpg_collection,1,1001,4821);
+      if(!caught)throw Error('낚시 fixture 실패');
+      expect(state.writer.commit('rpg_collection',caught.state)).toBe(true);await saved(connection);
+      expect(h.network.slice(start)).toEqual(['PUT /states/rpg_collection','PUT /states/rpg_collection']);
+      expect(state.writer.commit('rpg_collection',{...caught.state,species:[]})).toBe(false);
+      expect(state.writer.commit('rpg_collection',{...caught.state,nodes:[]})).toBe(false);
+      await connection.session.load();
+      expect(playable(connection.session).data.rpg_collection).toEqual(caught.state);
+      process.stdout.write('채집/낚시 실제 HTTP PUT: '+JSON.stringify(h.network.slice(start))+' DTO: '+JSON.stringify(caught.state)+'\n');
+    }finally{connection.destroy();await close(h.server);}
+  });
   it('물건 이동→ACK→재진입이 실제 HTTP 저장과 일치하고 PUT 503을 복구한다', async () => {
     const h = await httpStore(false); let connection = connect(h.store);
     try {

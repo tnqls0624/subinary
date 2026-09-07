@@ -1,0 +1,74 @@
+[
+  {
+    "path": "apps/web/public/miniapps/backyard/index.html",
+    "bytes": 2479,
+    "sha256": "61f4ae0ae705f066dcde494d6985098b47515e404dd11c2b5c13767cc33133e7",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-style.css",
+    "bytes": 3012,
+    "sha256": "11a639e9efb1f3a18ae9c68f2e1f1ca88171b0528a1ed8c06a6e73896a68ff5a",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/bridge.js",
+    "bytes": 7846,
+    "sha256": "eddf1fd206ef77782402be24f7942cdd88f2ce15cc796a1c2998cef91122c2b3",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/vendor/phaser.min.js",
+    "bytes": 1375976,
+    "sha256": "66348b1b5141e49b7d5ebbe688cddcb502eab1cb00f21c538686a5b2c5abe4de",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/balance.js",
+    "bytes": 671,
+    "sha256": "e22a31acf4bb58320a0605d1b253f27f5904cff75f50166bde94d0e39e9b129c",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rules.js",
+    "bytes": 8695,
+    "sha256": "942c11fa926286b3103f58bf47abd819e77f4ae96a86614723651cb13e78f86a",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/codec.js",
+    "bytes": 7219,
+    "sha256": "22b2ae06943c5a1e9efe7696e3a2ba5c6ccf1fec889338b3d03bcefd3d3cd272",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-codec.js",
+    "bytes": 7446,
+    "sha256": "574b0c4cc5e84b9472f7d7d3b8cffc8683ac6d3afaf873e4216d9f8814eba4a6",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-session.js",
+    "bytes": 12197,
+    "sha256": "b880a5d2a80dcd02482aea592a0538fc4db204e1558bf833eaf156eadccbb730",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-rules.js",
+    "bytes": 23801,
+    "sha256": "15972ca582fbc21a3168ea21c05ccaae13c34eda7794289bc5b85de26c5118aa",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-input.js",
+    "bytes": 3173,
+    "sha256": "ffb57a3c6fc749e18c8d21603554a3571460adebaf67eb480da76b34f5e9a855",
+    "equal": true
+  },
+  {
+    "path": "apps/web/public/miniapps/backyard/rpg-engine.js",
+    "bytes": 34659,
+    "sha256": "6b4a99e4f17890b77c40761b2f7ff8221174cab0f464ad197276f7c1355c410e",
+    "equal": true
+  }
+]
