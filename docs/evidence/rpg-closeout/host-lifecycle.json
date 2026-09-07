@@ -1,0 +1,1704 @@
+{
+  "browser": "149.0.7827.55",
+  "widths": [],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/unread-count"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_world"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_collection"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_residents"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_player"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/play/backyard/rpg_meta"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/realtime/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events/declines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/transactions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/card-sms-events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/play/backyard"
+    }
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "checks": [],
+  "cycles": [
+    {
+      "cycle": 1,
+      "active": {
+        "documentId": "3b52f6b1-e49d-4f7c-adc7-1ec57661ca92",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "3b52f6b1-e49d-4f7c-adc7-1ec57661ca92",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 2,
+      "active": {
+        "documentId": "b89b46a2-64c9-4e5a-b939-f80e82b9a358",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "b89b46a2-64c9-4e5a-b939-f80e82b9a358",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 3,
+      "active": {
+        "documentId": "939adff6-0858-4dbb-9097-dc81b8901338",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "939adff6-0858-4dbb-9097-dc81b8901338",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 4,
+      "active": {
+        "documentId": "90ef5c69-0863-4a02-b838-c529715918f1",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "90ef5c69-0863-4a02-b838-c529715918f1",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 5,
+      "active": {
+        "documentId": "8505f8cf-49ed-4339-8930-02b305ed497b",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "8505f8cf-49ed-4339-8930-02b305ed497b",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 6,
+      "active": {
+        "documentId": "1f08b3cd-5f31-4ede-9e6b-b1462c10d0d5",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "1f08b3cd-5f31-4ede-9e6b-b1462c10d0d5",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 7,
+      "active": {
+        "documentId": "7e991200-a183-4f02-91bb-c4db66d72476",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "7e991200-a183-4f02-91bb-c4db66d72476",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 8,
+      "active": {
+        "documentId": "649f601b-a28c-435b-a315-36ee56751fb6",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "649f601b-a28c-435b-a315-36ee56751fb6",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 9,
+      "active": {
+        "documentId": "1dc8c52e-3fa4-494d-87fb-da0d2626f79d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "1dc8c52e-3fa4-494d-87fb-da0d2626f79d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 10,
+      "active": {
+        "documentId": "82b24e8f-490d-4784-a5f6-94b81b794862",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "82b24e8f-490d-4784-a5f6-94b81b794862",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 11,
+      "active": {
+        "documentId": "d508818d-4a65-4d20-ba80-3c4f0f06394c",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "d508818d-4a65-4d20-ba80-3c4f0f06394c",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 12,
+      "active": {
+        "documentId": "ab1fb6d1-147a-460a-b39f-1cd51a0ca59d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "ab1fb6d1-147a-460a-b39f-1cd51a0ca59d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 13,
+      "active": {
+        "documentId": "dff5590f-2aaa-4d9e-935c-09b7e3973111",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "dff5590f-2aaa-4d9e-935c-09b7e3973111",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 14,
+      "active": {
+        "documentId": "7753c4bd-3678-4a1b-8e05-e51263d311f0",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "7753c4bd-3678-4a1b-8e05-e51263d311f0",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 15,
+      "active": {
+        "documentId": "30054a36-253e-480a-8e10-d214227c6334",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "30054a36-253e-480a-8e10-d214227c6334",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 16,
+      "active": {
+        "documentId": "2707fe1d-7b90-4ef7-ae1e-867ad9d2296d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "2707fe1d-7b90-4ef7-ae1e-867ad9d2296d",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 17,
+      "active": {
+        "documentId": "589c1618-5949-4887-9cd7-a8b7cdb7cec2",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "589c1618-5949-4887-9cd7-a8b7cdb7cec2",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 18,
+      "active": {
+        "documentId": "d8922890-8172-4665-8c2e-3cf5a5e08ffb",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "d8922890-8172-4665-8c2e-3cf5a5e08ffb",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 19,
+      "active": {
+        "documentId": "5d42930b-5593-4779-a828-e1e9466b67ff",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "5d42930b-5593-4779-a828-e1e9466b67ff",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    },
+    {
+      "cycle": 20,
+      "active": {
+        "documentId": "9a9add57-be5d-4e86-95b7-982b80b97f1a",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 67,
+          "pointerListeners": 6,
+          "raf": 1,
+          "timers": 0,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "pending": {
+        "documentId": "9a9add57-be5d-4e86-95b7-982b80b97f1a",
+        "counts": {
+          "games": 1,
+          "scenes": 3,
+          "listeners": 80,
+          "pointerListeners": 8,
+          "raf": 1,
+          "timers": 1,
+          "intervals": 0,
+          "observers": 1,
+          "canvas": 1
+        },
+        "totals": {
+          "createdGames": 1,
+          "destroyedGames": 0,
+          "createdScenes": 3,
+          "destroyedScenes": 0
+        }
+      },
+      "hostListeners": 0,
+      "detached": true,
+      "remainingGameFrames": 0
+    }
+  ],
+  "viewport": {
+    "active": {
+      "documentId": "3b52f6b1-e49d-4f7c-adc7-1ec57661ca92",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "paused": {
+      "documentId": "3b52f6b1-e49d-4f7c-adc7-1ec57661ca92",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "resumed": {
+      "documentId": "3b52f6b1-e49d-4f7c-adc7-1ec57661ca92",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    }
+  },
+  "realExit": {
+    "hostMessageListenersBaseline": 0,
+    "hostMessageListenersFinal": 0,
+    "entries": 20,
+    "detachedDocuments": 20,
+    "remainingGameFrames": 0,
+    "liveDocumentResources": {
+      "games": 0,
+      "scenes": 0,
+      "listeners": 0,
+      "pointerListeners": 0,
+      "raf": 0,
+      "timers": 0,
+      "observers": 0
+    }
+  },
+  "loadRetry": {
+    "failed": {
+      "documentId": "6048c812-1d09-4c48-8e48-3bc02ee5d6ee",
+      "counts": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 30,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "totals": {
+        "createdGames": 0,
+        "destroyedGames": 0,
+        "createdScenes": 0,
+        "destroyedScenes": 0
+      }
+    },
+    "retried": {
+      "documentId": "4c9fe8a1-77b4-4497-8ef4-9d03591b3ffc",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "newDocument": true
+  },
+  "appKeyChange": {
+    "before": {
+      "documentId": "4c9fe8a1-77b4-4497-8ef4-9d03591b3ffc",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "after": {
+      "documentId": "2676e8c8-39ad-44e0-b17d-7e8314d1295d",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "newDocument": true
+  },
+  "householdChange": {
+    "before": {
+      "documentId": "2676e8c8-39ad-44e0-b17d-7e8314d1295d",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "after": {
+      "documentId": "5e309b88-ae2b-48c3-92a1-3a4e0a5994e6",
+      "counts": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 67,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "totals": {
+        "createdGames": 1,
+        "destroyedGames": 0,
+        "createdScenes": 3,
+        "destroyedScenes": 0
+      }
+    },
+    "newDocument": true
+  },
+  "normalErrors": []
+}

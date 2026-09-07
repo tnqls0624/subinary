@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Users/soobeen/Desktop/Project/subinary/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  08:08:23
+   Duration  18.16s (transform 16ms, setup 0ms, import 21ms, tests 18.07s, environment 0ms)
+

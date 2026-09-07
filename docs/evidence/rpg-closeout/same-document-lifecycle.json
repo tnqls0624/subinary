@@ -1,0 +1,857 @@
+{
+  "browser": "149.0.7827.55",
+  "cycles": [
+    {
+      "cycle": 1,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 87,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 2,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 2,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 89,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 4,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 3,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 91,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 6,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 4,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 93,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 8,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 5,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 95,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 10,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 6,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 97,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 12,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 7,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 99,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 14,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 8,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 101,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 16,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 9,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 103,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 18,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 10,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 105,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 20,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 11,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 107,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 22,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 12,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 109,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 24,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 13,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 111,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 26,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 14,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 113,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 28,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 15,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 115,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 30,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 16,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 117,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 32,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 17,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 119,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 34,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 18,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 121,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 36,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 19,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 123,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 38,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    },
+    {
+      "cycle": 20,
+      "active": {
+        "games": 1,
+        "scenes": 3,
+        "listeners": 125,
+        "pointerListeners": 6,
+        "raf": 1,
+        "timers": 1,
+        "intervals": 0,
+        "observers": 1,
+        "canvas": 1
+      },
+      "destroyed": {
+        "games": 0,
+        "scenes": 0,
+        "listeners": 40,
+        "pointerListeners": 0,
+        "raf": 0,
+        "timers": 0,
+        "intervals": 0,
+        "observers": 0,
+        "canvas": 0
+      },
+      "engineDestroyed": {
+        "loopRunning": false,
+        "sceneCount": 0,
+        "canvasConnected": false,
+        "textureCount": 0
+      },
+      "captureBefore": true,
+      "captureAfter": false
+    }
+  ],
+  "errors": [],
+  "network": [],
+  "baseline": {
+    "games": 0,
+    "scenes": 0,
+    "listeners": 0,
+    "pointerListeners": 0,
+    "raf": 0,
+    "timers": 0,
+    "intervals": 0,
+    "observers": 0,
+    "canvas": 0
+  },
+  "remainingListeners": [
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    },
+    {
+      "type": "wheel",
+      "target": "HTMLCanvasElement"
+    },
+    {
+      "type": "visibilitychange",
+      "target": "HTMLDocument"
+    }
+  ],
+  "totals": {
+    "createdGames": 20,
+    "destroyedGames": 20,
+    "createdScenes": 60,
+    "destroyedScenes": 60
+  },
+  "final": {
+    "games": 0,
+    "scenes": 0,
+    "listeners": 40,
+    "pointerListeners": 0,
+    "raf": 0,
+    "timers": 0,
+    "intervals": 0,
+    "observers": 0,
+    "canvas": 0
+  }
+}
