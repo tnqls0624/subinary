@@ -1,0 +1,111 @@
+[play-state] 일회성 검증 DB 생성·확장 초기화: family_memory_verify_20260907140612_ff3c1b5a
+CREATE DATABASE
+You are now connected to database "family_memory_verify_20260907140612_ff3c1b5a" as user "family".
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE EXTENSION
+SET
+[play-state] 일회성 검증 DB migration 실행
+ Container family-memory-ai-migrate-run-10febc71b8a6 Creating 
+ Container family-memory-ai-migrate-run-10febc71b8a6 Created 
+! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-9.15.4.tgz
+
+> @family/database@0.0.0 migrate /app/packages/database
+> node dist/migrate.js
+
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "merchant_category_rules_prediction_trace_id_ai_invocations_id_fk" will be truncated to "merchant_category_rules_prediction_trace_id_ai_invocations_id_f"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "dataset_snapshot_items_dataset_snapshot_id_dataset_snapshots_id_fk" will be truncated to "dataset_snapshot_items_dataset_snapshot_id_dataset_snapshots_id"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "graph_entity_mentions_source_chunk_revision_id_chunk_revisions_id_fk" will be truncated to "graph_entity_mentions_source_chunk_revision_id_chunk_revisions_"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "memory_candidates_source_chunk_revision_id_chunk_revisions_id_fk" will be truncated to "memory_candidates_source_chunk_revision_id_chunk_revisions_id_f"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "model_alias_revisions_previous_model_registry_id_model_registry_id_fk" will be truncated to "model_alias_revisions_previous_model_registry_id_model_registry"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "model_registry_approvals_evaluation_run_id_evaluation_runs_id_fk" will be truncated to "model_registry_approvals_evaluation_run_id_evaluation_runs_id_f"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "dataset_snapshot_items_merchant_category_rule_id_merchant_category_rules_id_fk" will be truncated to "dataset_snapshot_items_merchant_category_rule_id_merchant_categ"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "model_traffic_policies_candidate_model_registry_id_model_registry_id_fk" will be truncated to "model_traffic_policies_candidate_model_registry_id_model_regist"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42622',
+  message: 'identifier "recurring_series_evidence_transaction_id_card_transactions_id_fk" will be truncated to "recurring_series_evidence_transaction_id_card_transactions_id_f"',
+  file: 'scansup.c',
+  line: '99',
+  routine: 'truncate_identifier'
+}
+[@family/database] migrate: migrations applied successfully
+[play-state] v1·RPG 5키·이전·두 클라이언트 역전 통합 검증 실행
+ Container family-memory-ai-api-run-c211553d5916 Creating 
+ Container family-memory-ai-api-run-c211553d5916 Created 
+RPG_RESULT {"databaseName":"family_memory_verify_20260907140612_ff3c1b5a","sizes":{"rpg_meta":{"raw":76,"pgColumnSize":109},"rpg_world":{"raw":662,"pgColumnSize":742},"rpg_collection":{"raw":2150,"pgColumnSize":532},"rpg_residents":{"raw":101,"pgColumnSize":131},"rpg_player":{"raw":84,"pgColumnSize":160}},"fiveKeyHttpPutGet":true,"failedKeyStatus":413,"allOtherKeysPreserved":true,"migration":{"writes":["rpg_world","rpg_collection","rpg_residents","rpg_player","rpg_meta"],"gardenUnchanged":true,"world":{"v":2,"items":["0:p:3:15","1:w:6:18","2:c:3:16"],"legacyFruit":123},"collection":{"v":2,"nodes":["pot-0:9999"],"fishing":[0,0,0],"species":[]}},"conflicts":[{"key":"rpg_collection","order":["B ACK","A late ACK"],"acknowledgedB":{"v":2,"nodes":["pot-0:9999","node-8:10060"],"fishing":[0,0,0],"species":["s4:1:10000:node-8"]},"final":{"v":2,"nodes":["pot-0:9999","node-0:20800"],"fishing":[0,0,0],"species":["s0:1:10000:node-0"]},"lost":{"discoveries":["s4"],"count":1,"firstSeenAt":10000,"nodeReadyAt":["node-8:10060"]},"differentKeyPreserved":"rpg_world"},{"key":"rpg_world","order":["B ACK","A late ACK"],"lost":{"placement":"0:p:8:20"},"final":{"v":2,"items":["0:p:3:15","1:w:6:18","2:c:7:20"],"legacyFruit":123}}],"policy":"기존 마지막 쓰기 우선 유지; 같은 키 무손실 동시 편집은 해결하지 않음","authentication":"일회용 사용자 주입; 실제 컨트롤러·파이프·서비스·PostgreSQL"}
+{"databaseName":"family_memory_verify_20260907140612_ff3c1b5a","rawBytes":469,"pgColumnSize":548,"serviceRoundTrip":true,"httpPutGet":true,"authentication":"일회용 사용자 주입"}
+raw 8192는 서비스 크기 검사를 통과하지만 DB jsonb CHECK에서 거절됨
+PlayService raw 8193의 413 거절 통과
+[play-state] 일회성 검증 DB 폐기: family_memory_verify_20260907140612_ff3c1b5a
+ pg_terminate_backend 
+----------------------
+(0 rows)
+
+DROP DATABASE
+[play-state] 검증 완료 · 일회성 DB 폐기 완료

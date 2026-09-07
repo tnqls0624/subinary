@@ -97,9 +97,9 @@ describe('채집 8종·60초·99개',()=>{
     // node-0은 열매라 재생성이 3시간(10800초)이다.
     const first=required(life.gather(codec.initial().rpg_collection,'node-0',1000));
     for(const time of [0,999,1000,1000+10799])expect(life.gather(first,'node-0',time)).toBeNull();
-    const next=required(life.gather(first,'node-0',1000+10800));expect(next.species[0]).toBe('s0:2:1000');
-    const later=required(life.gather(next,'node-0',1000+10800+30*86400));expect(later.species[0]).toBe('s0:3:1000');
-    expect(first.species[0]).toBe('s0:1:1000');
+    const next=required(life.gather(first,'node-0',1000+10800));expect(next.species[0]).toBe('s0:2:1000:node-0');
+    const later=required(life.gather(next,'node-0',1000+10800+30*86400));expect(later.species[0]).toBe('s0:3:1000:node-0');
+    expect(first.species[0]).toBe('s0:1:1000:node-0');
     expect(life.gather(first,'missing',1000)).toBeNull();expect(life.gather(first,'node-0',NaN)).toBeNull();
     // 버섯·솔방울·벌레는 한 산책 안에서 다시 나타난다.
     const pick=life.nodes.find(n=>n.species>=2)!;

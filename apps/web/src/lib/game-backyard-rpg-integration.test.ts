@@ -95,7 +95,7 @@ describe('실제 HTTP·브릿지·부모 큐·세션 통합', () => {
       expect(h.network.slice(start)).toEqual(['PUT /states/rpg_collection']);
       // node-0은 열매라 재생성이 3시간(1000+10800)이다. 버섯·솔방울·벌레는 60초다 —
       // 그 구분은 game-backyard-rpg-life.test.ts에서 고정한다.
-      expect(h.getSaved().rpg_collection).toEqual({v:2,species:['s0:1:1000'],nodes:[`node-0:${1000+life.regrowSeconds('node-0')}`],fishing:[0,0,0]});
+      expect(h.getSaved().rpg_collection).toEqual({v:2,species:['s0:1:1000:node-0'],nodes:[`node-0:${1000+life.regrowSeconds('node-0')}`],fishing:[0,0,0]});
       const caught=life.catchFish(playable(connection.session).data.rpg_collection,1,1001,4821);
       if(!caught)throw Error('낚시 fixture 실패');
       expect(state.writer.commit('rpg_collection',caught.state)).toBe(true);await saved(connection);

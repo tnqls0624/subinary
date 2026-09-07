@@ -2,7 +2,7 @@
 /** @typedef {'rpg_meta'|'rpg_world'|'rpg_collection'|'rpg_residents'|'rpg_player'} RpgKey */
 /** @typedef {{v:2,mapVersion:1,seed:number,initialized:true,migrated:boolean}} RpgMeta */
 /** @typedef {{v:2,items:string[],legacyFruit:number}} RpgWorld */
-/** @typedef {{v:2,species:string[],nodes:string[],fishing:number[]}} RpgCollection */
+/** @typedef {{v:2,species:string[],nodes:string[],fishing:number[],completed?:true}} RpgCollection */
 /** @typedef {{v:2,items:string[]}} RpgResidents */
 /** @typedef {{v:2,mapVersion:1,x:number,y:number,direction:number,outfit:number,t:number}} RpgPlayer */
 /** @typedef {{rpg_meta:RpgMeta,rpg_world:RpgWorld,rpg_collection:RpgCollection,rpg_residents:RpgResidents,rpg_player:RpgPlayer}} RpgData */
@@ -35,7 +35,7 @@ var BackyardRpgCodec = (() => {
     if(raw===null)return {status:'missing'};
     if(!record(raw)||!Object.hasOwn(raw,'v'))return {status:'invalid_state',message:'저장 객체나 버전이 없어요'};
     if(raw.v!==2)return {status:'unsupported_version',version:raw.v};
-    const fields={rpg_meta:['v','mapVersion','seed','initialized','migrated'],rpg_world:['v','items','legacyFruit'],rpg_collection:['v','species','nodes','fishing'],rpg_residents:['v','items'],rpg_player:['v','mapVersion','x','y','direction','outfit','t']};
+    const fields={rpg_meta:['v','mapVersion','seed','initialized','migrated'],rpg_world:['v','items','legacyFruit'],rpg_collection:['v','species','nodes','fishing','completed'],rpg_residents:['v','items'],rpg_player:['v','mapVersion','x','y','direction','outfit','t']};
     if(Object.keys(raw).some(field=>!fields[key].includes(field)))return {status:'invalid_state',message:'알 수 없는 저장 필드가 있어요'};
     let valid=false;
     const occupied=new Set();
@@ -50,9 +50,9 @@ var BackyardRpgCodec = (() => {
           const cell=p[2]+','+p[3];if(occupied.has(cell))return false;occupied.add(cell);return true;
         });break;
       case 'rpg_collection':
-        valid=tuples(raw.species,16,p=>p.length===3&&/^s([0-9]|1[0-5])$/.test(p[0])&&token(p[1],99)&&token(p[2]))&&
+        valid=tuples(raw.species,16,p=>(p.length===3||p.length===4&&/^(node-([0-9]|1[01])|pot-([0-9]|[1-3][0-9]|4[0-7])|fish-[0-2])$/.test(p[3]))&&/^s([0-9]|1[0-5])$/.test(p[0])&&token(p[1],99)&&token(p[2]))&&
           tuples(raw.nodes,60,p=>p.length===2&&(/^(node-([0-9]|1[01])|pot-([0-9]|[1-3][0-9]|4[0-7]))$/.test(p[0]))&&token(p[1]))&&
-          Array.isArray(raw.fishing)&&raw.fishing.length===3&&raw.fishing.every(n=>integer(n,7));break;
+          Array.isArray(raw.fishing)&&raw.fishing.length===3&&raw.fishing.every(n=>integer(n,7))&&(raw.completed===undefined||raw.completed===true&&raw.species.length===16);break;
       case 'rpg_residents':
         valid=tuples(raw.items,3,p=>p.length===5&&/^r[0-2]$/.test(p[0])&&token(p[1],4095)&&token(p[2],23)&&token(p[3],4294967295)&&(p[4]==='b'||/^s([0-9]|1[0-5])$/.test(p[4])));break;
       case 'rpg_player':

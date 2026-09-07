@@ -1,0 +1,226 @@
+• turbo 2.10.5
+
+   • Packages in scope: @family/ai-providers, @family/card-parsers, @family/config, @family/contracts, @family/database, @family/rag, @family/shared, @family/slack-parser, @family/transaction-domain
+   • Running build in 9 packages
+   • Remote caching disabled
+
+@family/ai-providers:build: cache bypass, force executing 8ef6705826aa9435
+@family/card-parsers:build: cache bypass, force executing bd6cacee7f6b7526
+@family/card-parsers:build: 
+@family/card-parsers:build: > @family/card-parsers@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/card-parsers
+@family/card-parsers:build: > tsup
+@family/card-parsers:build: 
+@family/ai-providers:build: 
+@family/ai-providers:build: > @family/ai-providers@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/ai-providers
+@family/ai-providers:build: > tsup
+@family/ai-providers:build: 
+@family/ai-providers:build: CLI Building entry: src/index.ts
+@family/card-parsers:build: CLI Building entry: src/index.ts
+@family/ai-providers:build: CLI Using tsconfig: tsconfig.json
+@family/ai-providers:build: CLI tsup v8.5.1
+@family/ai-providers:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/ai-providers/tsup.config.ts
+@family/card-parsers:build: CLI Using tsconfig: tsconfig.json
+@family/card-parsers:build: CLI tsup v8.5.1
+@family/card-parsers:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/card-parsers/tsup.config.ts
+@family/ai-providers:build: CLI Target: es2022
+@family/card-parsers:build: CLI Target: es2022
+@family/ai-providers:build: CLI Cleaning output folder
+@family/card-parsers:build: CLI Cleaning output folder
+@family/ai-providers:build: ESM Build start
+@family/ai-providers:build: CJS Build start
+@family/card-parsers:build: ESM Build start
+@family/card-parsers:build: CJS Build start
+@family/ai-providers:build: CJS dist/index.js     23.93 KB
+@family/ai-providers:build: CJS dist/index.js.map 49.11 KB
+@family/ai-providers:build: CJS ⚡️ Build success in 80ms
+@family/ai-providers:build: ESM dist/index.mjs     22.33 KB
+@family/ai-providers:build: ESM dist/index.mjs.map 48.65 KB
+@family/ai-providers:build: ESM ⚡️ Build success in 80ms
+@family/card-parsers:build: CJS dist/index.js     42.45 KB
+@family/card-parsers:build: CJS dist/index.js.map 106.48 KB
+@family/card-parsers:build: CJS ⚡️ Build success in 84ms
+@family/card-parsers:build: ESM dist/index.mjs     40.18 KB
+@family/card-parsers:build: ESM dist/index.mjs.map 104.52 KB
+@family/card-parsers:build: ESM ⚡️ Build success in 84ms
+@family/ai-providers:build: DTS Build start
+@family/card-parsers:build: DTS Build start
+@family/ai-providers:build: DTS ⚡️ Build success in 764ms
+@family/ai-providers:build: DTS dist/index.d.mts 12.89 KB
+@family/ai-providers:build: DTS dist/index.d.ts  12.89 KB
+@family/database:build: cache bypass, force executing f5ed2ae379e0d2b7
+@family/card-parsers:build: DTS ⚡️ Build success in 918ms
+@family/card-parsers:build: DTS dist/index.d.mts 17.36 KB
+@family/card-parsers:build: DTS dist/index.d.ts  17.36 KB
+@family/config:build: cache bypass, force executing 0b53672d5f4ad9f5
+@family/database:build: 
+@family/database:build: > @family/database@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/database
+@family/database:build: > tsup
+@family/database:build: 
+@family/config:build: 
+@family/config:build: > @family/config@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/config
+@family/config:build: > tsup
+@family/config:build: 
+@family/database:build: CLI Building entry: src/index.ts, src/migrate.ts
+@family/database:build: CLI Using tsconfig: tsconfig.json
+@family/database:build: CLI tsup v8.5.1
+@family/database:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/database/tsup.config.ts
+@family/database:build: CLI Target: es2022
+@family/database:build: CLI Cleaning output folder
+@family/database:build: ESM Build start
+@family/database:build: CJS Build start
+@family/config:build: CLI Building entry: src/index.ts
+@family/config:build: CLI Using tsconfig: tsconfig.json
+@family/config:build: CLI tsup v8.5.1
+@family/config:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/config/tsup.config.ts
+@family/config:build: CLI Target: es2022
+@family/config:build: CLI Cleaning output folder
+@family/config:build: ESM Build start
+@family/config:build: CJS Build start
+@family/config:build: ESM dist/index.mjs     11.36 KB
+@family/config:build: ESM dist/index.mjs.map 22.38 KB
+@family/config:build: ESM ⚡️ Build success in 26ms
+@family/config:build: CJS dist/index.js     13.06 KB
+@family/config:build: CJS dist/index.js.map 22.53 KB
+@family/config:build: CJS ⚡️ Build success in 26ms
+@family/database:build: ESM dist/migrate.mjs            1.21 KB
+@family/database:build: ESM dist/index.mjs              34.88 KB
+@family/database:build: ESM dist/chunk-R4KA7A6L.mjs     111.02 KB
+@family/database:build: ESM dist/index.mjs.map          82.13 KB
+@family/database:build: ESM dist/migrate.mjs.map        3.05 KB
+@family/database:build: ESM dist/chunk-R4KA7A6L.mjs.map 247.07 KB
+@family/database:build: ESM ⚡️ Build success in 66ms
+@family/database:build: CJS dist/index.js       177.44 KB
+@family/database:build: CJS dist/migrate.js     136.10 KB
+@family/database:build: CJS dist/index.js.map   330.51 KB
+@family/database:build: CJS dist/migrate.js.map 250.86 KB
+@family/database:build: CJS ⚡️ Build success in 69ms
+@family/database:build: DTS Build start
+@family/config:build: DTS Build start
+@family/config:build: DTS ⚡️ Build success in 540ms
+@family/config:build: DTS dist/index.d.mts 5.50 KB
+@family/config:build: DTS dist/index.d.ts  5.50 KB
+@family/contracts:build: cache bypass, force executing d09ff3592899bab3
+@family/contracts:build: 
+@family/contracts:build: > @family/contracts@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/contracts
+@family/contracts:build: > tsup
+@family/contracts:build: 
+@family/contracts:build: CLI Building entry: src/index.ts
+@family/contracts:build: CLI Using tsconfig: tsconfig.json
+@family/contracts:build: CLI tsup v8.5.1
+@family/contracts:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/contracts/tsup.config.ts
+@family/contracts:build: CLI Target: es2022
+@family/contracts:build: CLI Cleaning output folder
+@family/contracts:build: ESM Build start
+@family/contracts:build: CJS Build start
+@family/contracts:build: CJS dist/index.js     109.82 KB
+@family/contracts:build: CJS dist/index.js.map 220.54 KB
+@family/contracts:build: CJS ⚡️ Build success in 43ms
+@family/contracts:build: ESM dist/index.mjs     79.85 KB
+@family/contracts:build: ESM dist/index.mjs.map 204.30 KB
+@family/contracts:build: ESM ⚡️ Build success in 44ms
+@family/contracts:build: DTS Build start
+@family/contracts:build: DTS ⚡️ Build success in 948ms
+@family/contracts:build: DTS dist/index.d.mts 171.21 KB
+@family/contracts:build: DTS dist/index.d.ts  171.21 KB
+@family/shared:build: cache bypass, force executing 5874c9045b666c38
+@family/shared:build: 
+@family/shared:build: > @family/shared@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/shared
+@family/shared:build: > tsup
+@family/shared:build: 
+@family/shared:build: CLI Building entry: src/index.ts
+@family/shared:build: CLI Using tsconfig: tsconfig.json
+@family/shared:build: CLI tsup v8.5.1
+@family/shared:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/shared/tsup.config.ts
+@family/shared:build: CLI Target: es2022
+@family/shared:build: CLI Cleaning output folder
+@family/shared:build: ESM Build start
+@family/shared:build: CJS Build start
+@family/shared:build: ESM dist/index.mjs     69.44 KB
+@family/shared:build: ESM dist/index.mjs.map 161.46 KB
+@family/shared:build: ESM ⚡️ Build success in 39ms
+@family/shared:build: CJS dist/index.js     75.31 KB
+@family/shared:build: CJS dist/index.js.map 167.07 KB
+@family/shared:build: CJS ⚡️ Build success in 39ms
+@family/shared:build: DTS Build start
+@family/shared:build: DTS ⚡️ Build success in 624ms
+@family/shared:build: DTS dist/index.d.mts 52.46 KB
+@family/shared:build: DTS dist/index.d.ts  52.46 KB
+@family/rag:build: cache bypass, force executing 079048b0284d0000
+@family/database:build: DTS ⚡️ Build success in 3363ms
+@family/database:build: DTS dist/migrate.d.mts 13.00 B
+@family/database:build: DTS dist/index.d.mts   590.65 KB
+@family/database:build: DTS dist/migrate.d.ts  13.00 B
+@family/database:build: DTS dist/index.d.ts    590.65 KB
+@family/slack-parser:build: cache bypass, force executing 621d526a97946266
+@family/rag:build: 
+@family/rag:build: > @family/rag@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/rag
+@family/rag:build: > tsup
+@family/rag:build: 
+@family/slack-parser:build: 
+@family/slack-parser:build: > @family/slack-parser@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/slack-parser
+@family/slack-parser:build: > tsup
+@family/slack-parser:build: 
+@family/rag:build: CLI Building entry: src/index.ts
+@family/rag:build: CLI Using tsconfig: tsconfig.json
+@family/rag:build: CLI tsup v8.5.1
+@family/rag:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/rag/tsup.config.ts
+@family/rag:build: CLI Target: es2022
+@family/rag:build: CLI Cleaning output folder
+@family/rag:build: ESM Build start
+@family/rag:build: CJS Build start
+@family/rag:build: ESM dist/index.mjs     33.63 KB
+@family/rag:build: ESM dist/index.mjs.map 85.92 KB
+@family/rag:build: ESM ⚡️ Build success in 20ms
+@family/rag:build: CJS dist/index.js     36.04 KB
+@family/rag:build: CJS dist/index.js.map 88.03 KB
+@family/rag:build: CJS ⚡️ Build success in 21ms
+@family/slack-parser:build: CLI Building entry: src/index.ts
+@family/slack-parser:build: CLI Using tsconfig: tsconfig.json
+@family/slack-parser:build: CLI tsup v8.5.1
+@family/slack-parser:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/slack-parser/tsup.config.ts
+@family/slack-parser:build: CLI Target: es2022
+@family/slack-parser:build: CLI Cleaning output folder
+@family/slack-parser:build: ESM Build start
+@family/slack-parser:build: CJS Build start
+@family/slack-parser:build: CJS dist/index.js     26.00 KB
+@family/slack-parser:build: CJS dist/index.js.map 61.98 KB
+@family/slack-parser:build: CJS ⚡️ Build success in 17ms
+@family/slack-parser:build: ESM dist/index.mjs     24.55 KB
+@family/slack-parser:build: ESM dist/index.mjs.map 61.02 KB
+@family/slack-parser:build: ESM ⚡️ Build success in 17ms
+@family/rag:build: DTS Build start
+@family/slack-parser:build: DTS Build start
+@family/rag:build: DTS ⚡️ Build success in 461ms
+@family/rag:build: DTS dist/index.d.mts 24.65 KB
+@family/rag:build: DTS dist/index.d.ts  24.65 KB
+@family/transaction-domain:build: cache bypass, force executing 8de23fd2fd27a196
+@family/slack-parser:build: DTS ⚡️ Build success in 432ms
+@family/slack-parser:build: DTS dist/index.d.mts 14.73 KB
+@family/slack-parser:build: DTS dist/index.d.ts  14.73 KB
+@family/transaction-domain:build: 
+@family/transaction-domain:build: > @family/transaction-domain@0.0.0 build /Users/soobeen/Desktop/Project/subinary/packages/transaction-domain
+@family/transaction-domain:build: > tsup
+@family/transaction-domain:build: 
+@family/transaction-domain:build: CLI Building entry: src/index.ts
+@family/transaction-domain:build: CLI Using tsconfig: tsconfig.json
+@family/transaction-domain:build: CLI tsup v8.5.1
+@family/transaction-domain:build: CLI Using tsup config: /Users/soobeen/Desktop/Project/subinary/packages/transaction-domain/tsup.config.ts
+@family/transaction-domain:build: CLI Target: es2022
+@family/transaction-domain:build: CLI Cleaning output folder
+@family/transaction-domain:build: ESM Build start
+@family/transaction-domain:build: CJS Build start
+@family/transaction-domain:build: CJS dist/index.js     70.58 KB
+@family/transaction-domain:build: CJS dist/index.js.map 154.65 KB
+@family/transaction-domain:build: CJS ⚡️ Build success in 25ms
+@family/transaction-domain:build: ESM dist/index.mjs     64.64 KB
+@family/transaction-domain:build: ESM dist/index.mjs.map 152.16 KB
+@family/transaction-domain:build: ESM ⚡️ Build success in 25ms
+@family/transaction-domain:build: DTS Build start
+@family/transaction-domain:build: DTS ⚡️ Build success in 937ms
+@family/transaction-domain:build: DTS dist/index.d.mts 43.47 KB
+@family/transaction-domain:build: DTS dist/index.d.ts  43.47 KB
+
+ Tasks:    9 successful, 9 total
+Cached:    0 cached, 9 total
+  Time:    8.188s 
+

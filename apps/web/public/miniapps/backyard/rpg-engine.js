@@ -2,6 +2,7 @@
 /// <reference path="../../../types/phaser/phaser.d.ts" />
 /** Phaser 객체는 이 어댑터 안에서만 소유한다. 세션의 검증된 논리 상태만 사용한다. */
 (() => {
+  const listeners=new AbortController(),listenerOptions={signal:listeners.signal};
   const host = document.getElementById('world');
   const pad = document.getElementById('pad');
   const place = document.getElementById('place');
@@ -21,6 +22,7 @@
   /** @type {string|null} */ let movingId = null;
   let loaded=false;
   let actors=life.walkers();
+  let activeNodes=life.dailyNodes(0),visit=life.today(0,0,4821);
   /** @type {Phaser.GameObjects.Image[]} */ let actorImages=[];
   /** @type {{node:RpgNode,image:Phaser.GameObjects.Image}[]} */ let nodeImages=[];
   /** @type {RpgFishing} */ let fishing={phase:'idle'};
@@ -32,16 +34,70 @@
   const dialogueText=/** @type {HTMLElement} */(document.getElementById('dialogue-text'));
   const card=/** @type {HTMLElement} */(document.getElementById('catch-card'));
   const cancelFishing=/** @type {HTMLButtonElement} */(document.getElementById('cancel-fishing'));
+  const album=/** @type {HTMLElement} */(document.getElementById('album'));
+  const completion=/** @type {HTMLElement} */(document.getElementById('completion'));
+  const background=/** @type {HTMLElement} */(document.querySelector('main'));
+  let albumTab=0,completionPending=false,completionScheduled=false;
+  /** @type {HTMLElement|null} */ let returnFocus=null;
+  /** 배경의 실제 포커스를 차단하고 닫을 때 호출 버튼으로 돌린다. @param {HTMLElement} panel @param {boolean} open */
+  function togglePanel(panel,open){
+    if(open){returnFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;panel.hidden=false;background.inert=true;panel.querySelector('button')?.focus();}
+    else {panel.hidden=true;background.inert=false;(returnFocus?.isConnected?returnFocus:document.getElementById('open-album'))?.focus();}
+    syncPause();
+  }
+  /** 도감과 완료창의 모든 입력을 현재 패널 안에 유지한다. @param {HTMLElement} panel @param {()=>void} close */
+  function trap(panel,close){panel.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){event.preventDefault();close();return;}
+    if(event.key!=='Tab')return;
+    const buttons=Array.from(panel.querySelectorAll('button')).filter(b=>!b.hidden&&!b.disabled),index=buttons.indexOf(/** @type {HTMLButtonElement} */(document.activeElement));
+    event.preventDefault();buttons[(index+(event.shiftKey?-1:1)+buttons.length)%buttons.length]?.focus();
+  }, listenerOptions);}
+  /** 엔진을 참조하지 않는 HTML 도감에 기존 그림 레시피를 그린다. @param {number} index @param {number} size */
+  function specimen(index,size){const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;canvas.setAttribute('aria-hidden','true');const context=canvas.getContext('2d');if(context)drawSpecies(context,index,size);return canvas;}
+  /** 기록을 보는 카드만 만들며 획득 행동은 제공하지 않는다. */
+  function renderAlbum(){
+    const state=session.getState();if(state.status!=='playable')return;
+    const collection=state.data.rpg_collection,grid=/** @type {HTMLElement} */(document.getElementById('album-grid'));
+    const detail=/** @type {HTMLElement} */(document.getElementById('album-detail'));detail.hidden=true;grid.replaceChildren();grid.setAttribute('aria-labelledby','album-tab-'+albumTab);
+    const daily=document.getElementById('today');if(daily)daily.textContent=visit.description+' · 벌레와 주민도 다른 자리를 둘러봐요';
+    const count=document.getElementById('album-count');if(count)count.textContent='만난 생명 '+collection.species.filter(t=>Number(t.split(':')[1])>0).length+'/16';
+    document.querySelectorAll('[data-album-tab]').forEach(button=>button.setAttribute('aria-selected',String(/** @type {HTMLElement} */(button).dataset.albumTab===String(albumTab))));
+    for(const item of life.species.filter(s=>albumTab===0?s.index<4:albumTab===1?s.index>=4&&s.index<8:s.index>=8)){
+      const tuple=collection.species.find(t=>t.split(':')[0]===item.id),found=!!tuple&&Number(tuple.split(':')[1])>0;
+      const button=document.createElement('button');button.className='album-item';button.dataset.species=item.id;
+      const icon=specimen(item.index,64);if(!found)icon.className='silhouette';button.append(icon);
+      const name=document.createElement('strong');name.textContent=found?item.name:'아직 만나지 못했어요';button.append(name);
+      const hint=document.createElement('small');hint.textContent=found?'표본 '+tuple?.split(':')[1]+'개':life.hints[item.index].trim();button.append(hint);
+      button.addEventListener('click',()=>{
+        detail.hidden=false;detail.replaceChildren(specimen(item.index,96));
+        if(!found){detail.querySelector('canvas')?.classList.add('silhouette');const hint=document.createElement('p');hint.textContent='이곳에서 찾아봐요 · '+life.hints[item.index].trim();detail.append(hint);}
+        else {
+          const title=document.createElement('h3');title.textContent=item.name;detail.append(title);
+          const seconds=Number(tuple?.split(':')[2]),date=new Date(seconds*1000);
+          for(const text of ['처음 기록한 날짜 · '+(Number.isNaN(date.getTime())?'날짜 범위 밖의 이전 기록':date.toLocaleDateString('ko-KR',{timeZone:'UTC'})), '획득 장소 · '+life.recordPlace(tuple,item.index),life.notes[item.index]]){const line=document.createElement('p');line.textContent=text;detail.append(line);}
+        }
+        detail.scrollIntoView({block:'nearest'});
+      }, listenerOptions);grid.append(button);
+    }
+  }
+  document.getElementById('open-album')?.addEventListener('click',()=>{if(!loaded)return;renderAlbum();togglePanel(album,true);}, listenerOptions);
+  const closeAlbum=()=>{togglePanel(album,false);showCompletion();};
+  document.getElementById('close-album')?.addEventListener('click',closeAlbum, listenerOptions);trap(album,closeAlbum);
+  document.querySelectorAll('[data-album-tab]').forEach(button=>button.addEventListener('click',()=>{albumTab=Number(/** @type {HTMLElement} */(button).dataset.albumTab);renderAlbum();}, listenerOptions));
+  const closeCompletion=()=>togglePanel(completion,false);
+  document.getElementById('close-completion')?.addEventListener('click',closeCompletion, listenerOptions);trap(completion,closeCompletion);
+  /** 완료 기록 ACK 뒤 한 번 알린다. 재진입 시 완료된 저장을 다시 알리지 않는다. */
+  function showCompletion(){if(completionPending&&album.hidden&&currentWriter&&!currentWriter.getSaveState().locked){completionPending=false;card.hidden=true;cardName='';togglePanel(completion,true);}}
   /** 진행 시간과 걷기를 멈추는 공통 경계다. */
-  function suspended(){return paused||document.hidden||panelPaused||!loaded;}
+  function suspended(){return paused||document.hidden||panelPaused||!album.hidden||!completion.hidden||!loaded;}
   /** 벽시계를 초 단위로 읽고 역행은 채집점 readyAt 검사에서 차단한다. */
-  function now(){return Math.max(0,Math.floor(Date.now()/1000));}
+  function now(){const state=session.getState();return Math.max(0,Math.floor(Date.now()/1000),state.status==='playable'?state.data.rpg_player.t:0,visit.day*86400);}
   /** 실제 존재하는 근접 대상만 만든다. */
   function targets(){
     const state=session.getState();if(state.status!=='playable')return [];
     const collection=state.data.rpg_collection;
     return [...rules.sites.filter(t=>t.kind==='workbench'||t.kind==='fishing').map(t=>({...t,label:t.kind==='fishing'?'낚시하기':t.label})),
-      ...life.nodes.filter(n=>now()>=life.readyAt(collection,n.id)),
+      ...activeNodes.filter(n=>now()>=life.readyAt(collection,n.id)),
       ...actors.map(a=>({...a,kind:'resident',label:'말 걸기 · '+life.residents.find(r=>r.id===a.id)?.name})),
       ...rules.decorationTargets(decorations).map(t=>t.kind==='pot'?{...t,label:now()>=life.readyAt(collection,'pot-'+t.id)?'따기 · 노란 열매':'열매가 자라는 중'}:t)];
   }
@@ -72,19 +128,19 @@
     const title=document.getElementById('dialogue-title');if(title)title.textContent=life.residents.find(r=>r.id===actor.id)?.name+' · 함께한 경험 '+result.friendship+'/12';
     dialogue.hidden=false;input?.reset();syncPause();
   }
-  document.getElementById('talk-next')?.addEventListener('click',()=>converse('talk'));
-  document.getElementById('show-sample')?.addEventListener('click',()=>converse('sample'));
-  document.getElementById('sit-together')?.addEventListener('click',()=>converse('sit'));
-  document.getElementById('close-dialogue')?.addEventListener('click',()=>{dialogueId='';sittingTogether=false;dialogue.hidden=true;syncPause();action.focus();});
+  document.getElementById('talk-next')?.addEventListener('click',()=>converse('talk'), listenerOptions);
+  document.getElementById('show-sample')?.addEventListener('click',()=>converse('sample'), listenerOptions);
+  document.getElementById('sit-together')?.addEventListener('click',()=>converse('sit'), listenerOptions);
+  document.getElementById('close-dialogue')?.addEventListener('click',()=>{dialogueId='';sittingTogether=false;dialogue.hidden=true;syncPause();action.focus();}, listenerOptions);
   dialogue.addEventListener('keydown',event=>{
     if(event.key==='Escape'){document.getElementById('close-dialogue')?.click();return;}
     if(event.key!=='Tab')return;
     const buttons=Array.from(dialogue.querySelectorAll('button'));const index=buttons.indexOf(/** @type {HTMLButtonElement} */(document.activeElement));
     event.preventDefault();buttons[(index+(event.shiftKey?-1:1)+buttons.length)%buttons.length]?.focus();
-  });
-  document.getElementById('close-card')?.addEventListener('click',()=>{card.hidden=true;cardName='';action.focus();});
-  document.getElementById('retry-save')?.addEventListener('click',()=>currentWriter?.flush());
-  cancelFishing.addEventListener('click',()=>{fishing={phase:'idle'};gathering=null;cancelFishing.hidden=true;fishingArt?.setVisible(false);netArt?.setVisible(false);syncPause();feedback.textContent='산책을 계속해요';action.focus();});
+  }, listenerOptions);
+  document.getElementById('close-card')?.addEventListener('click',()=>{card.hidden=true;cardName='';action.focus();}, listenerOptions);
+  document.getElementById('retry-save')?.addEventListener('click',()=>currentWriter?.flush(), listenerOptions);
+  cancelFishing.addEventListener('click',()=>{fishing={phase:'idle'};gathering=null;cancelFishing.hidden=true;fishingArt?.setVisible(false);netArt?.setVisible(false);syncPause();feedback.textContent='산책을 계속해요';action.focus();}, listenerOptions);
 
   const saveLabel=/** @type {HTMLElement} */(document.getElementById('save'));
   /** 저장 ACK 전에는 의미 있는 편집을 잠근다. */
@@ -159,24 +215,24 @@
     feedback.textContent=current.kind==='chair'?'의자에 잠시 앉아 쉬어요':current.kind==='well'?'우물에 동그란 물결이 번져요':current.kind==='fishing'?'물 아래 작은 그림자가 지나가요':current.kind==='bug'?'잎 사이에서 작은 날개가 움직여요':'잎과 열매가 살랑여요';
     input?.reset();
   }
-  action.addEventListener('click',act);
-  document.getElementById('cancel')?.addEventListener('click',()=>{editing=false;movingId=null;editor.hidden=true;feedback.textContent='산책을 계속해요';pad?.focus({preventScroll:true});});
+  action.addEventListener('click',act, listenerOptions);
+  document.getElementById('cancel')?.addEventListener('click',()=>{editing=false;movingId=null;editor.hidden=true;feedback.textContent='산책을 계속해요';pad?.focus({preventScroll:true});}, listenerOptions);
   document.querySelectorAll('[data-kind]').forEach(button=>button.addEventListener('click',()=>{
     movingId=null;chosen=/** @type {HTMLElement} */(button).dataset.kind||'pot';
     document.querySelectorAll('[data-kind]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
-  }));
+  }, listenerOptions));
   document.getElementById('store')?.addEventListener('click',()=>{
     if(paused||!player||!writable())return;
     const current=rules.target(player,direction,rules.decorationTargets(decorations),decorations);
     if(!current){feedback.textContent='보관할 물건 가까이 다가가 바라봐 주세요';return;}
     if(saveWorld(owned.map(i=>i.id===current.id?{...i,stored:true}:i)))feedback.textContent='보관했어요 · 같은 종류를 고르면 다시 놓아요';
-  });
+  }, listenerOptions);
   document.getElementById('move')?.addEventListener('click',()=>{
     if(paused||!player||!writable())return;
     const current=rules.target(player,direction,rules.decorationTargets(decorations),decorations);
     if(!current){feedback.textContent='옮길 물건 가까이 다가가 바라봐 주세요';return;}
     movingId=current.id;chosen=current.kind;editing=true;editor.hidden=false;feedback.textContent='걸어서 새 자리를 골라 주세요';
-  });
+  }, listenerOptions);
   /** 부모 신원 확인 후 숨겨진 게임의 물리와 입력을 함께 멈춘다. */
   function syncPause() {
     input?.reset();
@@ -185,10 +241,10 @@
   window.addEventListener('message',event=>{
     if(event.source!==window.parent || event.data?.type!=='backyard.viewport' || typeof event.data.paused!=='boolean')return;
     paused=event.data.paused;syncPause();
-  });
-  document.addEventListener('backyard.panel',event=>{panelPaused=/** @type {CustomEvent<{open:boolean}>} */(event).detail?.open===true;syncPause();});
-  window.addEventListener('blur',()=>{panelPaused=true;syncPause();});
-  window.addEventListener('focus',()=>{panelPaused=false;syncPause();});
+  }, listenerOptions);
+  document.addEventListener('backyard.panel',event=>{panelPaused=/** @type {CustomEvent<{open:boolean}>} */(event).detail?.open===true;syncPause();}, listenerOptions);
+  window.addEventListener('blur',()=>{panelPaused=true;syncPause();}, listenerOptions);
+  window.addEventListener('focus',()=>{panelPaused=false;syncPause();}, listenerOptions);
   /** @type {Phaser.Game|null} */ let game = null;
   /** @type {Phaser.Physics.Arcade.Sprite|null} */ let player = null;
   /** @type {ReturnType<typeof BackyardRpgInput.create>|null} */ let input = null;
@@ -196,7 +252,7 @@
   /** @type {RpgVector} */ let intent = {x:0,y:0};
   /** 실패 시 루프와 입력을 해제하고 HTML 재시도를 제공한다. */
   function fail() { input?.destroy(); input=null; game?.destroy(true);game=null;errorPanel.hidden=false; }
-  document.getElementById('retry')?.addEventListener('click',()=>location.reload());
+  document.getElementById('retry')?.addEventListener('click',()=>location.reload(), listenerOptions);
   /** 생성 캔버스에 타원 도형을 그린다.
    * @param {CanvasRenderingContext2D} ctx @param {number} x @param {number} y
    * @param {number} rx @param {number} ry @param {string} color */
@@ -321,7 +377,7 @@
           const solid=this.add.rectangle(rect.x,rect.y,rect.width,rect.height).setOrigin(0).setVisible(false);
           solids.add(solid);
         }
-        nodeImages=life.nodes.map(node=>({node,image:this.add.image(node.x,node.y+8,'s'+node.species).setOrigin(0.5,1).setDepth(node.y).setScale(node.species>=4?0.6:1)}));
+        nodeImages=activeNodes.map(node=>({node,image:this.add.image(node.x,node.y+8,'s'+node.species).setOrigin(0.5,1).setDepth(node.y).setScale(node.species>=4?0.6:1)}));
         actorImages=actors.map(actor=>this.add.image(actor.x,actor.y,actor.id+'-0-0').setOrigin(0.5,0.92).setDepth(actor.y));
         fishingArt=this.add.image(0,0,'rod').setOrigin(0,1).setDepth(1900).setVisible(false);
         netArt=this.add.image(0,0,'net').setOrigin(0,1).setDepth(1900).setVisible(false);
@@ -364,7 +420,7 @@
         if(gathering.remaining===0){
           const node=gathering.node;gathering=null;netArt?.setVisible(false);
           const result=life.gather(state.data.rpg_collection,node,now(),owned);
-          if(result&&writable()&&state.writer.commit('rpg_collection',result))showCatch(life.nodes.find(n=>n.id===node)?.species??0);
+          if(result&&writable()&&state.writer.commit('rpg_collection',result)){showCatch(life.nodes.find(n=>n.id===node)?.species??0);const next=life.dailyNodes(life.today(now(),state.data.rpg_player.t,state.data.rpg_meta.seed).variant).find(n=>n.id===node);if(next){activeNodes=activeNodes.map(n=>n.id===node?next:n);nodeImages.forEach(item=>{if(item.node.id===node)item.node=next;});}}
           syncPause();
         }
       }
@@ -438,17 +494,22 @@
       saveLabel.textContent=currentWriter.getSaveState().message;
       const retrySave=document.getElementById('retry-save');if(retrySave)retrySave.hidden=!Object.values(currentWriter.getSaveState().keys).some(key=>!!key.error);
       if(fresh){
-        restored=state.data.rpg_player;editing=false;movingId=null;dialogueId='';dialogue.hidden=true;
+        restored=state.data.rpg_player;visit=life.today(Math.floor(Date.now()/1000),Math.max(restored.t,...state.data.rpg_collection.species.map(t=>Number(t.split(':')[2]))),state.data.rpg_meta.seed);activeNodes=life.dailyNodes(visit.variant);actors=life.walkers(visit.waypoint);nodeImages.forEach(item=>{item.node=activeNodes.find(n=>n.id===item.node.id)??item.node;});editing=false;movingId=null;dialogueId='';dialogue.hidden=true;
         if(player){const point=safePosition(restored);player.setPosition(point.x,point.y);direction=restored.direction;}
         feedback.textContent=state.data.rpg_world.legacyFruit?'예전 마당에서 모은 열매 '+state.data.rpg_world.legacyFruit+'개':'같은 마당을 공유해요. 동시에 바꾸면 마지막 저장이 남아요';
       }
       if(!game)startGame();else if(changed)renderFurniture();
       if(fresh)syncPause();
+      // 완료 표시는 16번째 획득의 ACK 뒤 별도 영속 표시를 ACK 받아 한 번만 연다.
+      if(life.complete(state.data.rpg_collection)&&!state.data.rpg_collection.completed&&!currentWriter.getSaveState().locked&&!completionScheduled){
+        completionScheduled=true;queueMicrotask(()=>{completionScheduled=false;const latest=session.getState();if(latest.status==='playable'&&!latest.data.rpg_collection.completed&&life.complete(latest.data.rpg_collection)&&!latest.writer.getSaveState().locked){completionPending=true;if(!latest.writer.commit('rpg_collection',{...latest.data.rpg_collection,completed:true}))completionPending=false;}});
+      }
+      if(state.data.rpg_collection.completed)showCompletion();
     }});
   document.addEventListener('visibilitychange',()=>{
     input?.reset();syncPause();
     if(document.hidden)currentWriter?.flush();else void session.load();
-  });
-  window.addEventListener('pagehide',()=>{currentWriter?.flush();session.destroy();observer.disconnect();input?.destroy();game?.destroy(true);game=null;},{once:true});
+  }, listenerOptions);
+  window.addEventListener('pagehide',()=>{currentWriter?.flush();session.destroy();observer.disconnect();input?.destroy();game?.destroy(true);game=null;listeners.abort();background.inert=false;album.hidden=true;completion.hidden=true;worldHost.removeAttribute('data-ready');},{signal:listeners.signal,once:true});
   void session.load();
 })();

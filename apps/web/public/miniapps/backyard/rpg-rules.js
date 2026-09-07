@@ -210,26 +210,26 @@ var BackyardRpgLife = (() => {
     const definition=nodes.find(n=>n.id===node);
     return definition && definition.species<2 ? FRUIT_REGROW : NODE_REGROW;
   }
-  /** 알려진 종을 한 개 기록한다. 99개에서는 원본을 유지한다. @param {RpgCollection} state @param {number} index @param {number} now */
-  function collect(state,index,now){
+  /** 알려진 종을 한 개 기록한다. 99개에서는 원본을 유지한다. @param {RpgCollection} state @param {number} index @param {number} now @param {string} [source] */
+  function collect(state,index,now,source){
     if(!species[index]||!Number.isSafeInteger(now)||now<0)return null;
     const id=species[index].id,old=state.species.find(t=>t.split(':')[0]===id)?.split(':');
     if(Number(old?.[1]??0)>=99)return null;
-    return {...state,species:[...state.species.filter(t=>t.split(':')[0]!==id),`${id}:${Number(old?.[1]??0)+1}:${old?.[2]??now}`]};
+    return {...state,species:[...state.species.filter(t=>t.split(':')[0]!==id),`${id}:${Number(old?.[1]??0)+1}:${old?.[2]??now}${old?.[3]||(!old&&source)?":"+(old?.[3]??source):""}`]};
   }
   /** 한 행동으로 도감·가방·채집점 시각을 확정한다. @param {RpgCollection} state @param {string} node @param {number} now @param {readonly RpgOwned[]} [owned] */
   function gather(state,node,now,owned=[]){
     const definition=nodes.find(n=>n.id===node),pot=node.startsWith('pot-')&&owned.some(i=>i.id===node.slice(4)&&i.kind==='pot'&&!i.stored);
     if(!definition&&!pot)return null;
-    if(now<readyAt(state,node)||now>Number.MAX_SAFE_INTEGER-60)return null;
-    const next=collect(state,definition?.species??0,now);if(!next)return null;
+    if(now<readyAt(state,node)||now>Number.MAX_SAFE_INTEGER-regrowSeconds(node))return null;
+    const next=collect(state,definition?.species??0,now,node);if(!next)return null;
     return {...next,nodes:[...state.nodes.filter(t=>t.split(':')[0]!==node),node+':'+(now+regrowSeconds(node))]};
   }
   /** 미발견 우선 후보와 순환 인덱스를 같은 collection에 반영한다. @param {RpgCollection} state @param {number} spot @param {number} now @param {number} seed */
   function catchFish(state,spot,now,seed){
     const group=fishGroups[spot];if(!group)return null;
     const index=group.find(i=>!state.species.some(t=>t.split(':')[0]===species[i].id))??group[(state.fishing[spot]+seed)%group.length];
-    const next=collect(state,index,now);if(!next)return null;
+    const next=collect(state,index,now,"fish-"+spot);if(!next)return null;
     return {index,state:{...next,fishing:state.fishing.map((value,i)=>i===spot?(value+1)%group.length:value)}};
   }
   /** 2~4초 대기를 시작한다. @param {number} spot @param {number} random @returns {RpgFishing} */
@@ -242,8 +242,18 @@ var BackyardRpgLife = (() => {
   }
   /** 입질 한 번만 끌어올림으로 전환한다. @param {RpgFishing} state @returns {RpgFishing} */
   function pull(state){return state.phase==='bite'?{phase:'pulling',spot:state.spot,remaining:600}:state;}
-  /** NPC는 저장하지 않는 순회 상태로 부팅한다. */
-  function walkers(){return residents.map(r=>({id:r.id,...r.waypoints[0],goal:1,rest:3000,blocked:0,direction:0,phase:0}));}
+  /** NPC는 방문 날짜의 순회 상태로 부팅한다. @param {number} [variant] */
+  function walkers(variant=0){return residents.map(r=>({id:r.id,...r.waypoints[variant],goal:(variant+1)%r.waypoints.length,rest:3000,blocked:0,direction:0,phase:0}));}
+  const hints=[' 나무 그늘의 열매나무 · 집 앞 화분','나무 그늘의 빨간 열매나무','나무 그늘의 낮은 풀밭','북쪽 오솔길 옆','그늘 서쪽 잎 주변','그늘 동쪽 햇볕 드는 곳','그늘 남쪽 잎 주변','연못 남쪽 둑','연못 가운데 서쪽 둑','연못 가운데 서쪽 둑','연못 남쪽 낚시점','연못 남쪽 낚시점','연못 남쪽 낚시점','연못 북쪽 낚시점','연못 북쪽 낚시점','연못 북쪽 낚시점'];
+  const notes=['잎 아래 동그란 햇빛이 매달린 것 같아요.','작은 열매가 붉은 빛을 품고 있어요.','둥근 갓 아래에 가느다란 주름이 숨어 있어요.','겹겹이 포개진 조각 사이로 바람이 지나가요.','넓고 둥근 날개로 잎 사이를 천천히 건너요.','작은 노란 날개가 햇볕을 따라 움직여요.','등의 점과 가운데 선을 함께 살펴봐요.','길쭉한 몸과 네 날개가 물가에 그림자를 남겨요.','동그란 몸을 움직이며 느긋하게 헤엄쳐요.','입가의 작은 수염이 물결에 흔들려요.','가는 몸으로 얕은 물을 가볍게 지나가요.','옆구리의 줄무늬가 물빛에 드러나요.','긴 몸을 부드럽게 굽히며 바닥을 살펴요.','넓은 머리와 긴 수염이 눈에 띄어요.','마름모 같은 몸에 은빛 물결이 비쳐요.','몸에 흩어진 작은 점을 하나씩 세어봐요.'];
+  /** 저장된 최초 획득 장소를 읽으며 옛 기록은 서식지 힌트로 구별한다. @param {string|undefined} tuple @param {number} index */
+  function recordPlace(tuple,index){const source=tuple?.split(':')[3];return source?.startsWith('pot-')?'집 앞 마당 · 화분':source?.startsWith('fish-')?['연못 북쪽 낚시점','연못 가운데 서쪽 둑','연못 남쪽 낚시점'][Number(source.slice(5))]:source?(index===7?'연못 남쪽 둑':'나무 그늘 · 채집 자리'):'이전 기록 · 장소 미기록 (힌트: '+hints[index].trim()+')';}
+  /** 발견은 수량이 있는 고유 16종으로만 완료한다. @param {RpgCollection} collection */
+  function complete(collection){return species.every(s=>collection.species.some(t=>t.split(':')[0]===s.id&&Number(t.split(':')[1])>0));}
+  /** 최대 저장 시각보다 뒤의 방문 날짜를 사용하며 보상이나 만료를 만들지 않는다. @param {number} now @param {number} maximum @param {number} seed */
+  function today(now,maximum,seed){const day=Math.floor(Math.max(0,now,maximum)/86400),variant=(day+seed)%3;return {day,variant,spot:variant,waypoint:variant,description:['오늘은 연못 북쪽 물결을 살펴봐요','오늘은 연못 가운데 둑에 앉아 봐요','오늘은 연못 남쪽 작은 물결을 살펴봐요'][variant]};}
+  /** 방문 또는 해당 벌레의 재생성 때만 호출한다. @param {number} variant @returns {RpgNode[]} */
+  function dailyNodes(variant){return nodes.map(n=>n.species<4?{...n}:{...n,x:n.x+(variant===1?16:variant===2?-16:0)});}
   /** 통행 가능한 격자 경로의 다음 칸을 구한다. @param {RpgVector} start @param {RpgVector} end @param {readonly RpgDecoration[]} decorations */
   function nextStep(start,end,decorations){
     const key=(/** @type {RpgVector} */p)=>Math.floor(p.x/32)+','+Math.floor(p.y/32);
@@ -281,5 +291,5 @@ var BackyardRpgLife = (() => {
     const nextGoal=r.waypoints.map((p,i)=>({p,i})).find(({p,i})=>i!==actor.goal&&rules.canStand(p.x,p.y,decorations)&&nextStep(actor,p,decorations));
     return {...actor,goal:nextGoal?.i??(actor.goal+1)%r.waypoints.length,blocked:0,phase:0,hop:null};
   }
-  return Object.freeze({species,nodes,fishGroups,residents,shared,tags,friendship,experience,layout,talk,readyAt,regrowSeconds,collect,gather,catchFish,cast,tickFishing,pull,walkers,walk,nextStep});
+  return Object.freeze({species,nodes,hints,notes,recordPlace,complete,today,dailyNodes,fishGroups,residents,shared,tags,friendship,experience,layout,talk,readyAt,regrowSeconds,collect,gather,catchFish,cast,tickFishing,pull,walkers,walk,nextStep});
 })();

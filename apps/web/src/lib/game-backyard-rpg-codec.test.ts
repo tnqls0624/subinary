@@ -18,8 +18,8 @@ describe('RPG 5키 codec', () => {
       rpg_meta: { v: 2, mapVersion: 1, seed: 4294967295, initialized: true, migrated: false },
       rpg_world: { v: 2, legacyFruit: max, items: Array.from({ length: 48 }, (_, i) => `${i}:p:${16 + i % 16}:${21 + Math.floor(i / 16)}`) },
       rpg_collection: {
-        v: 2, species: Array.from({ length: 16 }, (_, i) => `s${i}:99:${max}`),
-        nodes: [...Array.from({ length: 12 }, (_, i) => `node-${i}:${max}`), ...Array.from({ length: 48 }, (_, i) => `pot-${i}:${max}`)], fishing: [7, 7, 7],
+        v: 2, species: Array.from({ length: 16 }, (_, i) => `s${i}:99:${max}:node-11`),
+        nodes: [...Array.from({ length: 12 }, (_, i) => `node-${i}:${max}`), ...Array.from({ length: 48 }, (_, i) => `pot-${i}:${max}`)], fishing: [7, 7, 7], completed: true,
       },
       rpg_residents: { v: 2, items: Array.from({ length: 3 }, (_, i) => `r${i}:4095:23:4294967295:s15`) },
       rpg_player: { v: 2, mapVersion: 1, x: 511, y: 383, direction: 7, outfit: 1, t: max },

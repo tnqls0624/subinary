@@ -1,0 +1,13 @@
+
+> @family/shared@0.0.0 test /Users/soobeen/Desktop/Project/subinary/packages/shared
+> vitest run
+
+
+ RUN  v4.1.10 /Users/soobeen/Desktop/Project/subinary/packages/shared
+
+
+ Test Files  16 passed (16)
+      Tests  189 passed (189)
+   Start at  23:06:15
+   Duration  600ms (transform 1.18s, setup 0ms, import 1.51s, tests 124ms, environment 1ms)
+

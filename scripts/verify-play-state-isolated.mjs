@@ -115,7 +115,7 @@ try {
     `${exportVerificationDatabaseUrl}\npnpm --filter @family/database migrate`,
   ]);
 
-  console.log('[play-state] 마당 저장 통합 검증 실행');
+  console.log('[play-state] v1·RPG 5키·이전·두 클라이언트 역전 통합 검증 실행');
   runCompose([
     'run',
     '--rm',

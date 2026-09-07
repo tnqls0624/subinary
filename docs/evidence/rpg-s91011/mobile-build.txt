@@ -1,0 +1,50 @@
+
+> @family/web@0.0.0 build:mobile /Users/soobeen/Desktop/Project/subinary/apps/web
+> NODE_ENV=production NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://app.subinary.cloud} BUILD_TARGET=mobile next build
+
+▲ Next.js 16.2.10 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 2.6s
+  Running TypeScript ...
+  Finished TypeScript in 4.0s ...
+  Collecting page data using 10 workers ...
+  Generating static pages using 10 workers (0/28) ...
+  Generating static pages using 10 workers (7/28) 
+  Generating static pages using 10 workers (14/28) 
+  Generating static pages using 10 workers (21/28) 
+✓ Generating static pages using 10 workers (28/28) in 238ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /ai
+├ ○ /ai-operations
+├ ○ /api/health
+├ ○ /budgets
+├ ○ /cards
+├ ○ /categories
+├ ○ /dashboard
+├ ○ /declines
+├ ○ /devices
+├ ○ /household
+├ ○ /join
+├ ○ /login
+├ ○ /more
+├ ○ /more/category-rules
+├ ○ /more/merchants
+├ ○ /more/notifications
+├ ○ /more/password
+├ ○ /more/privacy
+├ ○ /more/recurring
+├ ○ /notifications
+├ ○ /play
+├ ○ /play/app
+├ ○ /register
+├ ○ /todo
+└ ○ /transactions
+
+
+○  (Static)  prerendered as static content
+
