@@ -29,9 +29,13 @@ var BackyardRpg3dController = (() => {
     for(let i=0;i<steps;i++) {if(rules.canStand(x+delta.x/steps,y))x+=delta.x/steps;if(rules.canStand(x,y+delta.y/steps))y+=delta.y/steps;}
     return {x,y};
   }
-  /** 고정 60Hz 시계. reset 직후 첫 frame은 delta 0이다. @param {RpgVector} [initial] */
-  function create(initial=rules.fixture()) {
-    let point=safePosition(initial),direction=rules.fixture().direction,accumulator=0,distance=0;
+  /** 고정 60Hz 시계. reset 직후 첫 frame은 delta 0이다.
+   * 저장 형식은 그대로 두고 **읽은 방향만** 복원한다 — 저장은 이미 direction을 담고 있었고
+   * 슬라이스 4까지 그것을 버렸다(근접 대상이 방향으로 정해지므로 복원해야 한다).
+   * @param {RpgVector} [initial] @param {number} [facing] */
+  function create(initial=rules.fixture(),facing) {
+    const restored=Number.isInteger(facing)&&Number(facing)>=0&&Number(facing)<=7?Number(facing):rules.fixture().direction;
+    let point=safePosition(initial),direction=restored,accumulator=0,distance=0;
     /** @type {number|null} */ let previous=null;
     let input={x:0,y:0};
     return {
