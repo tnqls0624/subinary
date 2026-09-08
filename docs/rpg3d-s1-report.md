@@ -91,3 +91,22 @@ python3 -m http.server 4318 --bind 127.0.0.1 --directory apps/web/public
 Memory·context7·sequential-thinking MCP는 사용 가능한 도구 목록에서 찾지 못했다. 과거 학습 로드, Memory ADR·학습 등록은 **확인 못 함**이며 이 문서에 대체 기록했다. r128 API는 [WebGLRenderer 원문](https://raw.githubusercontent.com/mrdoob/three.js/r128/src/renderers/WebGLRenderer.js), [geometry 목록](https://raw.githubusercontent.com/mrdoob/three.js/r128/src/geometries/Geometries.js), [툰 조명 셰이더](https://raw.githubusercontent.com/mrdoob/three.js/r128/src/renderers/shaders/ShaderChunk/lights_toon_pars_fragment.glsl.js)와 고정 타입 선언을 확인했다. Task Master 태스크가 아닌 Orca에서 배정한 구현 작업이다.
 
 반복 방지 기록: 높이의 전체 범위와 인접 경사 제한은 따로 검사한다; 렌더러의 버전과 타입 패키지 버전을 맞추고 런타임 검사를 유지한다; 구·캡슐 외곽선을 부품마다 중복하면 내부 검은 링이 생길 수 있다; clear 배경과 재질의 r128 색 처리 경로를 구분한다; 브라우저 캡처·모바일 에뮬레이션·실기기 성능·사용자 시각 승인을 서로 대체하지 않는다.
+
+---
+
+## 시각 승인 — 통과 (2026-09-08, 사용자 판정)
+
+설계서 §10이 후속 슬라이스를 이 게이트로 막아 두었다. 워커는 스스로 판정하지 않고
+**"시각 승인 확인 못 함"**으로 남겼고, 코디네이터가 비교 증거 두 장을 사용자에게 제시했다.
+
+- `docs/evidence/rpg3d-s1/compare-360x800.png` — 같은 지도 위치의 2D / 3D
+- `docs/evidence/rpg3d-s1/lighting-360x800.png` — 같은 기하에서 조명만 끈 것
+
+**사용자 판정: "좋다 이어서 진행해".** 2D 대비 선호가 확인됐으므로 슬라이스 2 이후를 연다.
+
+기록해 둘 것 — 조명 비교가 설계 근거를 눈으로 확인시켰다. 기하가 동일한데 그림자와
+명암을 빼면 다시 납작해진다. "동물의 숲 느낌은 정교한 그림이 아니라 둥근 형태에 얹힌
+부드러운 조명에서 온다"가 이 프로젝트에서 검증된 명제가 됐다. 이후 슬라이스에서
+성능 때문에 품질을 낮출 때 **그림자를 가장 마지막에 버려야 하는 이유**가 이것이다.
+
+여전히 미확인: 실기기 첫 프레임·지속 성능(슬라이스 8), 실제 OTA ZIP 절감(슬라이스 9).
