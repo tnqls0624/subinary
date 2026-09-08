@@ -1,0 +1,26 @@
+Tailwind v4 가 Phaser 파일을 클래스 후보로 스캔해 방출한 죽은 CSS
+
+전역 CSS 청크: 66,553B → 65,166B (-1,387B raw / -234B zip)
+사라진 유틸리티 15개 — 남은 소스 어디에도 쓰이지 않는다:
+
+  .container    phaser.min.js 1      types/phaser/phaser.d.ts 359
+  .contents     phaser.min.js 0      types/phaser/phaser.d.ts 93
+  .grayscale    phaser.min.js 1      types/phaser/phaser.d.ts 15
+  .invert       phaser.min.js 1      types/phaser/phaser.d.ts 204
+  .invisible    phaser.min.js 0      types/phaser/phaser.d.ts 124
+  .isolate      phaser.min.js 1      types/phaser/phaser.d.ts 13
+  .italic       phaser.min.js 0      types/phaser/phaser.d.ts 1
+  .lowercase    phaser.min.js 0      types/phaser/phaser.d.ts 2
+  .sepia        phaser.min.js 1      types/phaser/phaser.d.ts 8
+  .shrink       phaser.min.js 0      types/phaser/phaser.d.ts 9
+  .uppercase    phaser.min.js 0      types/phaser/phaser.d.ts 10
+  .grow         phaser.min.js 0      types/phaser/phaser.d.ts 6
+  .zoom-in      phaser.min.js 0      types/phaser/phaser.d.ts 1
+  .zoom-out     phaser.min.js 0      types/phaser/phaser.d.ts 1
+  .ease-in      phaser.min.js 0      types/phaser/phaser.d.ts 25
+
+남은 apps/web/src · apps/web/public 안의 출현: 0건
+  (grep -rlE 'grayscale|sepia|lowercase' apps/web/src apps/web/public → 결과 없음)
+
+판정: 삭제한 phaser.min.js(1.3MB)와 types/phaser/phaser.d.ts(7.7MB)가 Tailwind 의
+클래스 추출 대상에 들어가 있었다. 이번 삭제로 사라진 CSS 는 어떤 화면도 쓰지 않던 것이다.

@@ -1,0 +1,80 @@
+{
+  "checks": [
+    "out entry 3개 존재, public/miniapps ↔ out/miniapps 20개 파일 목록·바이트·SHA-256 일치",
+    "Phaser 동봉 0 — 파일명 0건, 335개 파일 중 내용 참조 0건",
+    "게임 경로(miniapps) 이미지·모델·오디오 에셋 0",
+    "OTA ZIP 실측 1405713B (raw 4848781B, 파일 335개) — 2D 마지막 배포 1,570,734B 대비 -165021B",
+    "실제 라우트 요청 43건 — 같은 origin 34건, 운영 API 9건은 전부 fixture 가 가로챔, CDN·외부 에셋 0 · 이미지/미디어/폰트 0 · Phaser 0 · 실패 0",
+    "3D 가 쓴 5키를 배포 codec 원본이 전부 왕복 — mapVersion 1 · v2 · x=120(0~511) · y=302(0~383), garden 원본 무변형"
+  ],
+  "artifact": {
+    "method": "deploy-ota-bundle.sh 와 동일: ( cd apps/web/out && zip -qr <path> . )",
+    "zipPath": "/var/folders/b7/psvnk_8n44j05wy9b6jnr3yc0000gn/T/backyard-s9-ota.zip",
+    "files": 335,
+    "rawBytes": 4848781,
+    "zipBytes": 1405713,
+    "zipSha256": "59947402349abc1268817e5d89e38e18a17ebf6fbd8165350b3f7e6e14e531d8",
+    "baseline2dDeployZipBytes": 1570734,
+    "baseline2dDeployRawBytes": 5511282,
+    "zipDeltaVs2dDeploy": -165021,
+    "rawDeltaVs2dDeploy": -662501,
+    "manifest": "20개 파일"
+  },
+  "network": {
+    "total": 43,
+    "sameOrigin": 34,
+    "apiInterceptedByFixture": 9,
+    "cdnOrExternalAsset": 0,
+    "assetRequests": 0,
+    "phaserRequests": 0,
+    "failed": 0,
+    "byType": {
+      "document": 1,
+      "stylesheet": 2,
+      "script": 31,
+      "fetch": 9
+    },
+    "scripts": [
+      "/_next/static/chunks/02iime-zoli-h.js",
+      "/_next/static/chunks/02okejr7bcer-.js",
+      "/_next/static/chunks/0a13162jtt5_s.js",
+      "/_next/static/chunks/0gpdzujk6-oiu.js",
+      "/_next/static/chunks/0xbryo4wozquu.js",
+      "/_next/static/chunks/12hckz0jb8hf8.js",
+      "/_next/static/chunks/1_p2a8n98y16z.js",
+      "/_next/static/chunks/1a3fq59mmpigc.js",
+      "/_next/static/chunks/1ma_811-7-hia.js",
+      "/_next/static/chunks/2bbp02ey95hhr.js",
+      "/_next/static/chunks/2fezxu-jn8qet.js",
+      "/_next/static/chunks/2v5ufl34j_oh-.js",
+      "/_next/static/chunks/2x3eec_mv1s00.js",
+      "/_next/static/chunks/38qmyqtmpq2n_.js",
+      "/_next/static/chunks/3czw3gc8dltsz.js",
+      "/_next/static/chunks/3tr-_m1h25fnc.js",
+      "/_next/static/chunks/3x3p42qbkbtap.js",
+      "/_next/static/chunks/turbopack-2lamapsl-76dy.js",
+      "/miniapps/backyard/balance.js",
+      "/miniapps/backyard/codec.js",
+      "/miniapps/backyard/rpg-codec.js",
+      "/miniapps/backyard/rpg-input.js",
+      "/miniapps/backyard/rpg-rules.js",
+      "/miniapps/backyard/rpg-session.js",
+      "/miniapps/backyard/rpg3d-controller.js",
+      "/miniapps/backyard/rpg3d-models.js",
+      "/miniapps/backyard/rpg3d-scene.js",
+      "/miniapps/backyard/rpg3d-terrain.js",
+      "/miniapps/backyard/rpg3d-world.js",
+      "/miniapps/backyard/rules.js",
+      "/miniapps/vendor/three-r128.min.js"
+    ],
+    "puts": [
+      "rpg_world",
+      "rpg_collection",
+      "rpg_residents",
+      "rpg_player",
+      "rpg_meta",
+      "rpg_player"
+    ]
+  },
+  "errors": []
+}

@@ -1,0 +1,272 @@
+{
+  "browser": "149.0.7827.55",
+  "environment": "macOS 데스크톱 Chromium; 실기기 성능·시각 승인은 여기서 판정하지 않음",
+  "checks": [
+    "out entry 3개 존재, public/miniapps ↔ out/miniapps 20개 파일 목록·바이트·SHA-256 일치",
+    "Phaser 동봉 0 — 파일명 0건, 335개 파일 중 내용 참조 0건",
+    "게임 경로(miniapps) 이미지·모델·오디오 에셋 0",
+    "OTA ZIP 실측 1405713B (raw 4848781B, 파일 335개) — 2D 마지막 배포 1,570,734B 대비 -165021B",
+    "실제 라우트 요청 43건 — 같은 origin 34건, 운영 API 9건은 전부 fixture 가 가로챔, CDN·외부 에셋 0 · 이미지/미디어/폰트 0 · Phaser 0 · 실패 0",
+    "3D 가 쓴 5키를 배포 codec 원본이 전부 왕복 — mapVersion 1 · v2 · x=121(0~511) · y=302(0~383), garden 원본 무변형"
+  ],
+  "errors": [],
+  "artifact": {
+    "method": "deploy-ota-bundle.sh 와 동일: ( cd apps/web/out && zip -qr <path> . )",
+    "zipPath": "/var/folders/b7/psvnk_8n44j05wy9b6jnr3yc0000gn/T/backyard-s9-ota.zip",
+    "files": 335,
+    "rawBytes": 4848781,
+    "zipBytes": 1405713,
+    "zipSha256": "59947402349abc1268817e5d89e38e18a17ebf6fbd8165350b3f7e6e14e531d8",
+    "baseline2dDeployZipBytes": 1570734,
+    "baseline2dDeployRawBytes": 5511282,
+    "zipDeltaVs2dDeploy": -165021,
+    "rawDeltaVs2dDeploy": -662501,
+    "manifest": [
+      {
+        "path": "miniapps/backyard/balance.js",
+        "bytes": 671,
+        "sha256": "e22a31acf4bb58320a0605d1b253f27f5904cff75f50166bde94d0e39e9b129c"
+      },
+      {
+        "path": "miniapps/backyard/codec.js",
+        "bytes": 7219,
+        "sha256": "22b2ae06943c5a1e9efe7696e3a2ba5c6ccf1fec889338b3d03bcefd3d3cd272"
+      },
+      {
+        "path": "miniapps/backyard/index.html",
+        "bytes": 334,
+        "sha256": "3cabb7cdacaf8375f638022abfdb7b857865ba069e1080a21eaeca1766fc08bb"
+      },
+      {
+        "path": "miniapps/backyard/rpg-codec.js",
+        "bytes": 7644,
+        "sha256": "737d07d9bcebc26535633c0aa7100997aaceec3d495822d45cf2262085f2ccd5"
+      },
+      {
+        "path": "miniapps/backyard/rpg-input.js",
+        "bytes": 3352,
+        "sha256": "8f056ce5474a7c3138582542c3d1fd21e813ac2d9195061e8421bcf0d26efef9"
+      },
+      {
+        "path": "miniapps/backyard/rpg-rules.js",
+        "bytes": 27923,
+        "sha256": "14a11d875955b755f5d10140a0f67906f4f543cd806f98e0d7512d6edcfb3df1"
+      },
+      {
+        "path": "miniapps/backyard/rpg-session.js",
+        "bytes": 12297,
+        "sha256": "cde1349b98ab7a5c3c6236977133b432952ae50b99a17e96275d31a76e8f43ce"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-controller.js",
+        "bytes": 3957,
+        "sha256": "a4ba7360aec89962d90f21322c455208ac3ae42df10691735b4481ee02b33410"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-fixture.css",
+        "bytes": 1491,
+        "sha256": "1b787581e4f4047dd59ccd0e678c685211084973a1476467b55e961106e000ce"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-fixture.html",
+        "bytes": 1133,
+        "sha256": "48aa31faac6d4824b70c812f5837121328daa88c0c64b261940dcdf9056358c2"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-fixture.js",
+        "bytes": 16387,
+        "sha256": "28a467ba21a168749ecea4c8339e52b69aec8461e4cf8e9d6eb65d2d25b1a00a"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-models.js",
+        "bytes": 20090,
+        "sha256": "17ce1548429d9f6883fa620f1c4878be36218378f09ffb1671b2c0c21d162fa4"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-scene.js",
+        "bytes": 32311,
+        "sha256": "38ab3daa4bd0c8d8d4556b1f03b8d72da9b58422838f555a9a788fef458bdc4f"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-terrain.js",
+        "bytes": 2126,
+        "sha256": "25144f87d01d33865f99f5a09ba13c8091383a668e121ea4515dcfe2e2e01b84"
+      },
+      {
+        "path": "miniapps/backyard/rpg3d-world.js",
+        "bytes": 15432,
+        "sha256": "2dd158ace11a85a72af6c6feb8d009e65f686304ae7eb79e494cbd51a2a8f217"
+      },
+      {
+        "path": "miniapps/backyard/rules.js",
+        "bytes": 8695,
+        "sha256": "942c11fa926286b3103f58bf47abd819e77f4ae96a86614723651cb13e78f86a"
+      },
+      {
+        "path": "miniapps/backyard/session.js",
+        "bytes": 9651,
+        "sha256": "26adf6e79a2dd670f4de39906837473cfe912a40933ef1ca368b3f18953c15ab"
+      },
+      {
+        "path": "miniapps/bridge.js",
+        "bytes": 7846,
+        "sha256": "eddf1fd206ef77782402be24f7942cdd88f2ce15cc796a1c2998cef91122c2b3"
+      },
+      {
+        "path": "miniapps/vendor/three-r128.LICENSE",
+        "bytes": 1081,
+        "sha256": "7dddf7c5b8fd10ee654db8857d75d104b5557889aa5a91fc4ca545ea7c07062f"
+      },
+      {
+        "path": "miniapps/vendor/three-r128.min.js",
+        "bytes": 603445,
+        "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+      }
+    ]
+  },
+  "network": {
+    "total": 43,
+    "sameOrigin": 34,
+    "apiInterceptedByFixture": 9,
+    "cdnOrExternalAsset": 0,
+    "assetRequests": 0,
+    "phaserRequests": 0,
+    "failed": 0,
+    "byType": {
+      "document": 1,
+      "stylesheet": 2,
+      "script": 31,
+      "fetch": 9
+    },
+    "scripts": [
+      "/_next/static/chunks/02iime-zoli-h.js",
+      "/_next/static/chunks/02okejr7bcer-.js",
+      "/_next/static/chunks/0a13162jtt5_s.js",
+      "/_next/static/chunks/0gpdzujk6-oiu.js",
+      "/_next/static/chunks/0xbryo4wozquu.js",
+      "/_next/static/chunks/12hckz0jb8hf8.js",
+      "/_next/static/chunks/1_p2a8n98y16z.js",
+      "/_next/static/chunks/1a3fq59mmpigc.js",
+      "/_next/static/chunks/1ma_811-7-hia.js",
+      "/_next/static/chunks/2bbp02ey95hhr.js",
+      "/_next/static/chunks/2fezxu-jn8qet.js",
+      "/_next/static/chunks/2v5ufl34j_oh-.js",
+      "/_next/static/chunks/2x3eec_mv1s00.js",
+      "/_next/static/chunks/38qmyqtmpq2n_.js",
+      "/_next/static/chunks/3czw3gc8dltsz.js",
+      "/_next/static/chunks/3tr-_m1h25fnc.js",
+      "/_next/static/chunks/3x3p42qbkbtap.js",
+      "/_next/static/chunks/turbopack-2lamapsl-76dy.js",
+      "/miniapps/backyard/balance.js",
+      "/miniapps/backyard/codec.js",
+      "/miniapps/backyard/rpg-codec.js",
+      "/miniapps/backyard/rpg-input.js",
+      "/miniapps/backyard/rpg-rules.js",
+      "/miniapps/backyard/rpg-session.js",
+      "/miniapps/backyard/rpg3d-controller.js",
+      "/miniapps/backyard/rpg3d-models.js",
+      "/miniapps/backyard/rpg3d-scene.js",
+      "/miniapps/backyard/rpg3d-terrain.js",
+      "/miniapps/backyard/rpg3d-world.js",
+      "/miniapps/backyard/rules.js",
+      "/miniapps/vendor/three-r128.min.js"
+    ],
+    "puts": [
+      "rpg_world",
+      "rpg_collection",
+      "rpg_residents",
+      "rpg_player",
+      "rpg_meta",
+      "rpg_player"
+    ]
+  },
+  "saveCompat": {
+    "shownPlayer": {
+      "x": 241.60000000000002,
+      "y": 604.8000000000002,
+      "direction": 2,
+      "distance": 187.2000000000021,
+      "world": {
+        "x": -8.45,
+        "z": 6.900000000000006,
+        "y": 0
+      }
+    },
+    "keys": [
+      "rpg_meta",
+      "rpg_world",
+      "rpg_collection",
+      "rpg_residents",
+      "rpg_player"
+    ],
+    "roundTrip": {
+      "rpg_meta": {
+        "v": 2,
+        "mapVersion": 1,
+        "seed": 4821,
+        "initialized": true,
+        "migrated": false
+      },
+      "rpg_world": {
+        "v": 2,
+        "items": [
+          "0:p:3:20",
+          "1:w:4:20",
+          "2:c:5:20"
+        ],
+        "legacyFruit": 0
+      },
+      "rpg_collection": {
+        "v": 2,
+        "species": [],
+        "nodes": [],
+        "fishing": [
+          0,
+          0,
+          0
+        ]
+      },
+      "rpg_residents": {
+        "v": 2,
+        "items": []
+      },
+      "rpg_player": {
+        "v": 2,
+        "mapVersion": 1,
+        "x": 121,
+        "y": 302,
+        "direction": 2,
+        "outfit": 0,
+        "t": 1788874656
+      }
+    },
+    "gardenPreserved": {
+      "input": {
+        "v": 1,
+        "t": 1000,
+        "s": 42,
+        "f": 137,
+        "n": 9,
+        "k": [
+          "p",
+          "w",
+          "c"
+        ],
+        "p": [
+          "p:0:2000",
+          "w:9",
+          "c:11"
+        ]
+      },
+      "unchangedAfterMigrate": true,
+      "migratedMeta": {
+        "v": 2,
+        "mapVersion": 1,
+        "seed": 4821,
+        "initialized": true,
+        "migrated": true
+      }
+    },
+    "note": "rpg-codec.js 는 2D 가 쓰던 것과 같은 파일이며 이번 삭제에서 수정하지 않았다. 왕복 통과가 설계서 §10 \"2D 가 같은 저장을 읽을 수 있다\"의 실측 근거다. 2D 표현 자체는 소스에서 제거되었으므로 복귀는 이전 배포물(OTA/웹) 되돌리기로 한다."
+  }
+}

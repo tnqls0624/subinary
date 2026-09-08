@@ -1,0 +1,57 @@
+OTA ZIP 분해 — 같은 배포 방식 `( cd apps/web/out && zip -qr <path> . )`
+Info-ZIP 3.0 (Apple), 기본 압축 레벨. NEXT_PUBLIC_API_URL=https://app.subinary.cloud 고정.
+
+        before  파일  343  raw   6293652  ZIP   1784810  (압축분 1714544 + 컨테이너 70266)  sha256 e8dbef1fbcce3e31…
+ before-repeat  파일  343  raw   6293652  ZIP   1784406  (압축분 1714140 + 컨테이너 70266)  sha256 43c979679b5f83d8…
+         after  파일  335  raw   4848781  ZIP   1405713  (압축분 1336931 + 컨테이너 68782)  sha256 3f217011f35d826e…
+
+빌드 노이즈(같은 소스 재빌드): ZIP -404B, raw +0B — Next buildId 가 빌드마다 바뀐다
+제거 전→후: ZIP -379097B, raw -1444871B
+
+── 사라진 엔트리 ──
+      -66553 raw    -12120 zip  _next/static/chunks/1k_v0lwhftp9-.css
+        -219 raw      -133 zip  _next/static/lj2OpJHNTiqETHtc9Bvdq/_buildManifest.js
+         -96 raw       -48 zip  _next/static/lj2OpJHNTiqETHtc9Bvdq/_clientMiddlewareManifest.js
+         -80 raw       -46 zip  _next/static/lj2OpJHNTiqETHtc9Bvdq/_ssgManifest.js
+       -9720 raw     -3602 zip  miniapps/backyard/app.js
+       -2285 raw      -888 zip  miniapps/backyard/input.js
+       -6024 raw     -2467 zip  miniapps/backyard/renderer.js
+      -42411 raw    -12846 zip  miniapps/backyard/rpg-engine.js
+       -4313 raw     -1405 zip  miniapps/backyard/rpg-style.css
+       -1656 raw      -781 zip  miniapps/backyard/style.css
+       -1120 raw      -663 zip  miniapps/vendor/PHASER-LICENSE.md
+    -1375976 raw   -354486 zip  miniapps/vendor/phaser.min.js
+    -1510453 raw   -389485 zip  소계
+
+── 새로 생긴 엔트리 ──
+      +65166 raw    +11886 zip  _next/static/chunks/05dp26j_g3pcu.css
+        +219 raw      +133 zip  _next/static/xpQMO7kf_gxQSlrv9eojJ/_buildManifest.js
+         +96 raw       +48 zip  _next/static/xpQMO7kf_gxQSlrv9eojJ/_clientMiddlewareManifest.js
+         +80 raw       +46 zip  _next/static/xpQMO7kf_gxQSlrv9eojJ/_ssgManifest.js
+      +65561 raw    +12113 zip  소계
+
+── 이름이 같은 331개 엔트리 변화 ──
+         +21 raw      -241 zip  내역: miniapps/backyard/rpg3d-world.js  raw +21  zip +21  (이번에 고친 머리주석 한 줄)
+        그 외 176개 엔트리        raw  +0  zip -262  (buildId 문자열이 __next 프리페치 txt 안에서 바뀜)
+        나머지 154개 엔트리       변화 없음
+
+── 합계 ──
+  엔트리 압축분 -377613B
+  컨테이너 오버헤드 -1484B (엔트리 343→335)
+  ZIP 총 변화 -379097B
+
+── 엔진 단독 비교(설계서 §1 예상 검증) ──
+  Phaser  raw 1375976  zip 354486  (+라이선스 zip 663)
+  Three   raw 603445  zip 149175  (+라이선스 zip 642)
+  엔진 ZIP 차 실측 205332B  vs 설계서 예상 205,394B  → 차이 -62B
+
+── 3D 게임 코드(상쇄분) ──
+       +3957 raw     +1782 zip  miniapps/backyard/rpg3d-controller.js
+       +1491 raw      +689 zip  miniapps/backyard/rpg3d-fixture.css
+       +1133 raw      +668 zip  miniapps/backyard/rpg3d-fixture.html
+      +16387 raw     +5895 zip  miniapps/backyard/rpg3d-fixture.js
+      +20090 raw     +6681 zip  miniapps/backyard/rpg3d-models.js
+      +32311 raw    +10634 zip  miniapps/backyard/rpg3d-scene.js
+       +2126 raw     +1069 zip  miniapps/backyard/rpg3d-terrain.js
+      +15432 raw     +5495 zip  miniapps/backyard/rpg3d-world.js
+                    +32913 zip  소계

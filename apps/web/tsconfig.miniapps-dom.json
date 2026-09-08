@@ -15,7 +15,6 @@
   "include": [
     "public/miniapps/bridge.js",
     "public/miniapps/backyard/*.js",
-    "types/phaser/phaser.d.ts",
     "types/three-r128.d.ts"
   ]
 }

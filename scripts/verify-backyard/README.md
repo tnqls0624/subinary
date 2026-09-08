@@ -26,30 +26,36 @@ node scripts/verify-play-state-isolated.mjs > /tmp/backyard-s4-db.log 2>&1
 컨테이너 내부 임의 localhost 포트에서 실행하며 인증 주체만 일회용 사용자로 주입한다.
 최대 상태는 배포 codec으로 생성하고 raw JSON·`pg_column_size`를 별도로 측정한다.
 
-## 슬라이스 6·7: 정적 export와 수명 검증
+## 슬라이스 6·7: 정적 export와 수명 검증 — 2D 하네스는 슬라이스 9에서 삭제됨
 
-모바일 빌드 후 아래 명령으로 재현한다. `export.mjs`는 임의 localhost 포트에서
-실제 `apps/web/out`을 서비스하고, API만 Playwright 라우트의 메모리 fixture로 격리한다.
-운영 API로 전달하지 않는다. 설치된 Playwright 모듈은 `PLAYWRIGHT_MODULE` 환경변수로
-지정할 수 있으며 기본값은 개인 gstack 설치의 `node_modules/playwright/index.mjs`다.
+이 절이 설명하던 v0 2D 하네스(`export.mjs`·`lifecycle.js`)와 RPG 2D 수명 하네스
+(`rpg-lifecycle.mjs`·`rpg-lifecycle.js`·`rpg-host-lifecycle.mjs`·`rpg2d-legacy.html`)는
+**슬라이스 9에서 함께 삭제했다.** 검증 대상이던 iframe 2D 표현이 사라졌기 때문이다
+(`#world[data-ready=true]`·`rpg-engine.js`·`phaser.min.js` 모두 없음). 그 하네스가
+남긴 측정 — 특히 Phaser 4.2.1이 destroy에서 정리하지 않는 **리스너 +40** — 은
+[`docs/rpg-s91011-report.md`](../../docs/rpg-s91011-report.md)에 기록으로 남아 있다.
+
+현재 살아 있는 재현은 3D 전체 화면 라우트(`/play/app/?key=backyard`)를 대상으로 한다.
 
 ```sh
-pnpm --filter @family/web build:mobile > /tmp/backyard-s6-mobile.log 2>&1
-node scripts/verify-backyard/export.mjs > /tmp/backyard-s6-export.log 2>&1
-python3 scripts/verify-backyard/artifact.py > /tmp/backyard-s6-artifact.log 2>&1
-pnpm --filter @family/web exec vitest run src/lib/game-backyard-lifecycle.test.ts
+pnpm --filter @family/web build:mobile > /tmp/backyard-mobile.log 2>&1
+node scripts/verify-backyard/rpg3d-s567.mjs > /tmp/rpg3d-s567.log 2>&1
+python3 scripts/verify-backyard/artifact.py > /tmp/backyard-artifact.log 2>&1
 ```
 
-- 실제 `/play/app/?key=backyard` 호스트와 opaque sandbox 게임의 GET/PUT·재진입 일치.
-- 폭 320/360/430px, 높이 470px 안의 마당·문구·44px 버튼 경계와 스크린샷.
-- 가짜 epoch 시각의 8100/10800초 성장 경계·우물 이동 후 시각 보존·장기 방치 1개 수확.
-- 완료 대화상자의 배경 inert·닫은 뒤 꽉 찬 마당 swap.
-- 초기 GET 503 시 PUT 0. 정상 과정 오류와 의도한 503 오류를 결과 JSON에서 분리.
-- `lifecycle.js`로 실제 브라우저의 등록 API를 계측한다. 최초 제품 앱을 pagehide로
-  종료한 뒤 같은 DOM에서 실제 app 팩토리를 20회 생성·해제하며, 각 회차의 실패 저장
-  재시도 timer·RAF·listener·ResizeObserver가 0으로 돌아오는지 검사하고 API를 복구한다.
+- `rpg3d-s567.mjs`가 실제 정적 export를 임의 localhost 포트에서 서비스하고, API만
+  Playwright 라우트의 메모리 fixture로 격리한다. 운영 API로 전달하지 않는다. 설치된
+  Playwright 모듈은 `PLAYWRIGHT_MODULE` 환경변수로 지정하며 기본값은 개인 gstack 설치의
+  `node_modules/playwright/index.mjs`다.
 - `artifact.py`는 entry의 script/CSS 참조 전체를 따라 public과 out의 바이트를 비교하고
   SHA-256을 기록한다. OTA와 같은 Info-ZIP 기본 압축으로 `/tmp/backyard-s6-ota.zip`을
-  생성하며, 결과는 `docs/evidence/backyard-s6/`에 기록한다.
+  생성하며, 결과는 `docs/evidence/backyard-s6/`에 기록한다. **기준값(baselineRawBytes·
+  baselineZipBytes)은 v0 시절 값 그대로이므로 증가율 필드는 참고로만 읽는다** —
+  현재 실측은 [`docs/rpg3d-s9-report.md`](../../docs/rpg3d-s9-report.md)에 있다.
+
+`index.html`·`server.py`(v0 sandbox iframe 하네스)와 `rpg-export.mjs`·`rpg-s45.mjs`·
+`rpg-s678.mjs`·`rpg3d-s1.mjs`의 2D 비교 분기는 **슬라이스 2·3에서 iframe 라우트가
+사라진 시점부터 이미 실행 불가**다. 이번에는 지시서가 지목한 2D 수명 하네스만 지웠고
+이 파일들은 과거 슬라이스 증거의 출처로 남겨 두었다.
 
 브라우저/API fixture 검증은 실제 인증·DB나 Capacitor 실기기 검증을 대체하지 않는다.
