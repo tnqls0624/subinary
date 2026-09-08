@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
 import { findMiniapp } from "@/lib/miniapp-registry";
 import { createMiniappStateHandlers } from "@/lib/miniapp-host";
+import { createBackyardStorage } from "@/lib/backyard-storage";
 
 /**
  * `useSearchParams`는 Suspense 경계를 요구한다(정적 export 포함) — 이 저장소의
@@ -43,8 +44,22 @@ function MiniappView() {
     });
   }, [householdId, manifest, authedFetch]);
 
+  // 가구·앱을 캡처한 직접 저장 어댑터. 가구가 바뀌면 새로 만들고 이전 것을 버린다 —
+  // 이미 시작한 요청은 캡처한 가구로만 끝난다(설계서 §3).
+  const backyardStorage = useMemo(() => {
+    if (!householdId || !manifest || manifest.execution !== "backyard") return null;
+    return createBackyardStorage({
+      householdId, appKey: manifest.key,
+      isReady: () => status === "authenticated",
+      store: {
+        list: (hid, appKey) => authedFetch((token) => api.play.list(token, hid, appKey)),
+        save: (hid, appKey, key, state) => authedFetch((token) => api.play.save(token, appKey, key, { householdId: hid, state })),
+      },
+    });
+  }, [householdId, manifest, authedFetch, status]);
+
   if (!manifest) return <main className="min-h-dvh p-6"><p>없는 미니앱이에요</p><Link className="inline-flex min-h-11 items-center" href="/play">미니앱 목록으로</Link></main>;
-  if (manifest.execution === "backyard") return <BackyardGame key={householdId}/>;
+  if (manifest.execution === "backyard") return <BackyardGame key={householdId} storage={backyardStorage}/>;
   return <main className="min-h-dvh p-4">
     <PageBackHeader title={manifest.name}/>
     {householdId && status === "authenticated" && <MiniappHost appKey={manifest.key} src={manifest.entry} permissions={manifest.permissions} handlers={handlers} height={manifest.height} title={manifest.name}/>}
