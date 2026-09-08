@@ -1,0 +1,15 @@
+.game {position:fixed;inset:0;width:100vw;height:100dvh;overflow:hidden;background:#e7ead0;color:#394535;isolation:isolate;}
+.game canvas {display:block;width:100%;height:100%;}
+.game button {min-width:44px;min-height:44px;padding:8px 14px;border-radius:16px;background:#fff6df;color:#394535;border:1px solid #b8bb98;font:inherit;cursor:pointer;}
+.game button:focus-visible,.pad:focus-visible {outline:3px solid #53744b;outline-offset:3px;}
+.exit,.help {position:absolute;top:calc(env(safe-area-inset-top) + 12px);}
+.exit {left:calc(env(safe-area-inset-left) + 12px);}
+.help {right:calc(env(safe-area-inset-right) + 12px);}
+.fixture {position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:calc(env(safe-area-inset-left) + 16px);font-size:12px;background:#fff6dfdd;border-radius:8px;padding:4px 8px;}
+.pad {position:absolute;bottom:calc(env(safe-area-inset-bottom) + 24px);left:calc(env(safe-area-inset-left) + 24px);width:112px;height:112px;border-radius:50%;border:2px solid #fff8e7aa;background:#e7ead077;display:grid;place-items:center;touch-action:none;user-select:none;}
+.pad span {width:44px;height:44px;border-radius:50%;background:#fff6dfcc;box-shadow:0 2px 8px #39453533;pointer-events:none;}
+.message {position:absolute;top:35%;left:16px;right:16px;text-align:center;background:#fff6df;padding:16px;border-radius:16px;}
+.dialog {position:fixed;inset:0;margin:auto;width:calc(100% - 48px);max-width:420px;max-height:calc(100dvh - 48px);overflow:auto;border-radius:20px;padding:24px;background:#fff6df;color:#394535;}
+.dialog::backdrop {background:#25362677;}
+.dialog p {margin:12px 0;}
+@media(max-width:320px) {.pad {width:96px;height:96px;}.fixture {font-size:10px;}}

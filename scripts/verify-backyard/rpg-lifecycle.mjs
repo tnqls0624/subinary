@@ -15,7 +15,11 @@ try {
   page.on('pageerror',error=>result.errors.push(error.message));
   page.on('console',entry=>{if(entry.type()==='error')result.errors.push(entry.text());});
   await page.route('**/*',route=>{result.network.push(route.request().url());return route.abort();});
-  const html=await readFile(resolve(root,'backyard/index.html'),'utf8');
+  // 2D 화면은 이제 제품 경로가 아니다. `backyard/index.html`은 전체 화면 3D로 안내하는
+  // 얇은 호환 페이지가 됐고, 2D DOM은 롤백 후보를 살려 두기 위해 이 검증용 사본에 남는다.
+  // 이 시험이 재는 것은 Phaser의 알려진 리스너 잔존(destroy가 정리하지 않는
+  // document visibilitychange + canvas wheel)이며, 제품 경로가 아니라 그 특성이다.
+  const html=await readFile(resolve('scripts/verify-backyard/rpg2d-legacy.html'),'utf8');
   await page.setContent(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'').replace(/<link\b[^>]*>/g,''));
   await page.addStyleTag({content:await readFile(resolve(root,'backyard/rpg-style.css'),'utf8')});
   for(const name of ['vendor/phaser.min.js','backyard/balance.js','backyard/rules.js','backyard/codec.js','backyard/rpg-codec.js','backyard/rpg-session.js','backyard/rpg-rules.js','backyard/rpg-input.js']) await page.addScriptTag({path:resolve(root,name)});

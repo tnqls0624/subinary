@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>뒷마당</title><link rel="stylesheet" href="rpg-style.css">
+<script defer src="../bridge.js"></script>
+<script defer src="../vendor/phaser.min.js"></script>
+<script defer src="balance.js"></script><script defer src="rules.js"></script><script defer src="codec.js"></script>
+<script defer src="rpg-codec.js"></script><script defer src="rpg-session.js"></script>
+<script defer src="rpg-rules.js"></script><script defer src="rpg-input.js"></script><script defer src="rpg-engine.js"></script>
+</head><body>
+<main><header><strong>우리 뒷마당</strong><span id="place" role="status">집 앞 마당</span><button id="open-album">도감</button></header>
+<div id="world" aria-label="산책하는 마당"></div>
+<footer><button id="pad" aria-label="방향 패드. 끌어서 걷기, 방향키 또는 WASD"><span></span><b>↑<br>←　→<br>↓</b></button><div class="actions"><button id="action" aria-disabled="true">다가가 보기</button><button id="cancel-fishing" hidden>취소하고 걷기</button><small id="save" role="status">불러오는 중</small></div></footer>
+<section id="editor" hidden aria-label="꾸미기"><div class="choices"><button data-kind="pot" aria-pressed="true">화분</button><button data-kind="well" aria-pressed="false">우물</button><button data-kind="chair" aria-pressed="false">의자</button><button id="move">이동</button><button id="store">보관</button><button id="cancel">닫기</button></div><p id="placement" role="status"></p></section>
+<p id="feedback" role="status" aria-live="polite">가까이 다가가 바라봐 주세요</p>
+<section id="dialogue" hidden role="dialog" aria-modal="true" aria-labelledby="dialogue-title"><strong id="dialogue-title"></strong><p id="dialogue-text" aria-live="polite"></p><div><button id="talk-next">이야기</button><button id="show-sample">표본 보여주기</button><button id="sit-together">함께 앉기</button><button id="close-dialogue">닫기</button></div></section>
+<section id="catch-card" hidden aria-label="획득 결과"><canvas id="catch-icon" width="64" height="64" aria-hidden="true"></canvas><p id="catch-text" role="status"></p><button id="close-card">닫기</button></section>
+<button id="retry-save" hidden>저장 다시</button>
+<section id="failure" hidden role="alert"><p>마당을 열지 못했어요</p><button id="retry">다시</button></section>
+</main>
+<section id="album" hidden role="dialog" aria-modal="true" aria-labelledby="album-title">
+<div class="album-heading"><strong id="album-title">우리 마당 도감</strong><button id="close-album">닫기</button></div>
+<div class="album-scroll"><p id="today"></p><p id="album-count"></p><div class="album-tabs" role="tablist" aria-label="도감 종류"><button role="tab" id="album-tab-0" data-album-tab="0" aria-controls="album-grid" aria-selected="true">바닥·열매</button><button role="tab" id="album-tab-1" data-album-tab="1" aria-controls="album-grid" aria-selected="false">벌레</button><button role="tab" id="album-tab-2" data-album-tab="2" aria-controls="album-grid" aria-selected="false">물고기</button></div><div id="album-grid" role="tabpanel" aria-labelledby="album-tab-0"></div><section id="album-detail" hidden aria-live="polite"></section></div>
+</section>
+<section id="completion" hidden role="dialog" aria-modal="true" aria-labelledby="completion-title"><h2 id="completion-title">우리 마당의 작은 생명을 모두 만났어요</h2><p>낚시하고, 이야기를 나누고, 마당을 꾸미며 계속 산책해요.</p><button id="close-completion">계속 산책하기</button></section>
+</body></html>

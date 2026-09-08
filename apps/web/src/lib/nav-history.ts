@@ -18,9 +18,12 @@
  * ------------------------------------------------------------------------- */
 
 let inAppNavigations = 0;
+let previousPath: string | undefined;
 
 /** 앱 내 경로가 바뀔 때마다 1회 호출(앱 셸 레이아웃이 배선한다). */
-export function noteInAppNavigation(): void {
+export function noteInAppNavigation(path?: string): void {
+  if (path !== undefined && path === previousPath) return;
+  previousPath = path;
   inAppNavigations += 1;
 }
 
@@ -37,4 +40,5 @@ export function canGoBackInApp(): boolean {
 /** 테스트 전용 — 카운터를 초기화한다. */
 export function resetInAppNavigations(): void {
   inAppNavigations = 0;
+  previousPath = undefined;
 }

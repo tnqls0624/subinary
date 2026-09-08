@@ -17,27 +17,19 @@
  * ------------------------------------------------------------------------- */
 import type { MiniappPermission } from "@family/shared";
 
-export interface MiniappManifest {
-  /** 식별자. 상태 저장 키(`play_states.app_key`)이자 번들 경로다. */
+interface MiniappBase {
   key: string;
   name: string;
   description: string;
-  /**
-   * 번들 진입 URL.
-   *
-   * `apps/web/public/` 아래에 두면 정적 export에 포함돼 **OTA로 함께 배포**된다 —
-   * 게임을 추가할 때 네이티브 재빌드가 없다는 뜻이고, 그것이 이 구조의 목적이다.
-   */
-  entry: string;
-  /** 이 미니앱에 허용된 권한. 선언하지 않은 메서드는 브릿지가 막는다. */
   permissions: readonly MiniappPermission[];
-  /** iframe 높이(px). 미니앱이 스스로 크기를 바꿀 수 없어 호스트가 정한다. */
-  height: number;
 }
+export type MiniappManifest = MiniappBase & (
+  { execution: "backyard" } | { execution: "iframe"; entry: string; height: number }
+);
 
 export const MINIAPPS: readonly MiniappManifest[] = [{
   key: "backyard", name: "뒷마당", description: "함께 작은 마당을 꾸며요",
-  entry: "/miniapps/backyard/index.html", permissions: [], height: 520,
+  execution: "backyard", permissions: [],
 }];
 
 /** 등록된 미니앱을 키로 찾는다. */

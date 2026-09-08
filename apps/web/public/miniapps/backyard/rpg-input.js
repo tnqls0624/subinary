@@ -23,7 +23,7 @@ var BackyardRpgInput = (() => {
       const x = event.clientX-box.left-box.width/2, y = event.clientY-box.top-box.height/2;
       const ratio = Math.min(1,40/Math.max(1,Math.hypot(x,y)));
       if(knob instanceof HTMLElement) knob.style.transform = `translate(${x*ratio}px,${y*ratio}px)`;
-      change(BackyardRpgRules.velocity(x,y));
+      change(BackyardRpgRules.velocity(x,y,box.width*0.1));
     }
     pad.addEventListener('pointerdown', event => {
       if(!enabled() || owner !== null || event.button !== 0) return;
@@ -41,6 +41,7 @@ var BackyardRpgInput = (() => {
         event.preventDefault();if(name==='keydown'&&!event.repeat)act();return;
       }
       if(!accepted.has(event.code)) return;
+      if(event.target instanceof HTMLElement && event.target!==pad && event.target.closest('input,textarea,select,button,a,[contenteditable="true"],dialog'))return;
       event.preventDefault();
       if(owner !== null) return;
       if(name==='keydown') keys.add(event.code); else keys.delete(event.code);

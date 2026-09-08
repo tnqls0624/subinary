@@ -16,31 +16,25 @@ import {
   CreditCard,
   Home,
   ListChecks,
-  Loader2,
   Receipt,
   Sparkles,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { type ReactNode } from "react";
 
+import { AppReadinessBoundary } from "@/components/app-readiness-boundary";
 import { AccountLink } from "@/components/account-link";
 import {
   ActivityProvider,
   useActivityStore,
 } from "@/components/activity-provider";
-import { ConnectionError } from "@/components/connection-error";
-import { Onboarding } from "@/components/onboarding";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UserMenu } from "@/components/user-menu";
 import { useTodoCounts } from "@/components/widgets";
-import { useAuth } from "@/lib/auth-context";
-import { useHousehold } from "@/lib/household-context";
-import { noteInAppNavigation } from "@/lib/nav-history";
 import { activeTabFor, type TabKey } from "@/lib/nav-tabs";
 import { useUnreadCount } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -269,64 +263,10 @@ function BottomNav({ pathname }: { pathname: string }) {
   );
 }
 
-export default function AppLayout({
+function AppShell({
   children,
 }: Readonly<{ children: ReactNode }>) {
-  const router = useRouter();
   const pathname = usePathname();
-  const { status, memberships, retryBootstrap } = useAuth();
-  const { householdId } = useHousehold();
-
-  useEffect(() => {
-    if (status === "unauthenticated") router.replace("/login");
-  }, [status, router]);
-
-  // 앱 안에서 화면이 바뀔 때마다 1회 — `PageBackHeader`의 뒤로가기가 "사용자가 온
-  // 길"과 "딥링크로 방금 연 화면"을 구분하는 데 쓴다(lib/nav-history.ts).
-  useEffect(() => {
-    noteInAppNavigation();
-  }, [pathname]);
-
-  // 통신 실패로 세션을 확인하지 못한 상태 — 리다이렉트하지 않고 재시도만 제안한다.
-  if (status === "offline") {
-    return <ConnectionError onRetry={retryBootstrap} />;
-  }
-
-  if (status !== "authenticated") {
-    return (
-      <main className="flex min-h-dvh items-center justify-center">
-        <div
-          className="text-muted-foreground flex items-center gap-2 text-sm"
-          role="status"
-          aria-live="polite"
-        >
-          <Loader2 className="size-4 animate-spin" />
-          불러오는 중…
-        </div>
-      </main>
-    );
-  }
-
-  // 멤버십 0개 → 온보딩(탭바 없이).
-  if (memberships.length === 0) {
-    return (
-      <div className="flex min-h-dvh flex-col">
-        <header className="bg-background/90 sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] backdrop-blur">
-          <div className="flex h-14 items-center justify-between px-4">
-            <BrandMark />
-            <div className="flex items-center gap-1">
-              <ThemeToggle />
-              <UserMenu />
-            </div>
-          </div>
-        </header>
-        <main className="flex-1 px-4">
-          <Onboarding />
-        </main>
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-dvh flex-col">
       {/* pt-[env(safe-area-inset-top)]: 상태바(노치) 영역만큼 헤더를 밀어 겹침 방지 */}
@@ -350,7 +290,7 @@ export default function AppLayout({
           마지막 콘텐츠가 탭바 밑에 깔렸다 — 변수 참조로 기기별 편차를 흡수한다. */}
       {/* 당겨서 새로고침 — 화면의 활성 쿼리만 다시 가져온다(전역 1회 배선). */}
       <main className="flex-1 px-4 pt-6 pb-[calc(var(--app-tabbar-h)+1.5rem)]">
-        <PullToRefresh>{householdId ? children : <Onboarding />}</PullToRefresh>
+        <PullToRefresh>{children}</PullToRefresh>
       </main>
 
       {/* 전역 결제 활동 레이어 — SSE/폴링으로 새 거래를 감지해 무효화+토스트+배지. */}
@@ -358,4 +298,9 @@ export default function AppLayout({
       <BottomNav pathname={pathname} />
     </div>
   );
+}
+
+/** 금융 셸은 인증·가구 준비가 끝난 뒤에만 마운트한다. */
+export default function AppLayout({children}: Readonly<{children: ReactNode}>) {
+  return <AppReadinessBoundary><AppShell>{children}</AppShell></AppReadinessBoundary>;
 }

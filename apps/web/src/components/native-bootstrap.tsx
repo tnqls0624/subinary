@@ -17,6 +17,8 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { decideBackAction } from "@/lib/back-button";
+import { consumeGameBack } from "@/lib/game-navigation";
+import { noteInAppNavigation } from "@/lib/nav-history";
 import { canGoBackInApp } from "@/lib/nav-history";
 import { isTabRoot, normalizePath } from "@/lib/nav-tabs";
 import {
@@ -44,6 +46,10 @@ export function NativeBootstrap() {
       onDeepLink: (path) => router.push(path),
       onBackButton: () => {
         const path = pathnameRef.current;
+        if (normalizePath(path) === "/play/app") {
+          if (!consumeGameBack()) router.replace("/play");
+          return;
+        }
         const action = decideBackAction({
           // 로그인 화면도 루트로 친다 — 인증 전에는 그 뒤에 앱 화면이 없어서
           // 뒤로가기가 갈 곳이 없다(콜드 스타트 → 로그인 → 뒤로 = 앱 닫기).
@@ -84,13 +90,14 @@ export function NativeBootstrap() {
   // 누른 것이 "두 번째 누름"으로 세어져 앱이 닫히면 안 된다.
   useEffect(() => {
     exitPromptAt.current = null;
+    noteInAppNavigation(pathname);
   }, [pathname]);
 
   // 상태바 아이콘 색을 앱 테마에 동기화(라이트=어두운 아이콘, 다크=흰 아이콘).
   useEffect(() => {
     if (!resolvedTheme) return;
-    void applyStatusBarStyle(resolvedTheme === "dark");
-  }, [resolvedTheme]);
+    void applyStatusBarStyle(normalizePath(pathname) === "/play/app" ? false : resolvedTheme === "dark");
+  }, [resolvedTheme, pathname]);
 
   return null;
 }

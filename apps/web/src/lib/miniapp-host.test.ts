@@ -40,9 +40,12 @@ describe('호스트 메시지 경계', () => {
   });
   it('권한 0개인 manifest와 ready, 지출 거부를 확인한다', async () => {
     expect(MINIAPPS).toHaveLength(1);
-    // height는 고정 높이가 아니라 상한이다. BackyardViewport가 이 값을 Math.min의
-    // 한쪽으로 쓰므로, 등록부만 고치고 컴포넌트에 숫자를 또 적으면 드리프트가 난다.
-    expect(MINIAPPS[0]).toMatchObject({ key: 'backyard', permissions: [], height: 520 });
+    // backyard는 전체 화면 내장 실행이라 entry·height가 없다. 그 둘은 iframe 실행
+    // 항목에만 있다 — 등록부가 execution으로 두 방식을 판별 유니온으로 가른다.
+    // 여기서 height를 다시 기대하면 옛 카드 화면 구조를 되살리는 셈이 된다.
+    expect(MINIAPPS[0]).toMatchObject({ key: 'backyard', permissions: [], execution: 'backyard' });
+    expect(MINIAPPS[0]).not.toHaveProperty('height');
+    expect(MINIAPPS[0]).not.toHaveProperty('entry');
     const frame = { postMessage: vi.fn() };
     const runtime = createMiniappHostRuntime({ appKey: 'backyard', permissions: MINIAPPS[0]!.permissions, getFrame: () => frame, getHandlers: () => ({}) });
     runtime.loaded();
