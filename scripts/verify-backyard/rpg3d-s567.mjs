@@ -229,7 +229,7 @@ try {
     await beside(actor);
     const before = await player();
     await page.locator('[data-action]').filter({ hasText: '말 걸기' }).click();
-    await page.locator('[data-dialogue][open]').waitFor();
+    await page.locator('[data-dialogue][data-open="true"]').waitFor();
     await ack();
     // 대화 중 이동 입력 0.
     await page.keyboard.down('ArrowUp'); await page.waitForTimeout(500); await page.keyboard.up('ArrowUp');
@@ -297,7 +297,13 @@ try {
       const keys = results.requests.slice(writes).filter(item => item.method === 'PUT').map(item => item.path);
       assert(keys.length >= 1 && keys.every(path => path === '/v1/play/backyard/rpg_collection'), '획득은 collection 키만 저장한다: ' + keys.join(','));
       assert(keys.length === 1 || dto.rpg_collection.completed === true, '획득 하나가 PUT 하나 — 완료 표시만 예외: ' + keys.join(','));
-      if (await page.locator('[data-completion][open]').count() === 0) await page.locator('[data-close-card]').click();
+      // 16번째 획득은 카드를 닫는 사이에 완료 화면으로 바뀔 수 있다 — 규칙이 완료 ACK에서
+      // `card`를 비우므로 카드가 DOM에서 사라진다. 그것 자체는 실패가 아니지만 **완료가
+      // 열리지 않았는데** 사라졌다면 실패여야 하므로 그때만 원래 오류를 그대로 올린다.
+      const close = page.locator('[data-close-card]');
+      if (await close.count()) await close.click({ timeout: 5000 }).catch(async error => {
+        if (await page.locator('[data-completion][open]').count() === 0) throw error;
+      });
     }
   }
   const caught = dto.rpg_collection.species.map(tuple => tuple.split(':')[0]).sort();

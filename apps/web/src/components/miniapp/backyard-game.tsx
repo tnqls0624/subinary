@@ -50,6 +50,10 @@ function loadEngine(): Promise<void> {
 const ALBUM_TABS=["바닥·열매","벌레","물고기"];
 /** 도감 탭이 담는 종 범위. 규칙의 species 순서를 그대로 나눈 것이다. */
 const inTab=(tab: number,index: number)=>tab===0?index<4:tab===1?index>=4&&index<8:index>=8;
+/** 주민 이름표 색. 실루엣(곰·새·토끼)마다 다르게 두어 누가 말하는지 색으로도 읽힌다. */
+const PLATE: Record<string,string>={bear:"#C98A5A",bird:"#5F9E9C",rabbit:"#D98C9B"};
+/** 글자 하나의 타이핑 간격(ms). 문장 부호에서 숨을 고른다 — 벤치마크의 말풍선 리듬이다. */
+const typeDelay=(character: string)=>/[.!?…]/.test(character)?260:/[,·]/.test(character)?130:34;
 
 /**
  * 전체 화면 뒷마당.
@@ -60,6 +64,9 @@ const inTab=(tab: number,index: number)=>tab===0?index<4:tab===1?index>=4&&index
  *
  * **`playable`이 아니면 게임을 그리지 않는다** — 로드 실패에서 빈 마당이 보이면
  * 그것을 저장하고 싶어지는 경로가 생긴다.
+ *
+ * 대화는 모달이 아니다. 화면 하단 말풍선이 글자를 한 자씩 띄우고, 세계는 뒤에서
+ * 계속 그려지며 카메라가 주민 쪽으로 다가간다. 이동 입력만 0이 된다(설계서 §7).
  */
 export function BackyardGame({ storage }: { storage: BackyardStorageBridge | null }) {
   const router=useRouter();
@@ -68,7 +75,7 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
   const host=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),pad=useRef<HTMLDivElement>(null);
   const help=useRef<HTMLDialogElement>(null),helpButton=useRef<HTMLButtonElement>(null);
   const album=useRef<HTMLDialogElement>(null),albumButton=useRef<HTMLButtonElement>(null),albumScroll=useRef<HTMLDivElement>(null);
-  const talk=useRef<HTMLDialogElement>(null),finale=useRef<HTMLDialogElement>(null),action=useRef<HTMLButtonElement>(null);
+  const bubble=useRef<HTMLElement>(null),finale=useRef<HTMLDialogElement>(null),action=useRef<HTMLButtonElement>(null);
   const reset=useRef<()=>void>(()=>{});
   const world=useRef<RpgWorldHandle|null>(null);
   const walker=useRef<RpgControllerHandle|null>(null);
@@ -80,10 +87,12 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
    * 처리해 **닫는 즉시 같은 이벤트 안에서 초점을 원래 버튼으로 돌릴 수 있다.**
    */
   const panels=useRef(false);
+  /** 대화 중인 주민 id와 타이핑 진행. 렌더 루프가 카메라·끄덕임에 매 프레임 읽는다. */
+  const talking=useRef<string|null>(null),typing=useRef(false);
   const [error,setError]=useState(""),[generation,setGeneration]=useState(0),[ready,setReady]=useState(false);
   const [hud,setHud]=useState<RpgHud|null>(null);
   const [albumTab,setAlbumTab]=useState(0),[detail,setDetail]=useState<number|null>(null);
-  const [today,setToday]=useState("");
+  const [today,setToday]=useState(""),[shown,setShown]=useState(0);
   const exit=useRef(()=>{});
   const playable=save.status==="playable"?save:null;
   // writer 하나가 세션 한 세대다. 세션은 ACK마다 새 상태 객체를 알리므로
@@ -97,9 +106,10 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
    * 패널 수명 하나로 두 가지를 켠다.
    * @param open 세계 렌더·진행을 멈출 것인가(도감·완료·도움말 전부)
    * @param hide 세계 HUD를 감출 것인가 — **투명한 전체 화면 도감만** 필요하다.
-   *   작은 대화창 뒤에서는 저장 상태 표시를 계속 보여야 한다(설계서 §7).
    */
   const setPanel=(open: boolean,hide: boolean)=>{panels.current=open;host.current?.toggleAttribute("data-panel",open&&hide);};
+  /** 대화를 닫는다. 관계 저장은 이미 끝났고 여기서 다시 쓰지 않는다. */
+  const closeDialogue=()=>{world.current?.closeDialogue();talking.current=null;typing.current=false;action.current?.focus();};
 
   /** 보이는 도감 카드의 표본만 같은 renderer의 scissor로 다시 그린다. */
   const drawSpecimens=useCallback(()=>{
@@ -132,7 +142,8 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
   useEffect(()=>()=>{session?.destroy();},[session]);
   useEffect(()=>registerGameBack(()=>{
     reset.current();
-    for(const panel of [talk,album,finale,help])if(panel.current?.open){panel.current.close();return true;}
+    if(talking.current){closeDialogue();return true;}
+    for(const panel of [album,finale,help])if(panel.current?.open){panel.current.close();return true;}
     exit.current();return true;
   }),[]);
   useEffect(()=>{
@@ -140,7 +151,7 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
     // playable이 아니면 3D를 만들지 않는다. 로드 실패에서 빈 마당을 보여 주면
     // 그것을 저장하고 싶어지는 경로가 생긴다(설계서 §3).
     if(!root||!screen||!control||!writer)return;
-    let disposed=false,frame=0,last: number | null=null,previous=0,digest="",listing="";
+    let disposed=false,frame=0,last: number | null=null,previous=0,digest="",listing="",phase="idle";
     let cleanup=()=>{};
     const originalOverflow=document.body.style.overflow;
     document.body.style.overflow="hidden";
@@ -175,7 +186,7 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
       content.sync(initial.data,true);setToday(content.visit().description);
       previous=controller.state().distance;
       const input=BackyardRpgInput.create(control,value=>controller.input(value),
-        ()=>!panels.current&&!talk.current?.open&&!content.busy()&&!document.hidden,
+        ()=>!panels.current&&!talking.current&&!content.busy()&&!document.hidden,
         ()=>{const state=controller.state();content.act(state,state.direction);});
       reset.current=()=>{input.reset();controller.reset();last=null;};
       const resize=()=>{
@@ -186,8 +197,10 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
       const pause=()=>{reset.current();cancelAnimationFrame(frame);if(!document.hidden)frame=requestAnimationFrame(tick);};
       const keydown=(event: KeyboardEvent)=>{
         if(event.key!=="Escape")return;
-        if(talk.current?.open||album.current?.open||finale.current?.open||help.current?.open)return;
-        event.preventDefault();exit.current();
+        if(album.current?.open||finale.current?.open||help.current?.open)return;
+        event.preventDefault();
+        if(talking.current){closeDialogue();return;}
+        exit.current();
       };
       document.addEventListener("visibilitychange",pause,{signal:abort.signal});window.addEventListener("blur",()=>reset.current(),{signal:abort.signal});
       window.addEventListener("resize",resize,{signal:abort.signal});window.visualViewport?.addEventListener("resize",resize,{signal:abort.signal});
@@ -199,17 +212,23 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
         // 도감·완료·도움말이 열려 있으면 세계를 그리지 않는다. 표본만 scissor로 남는다.
         if(panels.current){last=now;frame=requestAnimationFrame(tick);return;}
         // 대화·낚시·채집 중에는 같은 프레임에서 이동 입력을 0으로 만든다(설계서 §7).
-        if(content.busy()||talk.current?.open)controller.input({x:0,y:0});
+        if(content.busy()||talking.current)controller.input({x:0,y:0});
         controller.frame(now);const state=controller.state();
         const delta=last===null?0:now-last;
         const snapshot=content.frame(delta,state,state.direction);
         const moving=state.distance>previous;
+        talking.current=snapshot.dialogue?.id??null;
         stage?.update(state.world,state.direction,delta,last===null,{distance:state.distance,moving,
-          sitting:snapshot.actors.some(actor=>actor.sitting),reaching:!!snapshot.gathering||snapshot.fishing.phase!=="idle"});
-        stage?.content(snapshot,delta);stage?.render();
+          sitting:snapshot.actors.some(actor=>actor.sitting),reaching:!!snapshot.gathering||snapshot.fishing.phase!=="idle",
+          focusId:talking.current,fishing:snapshot.fishing.phase!=="idle"});
+        stage?.content(snapshot,delta,{talkingId:talking.current,talking:typing.current});stage?.render();
         previous=state.distance;last=now;
+        // 입질은 화면(찌가 잠김)과 손(짧은 진동)으로 함께 알린다. 진동이 없는 기기는 화면만 본다.
+        if(snapshot.fishing.phase==="bite"&&phase!=="bite")navigator.vibrate?.(40);
+        phase=snapshot.fishing.phase;
         root!.dataset.player=JSON.stringify(state);root!.dataset.target=snapshot.target?.id??"";
         root!.dataset.actors=JSON.stringify(snapshot.actors.map(actor=>({id:actor.id,x:Math.round(actor.x),y:Math.round(actor.y),direction:actor.direction})));
+        root!.toggleAttribute("data-talking",!!talking.current);
         // 검증이 규칙을 복제하지 않고 실제 활성 채집점을 읽을 수 있게 노출한다.
         const nodes=JSON.stringify(snapshot.nodes);
         if(nodes!==listing){listing=nodes;root!.dataset.nodes=nodes;}
@@ -219,8 +238,7 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
         if(serialized!==digest){digest=serialized;setHud(next);}
         if(snapshot.completion&&!finale.current?.open){setPanel(true,false);finale.current?.showModal();}
         // 정지 1초·걷기 10초·숨김 flush는 writer가 소유한다. 프레임마다 저장하지 않는다.
-        // `t`는 **벽시계 초**다. 슬라이스 4가 RAF 타임스탬프를 넣어 두었는데 규칙이 이 값을
-        // 시계 역행 차단의 하한으로 쓰므로(2D도 Date.now를 저장했다) 의미를 되돌린다.
+        // `t`는 **벽시계 초**다. 규칙이 이 값을 시계 역행 차단의 하한으로 쓴다(2D도 Date.now를 저장했다).
         const point=BackyardRpg3dController.toSaved(state);
         latest.current?.writer.observePlayer({v:2,mapVersion:1,x:point.x,y:point.y,direction:state.direction,outfit:saved.outfit,t:Math.floor(Date.now()/1000)},moving);
         frame=requestAnimationFrame(tick);
@@ -236,12 +254,22 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
     if(save.status!=="playable"||!world.current)return;
     world.current.sync(save.data,false);setToday(world.current.visit().description);
   },[save]);
-  // 대화는 규칙이 만든 문장을 그대로 띄운다. 열리는 순간 이동 입력을 버린다.
+  // 대화는 규칙이 만든 문장을 그대로 띄운다. 열리는 순간 이동 입력을 버리고 말풍선에 초점을 둔다.
   const dialogue=hud?.dialogue??null;
+  const line=dialogue?.text??"",done=shown>=line.length;
   useEffect(()=>{
-    if(dialogue&&!talk.current?.open){reset.current();talk.current?.showModal();}
-    if(!dialogue&&talk.current?.open)talk.current.close();
-  },[dialogue]);
+    if(!dialogue)return;
+    reset.current();bubble.current?.focus({preventScroll:true});
+  },[dialogue?.id]);
+  // 타이핑: 글자 하나씩, 문장 부호에서 잠깐 멈춘다. 새 문장마다 처음부터 시작한다.
+  useEffect(()=>{
+    setShown(0);
+    if(!line)return;
+    let index=0,timer=window.setTimeout(step,90);
+    function step(){index++;setShown(index);if(index<line.length)timer=window.setTimeout(step,typeDelay(line[index-1]??""));}
+    return ()=>window.clearTimeout(timer);
+  },[line,dialogue?.title]);
+  useEffect(()=>{typing.current=!!dialogue&&!done;},[dialogue,done]);
   useEffect(()=>{if(album.current?.open)drawSpecimens();},[albumTab,detail,drawSpecimens]);
 
   const collection=playable?.data.rpg_collection;
@@ -258,9 +286,17 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
   };
   /** 패널을 닫으면 HUD가 돌아오고 세계 렌더가 다시 살아난다. */
   const closePanel=()=>{setPanel(false,false);scene.current?.render();};
+  /** 말풍선 탭: 타이핑 중이면 전부 보이고, 다 보였으면 다음 이야기다(벤치마크의 A 버튼). */
+  const advance=()=>{
+    if(!done){setShown(line.length);return;}
+    const state=foot();if(state)world.current?.converse("talk",state);
+  };
+  const speaker=dialogue&&ready?BackyardRpgLife.residents.find(r=>r.id===dialogue.id):undefined;
+  const friendship=dialogue?.title.match(/(\d+)\/12/)?.[1]??"";
 
   return <div ref={host} className={styles.game} data-backyard-game>
     <canvas ref={canvas} aria-label="뒷마당 3D 산책"/>
+    <div className={styles.vignette} aria-hidden="true"/>
     <button className={styles.exit} data-exit onClick={()=>exit.current()}>마당 나가기</button>
     <button ref={albumButton} className={styles.albumButton} data-open-album onClick={openAlbum} aria-disabled={!ready}>도감</button>
     <button ref={helpButton} className={styles.help} onClick={()=>{reset.current();setPanel(true,false);help.current?.showModal();}}>도움말</button>
@@ -268,10 +304,14 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
       <span role="status" data-save>{playable.writer.getSaveState().message||(playable.writer.getSaveState().dirty?"저장 중…":"저장됨")}</span>
       {Object.values(playable.writer.getSaveState().keys).some(key=>!!key.error)&&<button data-retry-save onClick={()=>playable.writer.flush()}>저장 다시</button>}
     </div>}
-    {hud&&<p className={styles.place} role="status" data-place>{hud.hud.place}</p>}
+    {hud&&<div className={styles.placeGroup}>
+      <p className={styles.place} role="status" data-place>{hud.hud.place}</p>
+      {/* 오늘의 할 일은 규칙(`today`)이 정한 문장이다. 잠시 보이고 사라진다 — 도감 안에도 남아 있다. */}
+      {today&&<p key={today} className={styles.today} data-today>{today}</p>}
+    </div>}
     <div ref={pad} className={styles.pad} data-pad tabIndex={0} role="group" aria-label="이동 패드. 방향키 또는 WASD로 걸어요" aria-disabled={!ready}><span/></div>
     {hud&&<div className={styles.actions}>
-      <button ref={action} className={styles.action} data-action aria-disabled={hud.hud.disabled}
+      <button ref={action} className={styles.action} data-action data-phase={hud.fishing} aria-disabled={hud.hud.disabled}
         onClick={()=>{const state=foot();if(state)world.current?.act(state,state.direction);}}>{hud.hud.action}</button>
       {(hud.fishing!=="idle"||hud.gathering)&&<button className={styles.cancel} data-cancel-fishing
         onClick={()=>{world.current?.cancelFishing();action.current?.focus();}}>취소하고 걷기</button>}
@@ -286,10 +326,15 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
       </div>
       <p role="status" data-placement>{hud.hud.placement}</p>
     </section>}
-    {hud&&<p className={styles.feedback} role="status" aria-live="polite" data-feedback>{hud.hud.feedback}</p>}
-    {hud?.card&&<section className={styles.card} aria-label="획득 결과" data-card>
-      <p role="status" data-card-text>{hud.card.name} · {playable&&(()=>{const slot=playable.writer.getSaveState().keys.rpg_collection;
-        return slot.localSequence>slot.ackedSequence?(slot.error?"저장 후 계속할 수 있어요 · 다시":"저장 중"):"도감에 남겼어요";})()}</p>
+    {hud&&!dialogue&&<p key={hud.hud.feedback} className={styles.feedback} role="status" aria-live="polite" data-feedback>{hud.hud.feedback}</p>}
+    {/* key는 표본 인덱스만이다. 저장 ACK로 수가 갱신될 때 카드가 리마운트되면 닫기
+        버튼이 눌리는 도중 DOM에서 떨어진다 — 등장 애니메이션은 새 종에서만 필요하다. */}
+    {hud?.card&&<section key={hud.card.index} className={styles.card} aria-label="획득 결과" data-card>
+      <div>
+        {record(hud.card.index).count<=1&&<small className={styles.badge}>처음 만났어요</small>}
+        <p role="status" data-card-text>{hud.card.name} · {playable&&(()=>{const slot=playable.writer.getSaveState().keys.rpg_collection;
+          return slot.localSequence>slot.ackedSequence?(slot.error?"저장 후 계속할 수 있어요 · 다시":"저장 중"):"도감에 남겼어요";})()}</p>
+      </div>
       <button data-close-card onClick={()=>{world.current?.closeCard();action.current?.focus();}}>닫기</button>
     </section>}
     {save.status!=="playable"&&!error&&<div className={styles.message} role={"message" in save?"alert":"status"}>
@@ -300,17 +345,26 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
     </div>}
     {playable&&!ready&&!error&&<p className={styles.message} role="status">마당을 불러오는 중…</p>}
     {error&&<div className={styles.message} role="alert"><p>{error}</p><button onClick={()=>setGeneration(v=>v+1)}>다시 시도</button></div>}
-    <dialog ref={talk} className={styles.dialog} data-dialogue
-      onClose={()=>{world.current?.closeDialogue();action.current?.focus();}} onCancel={()=>reset.current()}>
-      <strong>{dialogue?.title}</strong>
-      <p aria-live="polite" data-dialogue-text>{dialogue?.text}</p>
-      <div className={styles.row}>
-        <button data-talk-next onClick={()=>{const state=foot();if(state)world.current?.converse("talk",state);}}>이야기</button>
-        <button data-show-sample onClick={()=>{const state=foot();if(state)world.current?.converse("sample",state);}}>표본 보여주기</button>
-        <button data-sit-together onClick={()=>{const state=foot();if(state)world.current?.converse("sit",state);}}>함께 앉기</button>
-        <button data-close-dialogue onClick={()=>talk.current?.close()}>닫기</button>
-      </div>
-    </dialog>
+    {/*
+      말풍선. 모달이 아니라 화면 하단의 한 장이다 — 세계는 뒤에서 계속 그려지고 저장 상태도
+      계속 보인다(설계서 §7). 보이는 글은 한 자씩 늘어나지만 요소의 textContent는 항상
+      문장 전체다(숨긴 span) — 글자가 늘어도 줄바꿈이 흔들리지 않고 검증도 전체를 읽는다.
+      스크린리더에는 완성 문장 하나만 따로 알린다.
+    */}
+    {dialogue&&<section ref={bubble} className={styles.bubble} data-dialogue data-open="true" role="dialog" aria-label={speaker?.name??"주민"}
+      tabIndex={0} onClick={advance} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();advance();}}}>
+      <span className={styles.plate} style={{background:PLATE[speaker?.shape??""]??"#8DA86A"}}>{speaker?.name??dialogue.title}</span>
+      {friendship&&<span className={styles.hearts} aria-label={`함께한 경험 ${friendship}/12`}>♥ {friendship}<small>/12</small></span>}
+      <p className={styles.line} data-dialogue-text aria-hidden="true">{line.slice(0,shown)}<span className={styles.unread}>{line.slice(shown)}</span></p>
+      <p className={styles.srOnly} aria-live="polite">{line}</p>
+      <span className={styles.caret} aria-hidden="true" hidden={!done}>▼</span>
+    </section>}
+    {dialogue&&<div className={styles.choices} data-choices hidden={!done}>
+      <button data-talk-next onClick={()=>{const state=foot();if(state)world.current?.converse("talk",state);}}>이야기</button>
+      <button data-show-sample onClick={()=>{const state=foot();if(state)world.current?.converse("sample",state);}}>표본 보여주기</button>
+      <button data-sit-together onClick={()=>{const state=foot();if(state)world.current?.converse("sit",state);}}>함께 앉기</button>
+      <button data-close-dialogue onClick={closeDialogue}>그만</button>
+    </div>}
     {/* 도감 표본은 같은 canvas가 그린다. 창은 투명하게 두고 텍스트·초점·스크롤만 HTML이 맡는다. */}
     <dialog ref={album} className={styles.albumPanel} aria-label="우리 마당 도감" data-album
       onClose={()=>{closePanel();albumButton.current?.focus();}}>
@@ -353,8 +407,8 @@ export function BackyardGame({ storage }: { storage: BackyardStorageBridge | nul
     </dialog>
     <dialog ref={help} className={styles.dialog} onClose={()=>{closePanel();reset.current();helpButton.current?.focus();}} onCancel={()=>reset.current()}>
       <h1>마당 산책</h1><p>왼쪽 패드나 방향키·WASD로 걸어요. 위쪽은 항상 북쪽이에요.</p>
-      <p>가까이 다가가 바라보면 오른쪽 버튼으로 채집·낚시·이야기를 해요. 입질은 누를 때까지 기다려 줘요.</p>
-      <p>지출 정보와 연결되지 않아요. 같은 가족의 마당은 공동 저장되며, 동시에 바꾸면 마지막 저장이 남아요.</p>
+      <p>가까이 다가가 바라보면 오른쪽 버튼으로 채집·낚시·이야기를 해요. 찌가 잠기면 바로 끌어올려요.</p>
+      <p>말풍선을 누르면 다음 이야기로 넘어가요. 지출 정보와 연결되지 않아요. 같은 가족의 마당은 공동 저장되며, 동시에 바꾸면 마지막 저장이 남아요.</p>
       <p>걸음을 멈추면 위치가 저장돼요. 저장이 안 되면 화면 아래에 계속 표시돼요.</p>
       <button onClick={()=>help.current?.close()}>닫기</button>
     </dialog>
