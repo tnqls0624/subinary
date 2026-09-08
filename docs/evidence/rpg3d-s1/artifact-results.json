@@ -1,0 +1,70 @@
+{
+  "engine": {
+    "source": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js",
+    "bytes": 603445,
+    "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
+    "license": "apps/web/public/miniapps/vendor/three-r128.LICENSE"
+  },
+  "nodeCheck": [
+    {
+      "file": "apps/web/public/miniapps/vendor/three-r128.min.js",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "apps/web/public/miniapps/backyard/rpg3d-terrain.js",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "apps/web/public/miniapps/backyard/rpg3d-fixture.js",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "scripts/verify-backyard/rpg3d-s1.mjs",
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "system": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "implementationImages": [],
+  "realDevice": "확인 못 함: adb devices 비어 있음, booted iOS simulator 없음",
+  "preserved2d": {
+    "rpg-rules.js": true,
+    "rpg-codec.js": true,
+    "rpg-session.js": true,
+    "rpg-engine.js": true,
+    "index.html": true,
+    "rpg-style.css": true
+  },
+  "checks": {
+    "domTypecheck": 0,
+    "rulesTypecheck": 0,
+    "webTypecheck": 0,
+    "backyardVitest": {
+      "exit": 0,
+      "files": 14,
+      "tests": 190
+    },
+    "browserHarness": 0
+  },
+  "hashes": {
+    "apps/web/public/miniapps/backyard/rpg3d-fixture.js": "28a467ba21a168749ecea4c8339e52b69aec8461e4cf8e9d6eb65d2d25b1a00a",
+    "apps/web/public/miniapps/backyard/rpg3d-fixture.css": "1b787581e4f4047dd59ccd0e678c685211084973a1476467b55e961106e000ce",
+    "apps/web/public/miniapps/backyard/rpg3d-terrain.js": "25144f87d01d33865f99f5a09ba13c8091383a668e121ea4515dcfe2e2e01b84",
+    "apps/web/public/miniapps/backyard/rpg3d-fixture.html": "48aa31faac6d4824b70c812f5837121328daa88c0c64b261940dcdf9056358c2",
+    "docs/evidence/rpg3d-s1/3d-800x360.png": "18ad1c0759be451538518cb7af185561d26adc112cc46afa7549a4f1bc6417fd",
+    "docs/evidence/rpg3d-s1/lighting-800x360.png": "6a63245bb52c8cbc072e5947d9a535ae88a2392a682841d5882426fd721cd922",
+    "docs/evidence/rpg3d-s1/2d-800x360.png": "00c0fc8c3c1547a5f6c3e5633594a33917bb0e74b33799f963c1f018d4e6888d",
+    "docs/evidence/rpg3d-s1/compare-800x360.png": "d3d2b362c63ec45d79fc982de519513c5b296efdb1e4349f0434cff07716698b",
+    "docs/evidence/rpg3d-s1/3d-800x360-unlit.png": "d1618088baa011d88916896757802ec080b0cdeed4d29970ec0411897c570b81",
+    "docs/evidence/rpg3d-s1/lighting-360x800.png": "41f406d0d1856e27da74ea0ed569d9b8df8ad36fe5a238fa12b70d95b8fcc3b1",
+    "docs/evidence/rpg3d-s1/3d-360x800.png": "ce2e0c2b3dcf45a13ac8a270ce40a220827da0bccbd09dd36e1a7426bfd52046",
+    "docs/evidence/rpg3d-s1/3d-800x360-context-loss.png": "fb584019fba7fe5ad5337043ae3963421f877572da55e01c646659970309e9b1",
+    "docs/evidence/rpg3d-s1/3d-360x800-context-loss.png": "f7e0f53feafc4795b2ef812dc03aff1f41b73c3ea1056c3884041d8e583b10ea",
+    "docs/evidence/rpg3d-s1/2d-360x800.png": "a7bdde489b9422a9a81188f3bac7926d70d78410d56d81c944187eef2e8ac78e",
+    "docs/evidence/rpg3d-s1/compare-360x800.png": "e34c68c501e4fadb5238e3074ba641713c00d89b9a4cc8c1f6a3e9009ea5618e",
+    "docs/evidence/rpg3d-s1/3d-360x800-unlit.png": "c75f3ce54965e316bbc288a164a5724d85f31b644b066c14927db48f2bd3e4a4"
+  }
+}

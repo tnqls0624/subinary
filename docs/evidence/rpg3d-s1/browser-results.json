@@ -1,0 +1,523 @@
+{
+  "browser": "149.0.7827.55",
+  "environment": "macOS 데스크톱 Chromium; 모바일 에뮬레이션은 실기기 성능 증거가 아님",
+  "screens": [
+    {
+      "size": {
+        "width": 360,
+        "height": 800
+      },
+      "data": {
+        "renderCpuMs": "74.40",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "184.70",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "186.10",
+        "ready": "true"
+      },
+      "network": [
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.html",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.css",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/vendor/three-r128.min.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg-rules.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-terrain.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.js",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 800,
+        "height": 360
+      },
+      "data": {
+        "renderCpuMs": "54.20",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "95.00",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "95.40",
+        "ready": "true"
+      },
+      "network": [
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.html",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.css",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/vendor/three-r128.min.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg-rules.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-terrain.js",
+          "method": "GET"
+        },
+        {
+          "url": "http://127.0.0.1:51775/miniapps/backyard/rpg3d-fixture.js",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "checks": [
+    "360×800 / 800×360, 동일 anchor·12그루·825정점·canvas 1·iframe 0",
+    "조명 on/off와 회전, 내부 150만 픽셀 제한",
+    "3D 저장 API/Storage 호출 0·CDN/이미지 요청 0",
+    "WebGL context loss 오류 UI 및 restore 뒤 같은 장면 복원",
+    "동봉 엔진 버전 불일치 오류 UI"
+  ],
+  "errors": [],
+  "mobileFirstFrame": "확인 못 함 — 연결된 대표 실기기 없음",
+  "emulatedTiming": [
+    {
+      "deviceName": "Pixel 5",
+      "run": 0,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "86.80",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "195.60",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "197.10",
+        "ready": "true"
+      }
+    },
+    {
+      "deviceName": "Pixel 5",
+      "run": 1,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "73.20",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "142.00",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "143.10",
+        "ready": "true"
+      }
+    },
+    {
+      "deviceName": "Pixel 5",
+      "run": 2,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "69.40",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "128.90",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "129.90",
+        "ready": "true"
+      }
+    },
+    {
+      "deviceName": "iPhone 13",
+      "run": 0,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "89.80",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "196.90",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "198.40",
+        "ready": "true"
+      }
+    },
+    {
+      "deviceName": "iPhone 13",
+      "run": 1,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "72.20",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "139.70",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "141.00",
+        "ready": "true"
+      }
+    },
+    {
+      "deviceName": "iPhone 13",
+      "run": 2,
+      "cpuThrottle": 4,
+      "engine": "Chromium (iPhone도 WKWebView 아님)",
+      "data": {
+        "renderCpuMs": "71.40",
+        "calls": "37",
+        "triangles": "25776",
+        "characterHeightPercent": "13.53",
+        "characterCenterPercent": "56.71",
+        "firstSubmitMs": "134.40",
+        "treeCount": "12",
+        "terrainVertices": "825",
+        "anchor": "{\"logical\":{\"x\":240,\"y\":304},\"world\":{\"x\":-8.5,\"z\":-2.5,\"y\":0.06144016983938401}}",
+        "firstFrameMs": "135.40",
+        "ready": "true"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/index.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-style.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/phaser.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/balance.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/codec.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-codec.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-session.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-input.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-engine.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/index.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-style.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/phaser.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/balance.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/codec.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-codec.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-session.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-input.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-engine.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/vendor/three-r128.min.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.html"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.css"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg-rules.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-terrain.js"
+    },
+    {
+      "method": "GET",
+      "url": "/miniapps/backyard/rpg3d-fixture.js"
+    }
+  ]
+}
