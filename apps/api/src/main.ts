@@ -16,6 +16,7 @@ import type { AppConfig } from '@family/config';
 import { NATIVE_CLIENT_ORIGINS } from '@family/shared';
 import { createLogger } from '@family/shared';
 
+import { registerEmptyBodyParser } from './empty-body-parser.js';
 import { AppModule } from './app.module';
 
 const DEFAULT_API_PORT = 3001;
@@ -101,6 +102,10 @@ async function bootstrap(): Promise<void> {
     { parseAs: 'string' },
     (_req, body, done) => done(null, body),
   );
+
+  // 본문 없는 POST/DELETE가 Cloudflare 터널을 지나면 415로 끊겨 앱 자동 로그인이 죽었다.
+  // 근거와 경계는 `empty-body-parser.ts` 머리주석에 있다.
+  registerEmptyBodyParser(fastify);
 
   // card-sms-token(JSON) 경로 한정 lenient JSON 수리: MacroDroid가 content에
   // 카드문자를 raw로 넣으면 문자열 안 개행 때문에 표준 JSON 파서가 400을 낸다.
