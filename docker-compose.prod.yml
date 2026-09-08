@@ -434,9 +434,17 @@ services:
 
   # Cloudflare Tunnel: 아웃바운드 연결만 → 공유기 포트 개방 불필요, 공인 IP 비노출.
   # 공개 호스트명 매핑(도메인 → http://caddy:80)은 Cloudflare Zero Trust 대시보드에서 설정.
+  #
+  # `--protocol http2`를 명시하는 이유(2026-09-08 실측):
+  # 기본값 QUIC(UDP)에서 24시간 동안 재연결 203회, `timeout: no recent network activity`
+  # 200회가 관측됐다. 4개 HA 커넥션 중 1·2·3이 동시에 끊긴 뒤 복구되지 않아 0번 하나로만
+  # 서비스했고, 그 하나가 끊기는 동안이 그대로 외부 장애가 됐다. 원인은 공유기/ISP가 유휴
+  # UDP 세션을 끊는 것으로 보인다. http2는 TCP를 쓰므로 NAT 타임아웃에 강하다.
+  # 포기하는 것은 QUIC의 낮은 지연과 UDP 기반 기능이며, 이 앱은 HTTP 요청만 쓴다.
+  # 재연결 빈도가 회복되지 않으면 이 플래그를 지우고 MTU·네트워크 쪽을 본다.
   cloudflared:
     image: *cloudflared-image
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.production}
+    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.production}
     depends_on:
       - caddy
     logging: *default-logging
