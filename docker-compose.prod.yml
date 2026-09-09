@@ -444,9 +444,35 @@ services:
   # 재연결 빈도가 회복되지 않으면 이 플래그를 지우고 MTU·네트워크 쪽을 본다.
   cloudflared:
     image: *cloudflared-image
-    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.production}
+    # --metrics를 **고정**한다. 미지정이면 20241~20245 중 비어 있는 포트를 골라 붙어서
+    # 아래 healthcheck가 어느 포트를 물어야 할지 알 수 없다. 127.0.0.1로 묶어 도커
+    # 네트워크에는 노출하지 않는다(같은 컨테이너 안에서만 조회).
+    command: tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env.production}
     depends_on:
       - caddy
+    # 터널이 죽어도 **프로세스는 살아 있다.**
+    #
+    # 2026-09-09 20:55, 맥이 절전에 들어가며 엣지 커넥션 4개가 한꺼번에 끊겼다.
+    # cloudflared는 종료하지 않고 "Retrying connection in up to 1s"만 14분간 반복했고,
+    # 그동안 공개 도메인은 전부 502/530이었다. 컨테이너는 `Up 13 hours`로 멀쩡해 보였고
+    # `restart: unless-stopped`는 종료된 적이 없으니 아무것도 하지 않았다. 결국 사람이
+    # 알아채고 수동으로 재시작해야 풀렸다.
+    #
+    # 이미지가 distroless라 셸·curl·wget이 없어 CMD-SHELL 헬스체크를 못 쓴다. 대신
+    # 이미지 자신의 `cloudflared tunnel ready`가 /ready를 호출하고 **종료 코드로** 답한다
+    # (엣지 커넥션 0이면 비정상). CMD 형식은 셸 없이 실행되므로 이 이미지에서 동작한다.
+    #
+    # ⚠️ 이것은 **감지**이지 자동 복구가 아니다. 도커는 unhealthy 컨테이너를 재시작하지
+    # 않는다(재시작 정책은 "종료"에만 반응한다). 이 헬스체크가 하는 일은 `docker ps`·
+    # 배포 검증·로그 뷰어에서 "터널만 죽었다"가 원본 장애와 구분되어 보이게 하는 것이다.
+    # 호스트가 잠들면 gatus를 포함한 로컬 감시 전부가 함께 멈추므로, 그 경우를 잡으려면
+    # 맥 **밖의** 죽은 사람 스위치(OPS_SENTINEL_HEARTBEAT_URL)가 필요하다.
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     logging: *default-logging
     restart: unless-stopped
 
