@@ -23,14 +23,17 @@ interface MiniappBase {
   description: string;
   permissions: readonly MiniappPermission[];
 }
-export type MiniappManifest = MiniappBase & (
-  { execution: "backyard" } | { execution: "iframe"; entry: string; height: number }
-);
+export type MiniappManifest = MiniappBase & { execution: "iframe"; entry: string; height: number };
 
-export const MINIAPPS: readonly MiniappManifest[] = [{
-  key: "backyard", name: "뒷마당", description: "함께 작은 마당을 꾸며요",
-  execution: "backyard", permissions: [],
-}];
+/*
+ * 지금은 비어 있다 — 뒷마당(3D 산책)을 2026-09-09에 걷어냈다. 재미가 없다는 판정이었다.
+ *
+ * 배열만 비우고 **틀은 남긴다.** 호스트·브릿지·권한 검증·저장 API(`/v1/play/*`)가
+ * 그대로라 다음 미니앱은 여기 한 줄을 더하는 것으로 붙는다. 전체 화면 실행 방식
+ * (`execution: "backyard"`)은 그 게임 전용이었으므로 유니온에서 함께 뺐다 — 다시
+ * 필요해지면 git에서 되살린다(`c820a43` 이전).
+ */
+export const MINIAPPS: readonly MiniappManifest[] = [];
 
 /** 등록된 미니앱을 키로 찾는다. */
 export function findMiniapp(key: string): MiniappManifest | null {

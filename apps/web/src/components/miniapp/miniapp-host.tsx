@@ -34,9 +34,9 @@ export function MiniappHost({ appKey, src, permissions, handlers, height = 480, 
       window.removeEventListener("message", onMessage);
     };
   }, [appKey, permissions, src]);
-  const sendViewport = useCallback((): void => {
-    if (appKey === "backyard") frameRef.current?.contentWindow?.postMessage({ type: "backyard.viewport", paused }, "*");
-  }, [appKey, paused]);
+  // 뒷마당이 쓰던 전용 viewport 메시지는 그 게임과 함께 걷어냈다. 새 미니앱이
+  // 일시정지 신호를 필요로 하면 앱별 분기가 아니라 브릿지 메서드로 넣는다.
+  const sendViewport = useCallback((): void => {}, []);
   useEffect(sendViewport, [sendViewport]);
   const onLoad = useCallback(() => {
     hasLoaded.current = true;

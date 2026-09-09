@@ -38,22 +38,30 @@ describe('호스트 메시지 경계', () => {
     result.resolve({ state: null }); await pending;
     expect(old.postMessage).not.toHaveBeenCalled(); expect(fresh.postMessage).not.toHaveBeenCalled();
   });
-  it('권한 0개인 manifest와 ready, 지출 거부를 확인한다', async () => {
-    expect(MINIAPPS).toHaveLength(1);
-    // backyard는 전체 화면 내장 실행이라 entry·height가 없다. 그 둘은 iframe 실행
-    // 항목에만 있다 — 등록부가 execution으로 두 방식을 판별 유니온으로 가른다.
-    // 여기서 height를 다시 기대하면 옛 카드 화면 구조를 되살리는 셈이 된다.
-    expect(MINIAPPS[0]).toMatchObject({ key: 'backyard', permissions: [], execution: 'backyard' });
-    expect(MINIAPPS[0]).not.toHaveProperty('height');
-    expect(MINIAPPS[0]).not.toHaveProperty('entry');
+  it('권한 0개면 ready가 빈 권한을 알리고 지출 조회를 거부한다', async () => {
+    // 등록부가 비어도 이 계약은 유지돼야 한다 — 뒷마당을 걷어내며 MINIAPPS가 비었고,
+    // 예전에는 이 테스트가 `MINIAPPS[0]`(그 게임)을 직접 집었다. 런타임 계약은
+    // 등록부에 무엇이 들었는지와 무관하므로 권한 배열을 여기서 만든다.
     const frame = { postMessage: vi.fn() };
-    const runtime = createMiniappHostRuntime({ appKey: 'backyard', permissions: MINIAPPS[0]!.permissions, getFrame: () => frame, getHandlers: () => ({}) });
+    const runtime = createMiniappHostRuntime({ appKey: 'demo', permissions: [], getFrame: () => frame, getHandlers: () => ({}) });
     runtime.loaded();
     expect(frame.postMessage).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', permissions: [] }), '*');
     await runtime.receive({ source: frame, data: request('merchant.list') });
     expect(frame.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ error: expect.objectContaining({ code: 'permission_denied' }) }), '*');
     expect(activeTabFor('/play/app/')).toBe('account');
   });
+
+  it('등록부의 모든 항목이 iframe 실행 계약을 지킨다', () => {
+    // 지금은 비어 있어 무증명이지만, 다음 미니앱이 추가되는 순간 이 검사가 살아난다.
+    // "혹시 쓸까 봐" 넣은 권한이 조용히 들어오는 것을 여기서 막는다(등록부 머리주석).
+    for (const app of MINIAPPS) {
+      expect(app).toMatchObject({ execution: 'iframe' });
+      expect(typeof app.entry).toBe('string');
+      expect(typeof app.height).toBe('number');
+      expect(Array.isArray(app.permissions)).toBe(true);
+    }
+  });
+
   it('내부 오류 상세는 내보내지 않는다', async () => {
     const frame = { postMessage: vi.fn() };
     const runtime = createMiniappHostRuntime({ appKey: 'backyard', permissions: [], getFrame: () => frame, getHandlers: () => ({ 'state.get': async () => { throw new Error('SQL secret'); } }) });
