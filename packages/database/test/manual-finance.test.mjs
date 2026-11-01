@@ -11,7 +11,7 @@ describe('0065 수동 기록 additive migration', () => {
   it('새 테이블만 추가하며 기존 행·설정·카드 원장을 변경하지 않는다', () => {
     for (const pattern of [/^\s*ALTER\b/im, /^\s*UPDATE\b/im, /^\s*DELETE\s+FROM\b/im, /^\s*DROP\b/im, /^\s*TRUNCATE\b/im, /^\s*INSERT\b/im]) assert.doesNotMatch(body, pattern);
     assert.deepEqual([...body.matchAll(/CREATE TABLE (\w+)/g)].map((match) => match[1]), ['manual_assets', 'manual_housing_plans', 'manual_housing_payments', 'manual_finance_audit']);
-    assert.equal(journal.entries.at(-1).tag, '0065_manual_finance');
+    assert.equal(journal.entries.find(entry => entry.idx === 65)?.tag, '0065_manual_finance');
   });
   it('원화 numeric20,0이며 unknown 금액·날짜를 기본 0/오늘로 바꾸지 않는다', () => {
     assert.equal([...body.matchAll(/\b(?:amount|paid_amount) numeric\(20,0\)/g)].length, 3);
