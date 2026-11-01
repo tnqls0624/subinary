@@ -52,11 +52,11 @@ function deferred<T>() {
 }
 
 describe("manual recorded values", () => {
-  it("keeps default values unknown and private without dates or housing assumptions", () => {
+  it("creates shared drafts while keeping amounts and dates unknown", () => {
     expect(assetDraft()).toEqual({
       kind: "account",
       label: "",
-      visibility: "private",
+      visibility: "household",
       amount: "",
       asOfDate: "",
       legalOwnerLabel: "",
@@ -64,12 +64,17 @@ describe("manual recorded values", () => {
     });
     expect(planDraft()).toEqual({
       label: "",
-      visibility: "private",
+      visibility: "household",
       occupancyYear: "",
       contractStage: "",
       fundingNote: "",
       payments: [],
     });
+    const sharedPlan = planRequest(
+      { ...planDraft(), label: "합성 가족 계획" }, id, householdId
+    );
+    expect(sharedPlan.ok).toBe(true);
+    if (sharedPlan.ok) expect(sharedPlan.body.visibility).toBe("household");
     expect(paymentDraft(id)).toEqual({
       id,
       kind: "contract",
@@ -79,6 +84,41 @@ describe("manual recorded values", () => {
       paidAmount: "",
       paidDate: "",
     });
+  });
+  it("preserves existing private asset and plan visibility through an edit request", () => {
+    const asset = assetDraft({
+      kind: "account",
+      label: "합성 비공개 통장",
+      visibility: "private",
+      amount: null,
+      asOfDate: null,
+      legalOwnerLabel: null,
+      note: null,
+    } as ManualAsset);
+    const plan = planDraft({
+      label: "합성 비공개 계획",
+      visibility: "private",
+      occupancyYear: null,
+      contractStage: null,
+      fundingNote: null,
+    } as ManualHousingPlan);
+    expect(asset.visibility).toBe("private");
+    expect(plan.visibility).toBe("private");
+    const assetEdit = assetRequest({ ...asset, label: "합성 수정 통장" }, id, householdId);
+    const planEdit = planRequest({ ...plan, label: "합성 수정 계획" }, id, householdId);
+    expect(assetEdit.ok).toBe(true);
+    expect(planEdit.ok).toBe(true);
+    if (assetEdit.ok) expect(assetEdit.body.visibility).toBe("private");
+    if (planEdit.ok) expect(planEdit.body.visibility).toBe("private");
+  });
+  it("disables creation in the legacy private view without removing existing editor permissions", () => {
+    for (const role of ["owner", "admin", "member", "viewer", null, undefined])
+      expect(manualFinanceCanCreate(role, "private")).toBe(false);
+    expect(manualFinanceCanCreate("member", "household")).toBe(true);
+    expect(manualFinanceCanCreate("viewer", "household")).toBe(false);
+    expect(manualFinanceEditorContext(id, householdId, "private", "member")).toBe(
+      `${id}/${householdId}/private/writer`
+    );
   });
   it("distinguishes unknown and explicit zero and preserves 20-digit integer precision", () => {
     expect(parseManualKrwInput(" ")).toBeNull();
@@ -125,7 +165,7 @@ describe("manual recorded values", () => {
         source: null,
         legalOwnerLabel: null,
         note: null,
-        visibility: "private",
+        visibility: "household",
       });
   });
   it("requires actual as-of date for a recorded amount and rejects future or rollover dates", () => {
@@ -285,9 +325,9 @@ describe("manual recorded values", () => {
     const empty = renderToStaticMarkup(
       createElement(ManualAssetsSummary, { summary })
     );
-    expect(empty).toContain("— 원");
+    expect(empty).toContain("등록된 자산이 없어요");
     expect(empty).not.toContain("0원");
-    expect(empty).toContain("기준일 미입력");
+    expect(empty).not.toContain("— 원");
     const partial = renderToStaticMarkup(
       createElement(ManualAssetsSummary, {
         summary: {
@@ -301,8 +341,12 @@ describe("manual recorded values", () => {
         },
       })
     );
-    expect(partial).toContain("알려진 자산 부분합");
-    expect(partial).toContain("기준일 혼재");
+    expect(partial).toContain("자산 (일부 입력)");
+    expect(partial).toContain("항목별 기준일");
+    expect(partial).toContain("미입력");
+    expect(partial).toContain("순자산은 아직 계산하지 않았어요");
+    expect(partial).not.toContain("— 원");
+    expect(partial).not.toContain(">0원<");
     expect(partial).toContain("9,007,199,254,740,993원");
   });
   it("dismisses a revoked record without discarding an unrelated draft during a transient refresh", () => {

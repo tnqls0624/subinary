@@ -1,6 +1,6 @@
 "use client";
 /**
- * 전체: 새 자산·계획과 기존 가계부·관리 도구를 한곳에서 찾는다.
+ * 설정: 가족·연결·계정과 가끔 사용하는 관리 도구.
  * 기존 메뉴, 네이티브 생체인식 설정과 owner/admin 운영 도구의 조건을 보존한다.
  */
 import {
@@ -14,7 +14,6 @@ import {
   KeyRound,
   LogOut,
   ListChecks,
-  Receipt,
   Repeat,
   ShieldCheck,
   Smartphone,
@@ -32,6 +31,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
+import { ThemeSettingRow } from "@/components/theme-toggle";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -46,7 +46,7 @@ interface MoreItem {
   href: string;
   icon: LucideIcon;
   title: string;
-  description: string;
+  description?: string;
 }
 
 interface MoreGroup {
@@ -56,112 +56,30 @@ interface MoreGroup {
 }
 
 const GROUPS: ReadonlyArray<MoreGroup> = [
-  {
-    key: "position",
-    title: "자산과 계획",
-    items: [
-      { href: "/assets", icon: Wallet, title: "자산", description: "현재 자산의 기준과 결제 카드 관리를 확인해요" },
-      { href: "/plan", icon: Flag, title: "계획", description: "주택 지급 일정과 준비할 정보를 살펴봐요" },
-    ],
-  },
-  {
-    key: "records",
-    title: "돈의 기록과 확인",
-    items: [
-      { href: "/transactions", icon: Receipt, title: "거래 검색", description: "카드 승인·취소와 확인이 필요한 거래를 찾아요" },
-      { href: "/ledger/analysis", icon: Activity, title: "소비 분석", description: "기록된 카드 지출을 월별로 살펴봐요" },
-      { href: "/budgets", icon: Wallet, title: "예산", description: "선택한 달의 예산과 사용률을 확인해요" },
-      { href: "/todo", icon: ListChecks, title: "확인할 일", description: "문자 검토·실패한 결제와 반영 상태를 확인해요" },
-      { href: "/ai", icon: Sparkles, title: "AI 도우미", description: "기존 AI 대화와 가져오기 기능으로 이동해요" },
-    ],
-  },
-  {
-    key: "household",
-    title: "가계 설정",
-    items: [
-      {
-        href: "/household",
-        icon: Users,
-        title: "가족 관리",
-        description: "구성원 초대·역할, 대기 중인 초대를 관리해요",
-      },
-      {
-        href: "/cards",
-        icon: CreditCard,
-        title: "결제 카드",
-        description: "카드를 등록하면 문자 내역이 자동으로 연결돼요",
-      },
-      {
-        href: "/categories",
-        icon: Tags,
-        title: "카테고리 관리",
-        description: "우리 가족만의 지출 카테고리를 만들고 정리해요",
-      },
-      {
-        href: "/more/merchants",
-        icon: Store,
-        title: "가맹점 정리",
-        description: "같은 가게가 여러 이름으로 나뉘어 있으면 하나로 묶어요",
-      },
-      {
-        href: "/more/recurring",
-        icon: Repeat,
-        title: "정기 지출",
-        description: "매달 빠져나가는 결제를 찾아 확인해요",
-      },
-      {
-        href: "/more/category-rules",
-        icon: Wand2,
-        title: "카테고리 규칙",
-        description: "자동으로 붙는 카테고리를 확인하고 과거에도 적용해요",
-      },
-    ],
-  },
-  {
-    key: "collection",
-    title: "수집",
-    items: [
-      {
-        href: "/devices",
-        icon: Smartphone,
-        title: "연결한 기기",
-        description: "카드 문자를 보내는 휴대폰을 등록·관리해요",
-      },
-      {
-        // 처리는 '확인할 일' 화면이 갖는다 — 여기는 해결된 것까지 남는 기록이다.
-        // 링크를 지우지 않는 이유: 지난 실패를 볼 수 있는 상시 경로가 여기뿐이다.
-        href: "/declines",
-        icon: AlertTriangle,
-        title: "실패한 결제 기록",
-        description: "해결된 것까지 모두 남아 있어요 · 처리는 확인할 일에서 해요",
-      },
-    ],
-  },
-  {
-    key: "account",
-    title: "내 계정",
-    items: [
-      {
-        href: "/more/privacy",
-        icon: ShieldCheck,
-        title: "개인정보",
-        description: "무엇에 동의했고 무엇이 수집·보관되는지 확인해요",
-      },
-      {
-        href: "/more/notifications",
-        icon: Bell,
-        title: "알림 설정",
-        description: "푸시 알림·최소 금액·무음 시간대를 조절해요",
-      },
-      {
-        href: "/more/password",
-        icon: KeyRound,
-        title: "비밀번호 변경",
-        description: "바꾸면 모든 기기에서 다시 로그인해야 해요",
-      },
-    ],
-  },
+  { key: "household", title: "가족 · 연결", items: [
+    { href: "/household", icon: Users, title: "가족 관리" },
+    { href: "/cards", icon: CreditCard, title: "결제 카드" },
+    { href: "/devices", icon: Smartphone, title: "문자 연동", description: "카드 문자를 보내는 휴대폰" },
+  ] },
+  { key: "account", title: "내 계정", items: [
+    { href: "/more/notifications", icon: Bell, title: "알림" },
+    { href: "/more/privacy", icon: ShieldCheck, title: "개인정보" },
+    { href: "/more/password", icon: KeyRound, title: "비밀번호 변경", description: "변경 후 모든 기기에서 다시 로그인" },
+  ] },
 ];
+const ADVANCED_GROUP: MoreGroup = { key: "advanced", title: "가계부 관리", items: [
+  { href: "/categories", icon: Tags, title: "카테고리", description: "지출 분류 추가·수정" },
+  { href: "/more/merchants", icon: Store, title: "가맹점 정리", description: "같은 가게의 여러 이름 묶기" },
+  { href: "/more/recurring", icon: Repeat, title: "정기 지출", description: "반복되는 결제 확인" },
+  { href: "/more/category-rules", icon: Wand2, title: "자동 분류 규칙", description: "분류 기준과 지난 거래에 적용" },
+  { href: "/todo", icon: ListChecks, title: "확인할 거래", description: "문자 확인과 결제 처리 상태" },
+  { href: "/declines", icon: AlertTriangle, title: "실패한 결제", description: "이전 결제 실패 내역" },
+  { href: "/ai", icon: Sparkles, title: "AI 도우미", description: "질문하기와 자료 가져오기" },
+] };
+const LEGACY_RECORDS_GROUP: MoreGroup = { key: "legacy", title: "기존 비공개 기록", items: [
+  { href: "/assets?scope=private", icon: Wallet, title: "기존 비공개 자산", description: "이전에 나만 보도록 저장한 기록" },
+  { href: "/plan?scope=private", icon: Flag, title: "기존 비공개 주택 계획", description: "가족에게 공개하지 않고 보관 중인 기록" },
+] };
 
 /** owner·admin에게만 보이는 개발자 화면. 일반 목록과 섞지 않는다. */
 const OPERATIONS_GROUP: MoreGroup = {
@@ -171,8 +89,8 @@ const OPERATIONS_GROUP: MoreGroup = {
     {
       href: "/ai-operations",
       icon: Activity,
-      title: "AI 파이프라인 운영",
-      description: "큐·지연·오류·토큰·학습 품질을 확인해요",
+      title: "AI 처리 현황",
+      description: "대기 작업·오류·사용량",
     },
   ],
 };
@@ -187,14 +105,12 @@ function MoreRow({ item, divided }: Readonly<{ item: MoreItem; divided: boolean 
         divided ? "border-t" : ""
       }`}
     >
-      <span className="bg-accent text-accent-foreground flex size-10 shrink-0 items-center justify-center rounded-full">
+      <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-xl">
         <Icon className="size-5" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[15px] font-medium">{item.title}</span>
-        <span className="text-muted-foreground text-[13px]">
-          {item.description}
-        </span>
+        {item.description ? <span className="text-muted-foreground text-[13px]">{item.description}</span> : null}
       </span>
       <ChevronRight className="text-muted-foreground/50 size-4 shrink-0" />
     </Link>
@@ -273,7 +189,7 @@ function BiometricToggleRow() {
 
   return (
     <div className="flex items-center gap-3 border-t px-4 py-4">
-      <span className="bg-accent text-accent-foreground flex size-10 shrink-0 items-center justify-center rounded-full">
+      <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-xl">
         <Fingerprint className="size-5" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -339,7 +255,7 @@ export default function MorePage() {
       {/* 누구로 로그인해 있는지 — 예전에는 아바타 드롭다운에만 있던 정보다.
           아바타가 링크가 되면서 이 화면이 그 자리를 대신한다. */}
       <div>
-        <h1 className="mb-2 text-2xl font-bold tracking-tight">전체</h1>
+        <h1 className="mb-2 text-2xl font-bold tracking-tight">설정</h1>
         <p className="text-[15px] font-semibold">{user?.name ?? "사용자"}</p>
         <p className="text-muted-foreground text-sm">
           {user?.email ?? ""}
@@ -350,6 +266,7 @@ export default function MorePage() {
       {GROUPS.map((group) =>
         group.key === "account" ? (
           <MoreSection key={group.key} group={group}>
+            <ThemeSettingRow />
             <BiometricToggleRow />
             <LogoutRow />
           </MoreSection>
@@ -358,7 +275,14 @@ export default function MorePage() {
         ),
       )}
 
-      {canViewOperations ? <MoreSection group={OPERATIONS_GROUP} /> : null}
+      <details className="bg-card rounded-xl border p-4">
+        <summary className="min-h-11 cursor-pointer py-3 font-medium">상세 설정</summary>
+        <div className="mt-3 space-y-6">
+          <MoreSection group={ADVANCED_GROUP} />
+          <MoreSection group={LEGACY_RECORDS_GROUP} />
+          {canViewOperations ? <MoreSection group={OPERATIONS_GROUP} /> : null}
+        </div>
+      </details>
     </div>
   );
 }

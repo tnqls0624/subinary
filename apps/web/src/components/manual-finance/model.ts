@@ -73,7 +73,7 @@ export function assetDraft(item?: ManualAsset): AssetDraft {
     : {
         kind: "account",
         label: "",
-        visibility: "private",
+        visibility: "household",
         amount: "",
         asOfDate: "",
         legalOwnerLabel: "",
@@ -89,14 +89,14 @@ export function assetRequest(
 ): Validation<ManualAssetCreateRequest> {
   const amount = parseManualKrwInput(draft.amount);
   if (!draft.label.trim())
-    return { ok: false, message: "기록 이름을 입력해 주세요." };
+    return { ok: false, message: "자산 이름을 입력해 주세요." };
   if (amount === undefined)
     return {
       ok: false,
-      message: "금액은 20자리 이하의 0 이상 정수 원으로 입력해 주세요.",
+      message: "금액은 0원 이상, 소수점 없이 입력해 주세요. 최대 20자리까지 가능해요.",
     };
   if (amount === null && draft.asOfDate)
-    return { ok: false, message: "금액이 미입력이면 기준일도 비워 주세요." };
+    return { ok: false, message: "금액을 입력하지 않았다면 기준일도 비워 주세요." };
   const result = manualAssetCreateRequestSchema.safeParse({
     id,
     householdId,
@@ -112,8 +112,8 @@ export function assetRequest(
     return {
       ok: false,
       message: result.error.issues.some((issue) => issue.path[0] === "asOfDate")
-        ? "금액의 기준일을 실제 날짜로 입력해 주세요. 미래 날짜는 사용할 수 없어요."
-        : "입력 길이와 공개 범위·금액을 확인해 주세요.",
+        ? "금액을 확인한 날짜를 입력해 주세요. 미래 날짜는 사용할 수 없어요."
+        : "이름·메모의 길이와 금액·공개 범위를 확인해 주세요.",
     };
   return { ok: true, body: result.data };
 }
@@ -174,7 +174,7 @@ export function planDraft(
       }
     : {
         label: "",
-        visibility: "private",
+        visibility: "household",
         occupancyYear: "",
         contractStage: "",
         fundingNote: "",
@@ -191,7 +191,7 @@ export function planRequest(
   if (draft.occupancyYear && !/^[1-9]\d{0,3}$/.test(draft.occupancyYear))
     return {
       ok: false,
-      message: "입주연도는 확인한 연도만 입력하거나 비워 주세요.",
+      message: "입주연도를 확인해 주세요. 아직 모르면 비워두세요.",
     };
   for (const [index, p] of draft.payments.entries()) {
     if (
@@ -202,12 +202,12 @@ export function planRequest(
         ok: false,
         message: `${
           index + 1
-        }번째 지급 기록의 금액은 20자리 이하의 0 이상 정수 원으로 입력해 주세요.`,
+        }번째 납부 금액을 확인해 주세요. 0원 이상, 소수점 없이 최대 20자리까지 입력할 수 있어요.`,
       };
     if (p.installment && !/^[1-9]\d{0,3}$/.test(p.installment))
       return {
         ok: false,
-        message: `${index + 1}번째 지급 기록의 회차를 확인해 주세요.`,
+        message: `${index + 1}번째 납부 일정의 회차를 확인해 주세요.`,
       };
   }
   const result = manualHousingPlanCreateRequestSchema.safeParse({
@@ -232,7 +232,7 @@ export function planRequest(
     return {
       ok: false,
       message:
-        "지급 날짜와 금액을 확인해 주세요. 납부액은 예정 금액 이하여야 하며, 실제 납부액이 있으면 납부일도 필요해요.",
+        "납부 날짜와 금액을 확인해 주세요. 낸 금액은 예정 금액을 넘을 수 없어요. 실제 납부액이 있으면 납부일도 입력해 주세요.",
     };
   return { ok: true, body: result.data };
 }
@@ -250,12 +250,12 @@ export function manualFailureMessage(error: unknown): string {
       ? (error as { status: unknown }).status
       : null;
   if (status === 409)
-    return "다른 곳에서 기록이 바뀌었거나 같은 요청의 입력이 달라요. 현재 기록을 확인해 주세요. 입력은 그대로 남아 있어요.";
+    return "저장된 내용이나 이전 요청과 달라요. 현재 기록을 확인해 주세요. 입력한 내용은 남아 있어요.";
   if (status === 403 || status === 404)
-    return "기록을 열거나 수정할 권한이 없거나 기록을 찾을 수 없어요. 현재 상태를 다시 확인해 주세요.";
+    return "기록이 없거나 접근 권한이 바뀌었을 수 있어요. 현재 상태를 확인해 주세요.";
   if (status === 400 || status === 422)
-    return "입력한 값과 날짜·공개 범위를 확인해 주세요. 입력은 그대로 남아 있어요.";
-  return "저장 결과를 확인할 수 없어요. 다시 보내기 전에 현재 기록을 확인해 주세요. 입력은 그대로 남아 있어요.";
+    return "금액·날짜·공개 범위를 확인해 주세요. 입력한 내용은 남아 있어요.";
+  return "저장됐는지 확인하지 못했어요. 다시 저장하기 전에 현재 기록을 확인해 주세요. 입력한 내용은 남아 있어요.";
 }
 
 /** A fresh scoped response or permission loss removes a formerly visible editor. */
@@ -307,8 +307,11 @@ export function manualRecordVersionChanged(
   return current !== null && observed !== undefined && observed > current;
 }
 
-export function manualFinanceCanCreate(role: unknown): boolean {
-  return role === "owner" || role === "admin" || role === "member";
+export function manualFinanceCanCreate(
+  role: unknown,
+  scope: ManualFinanceScope = "household"
+): boolean {
+  return scope === "household" && (role === "owner" || role === "admin" || role === "member");
 }
 
 /** Losing write permission invalidates the editor even if user and family stay the same. */

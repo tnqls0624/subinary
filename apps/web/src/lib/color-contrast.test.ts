@@ -83,3 +83,19 @@ describe('상태색 대비 (globals.css에서 직접 읽음)', () => {
     expect(token(':root', 'success-strong')).not.toBe(token(':root', 'success'));
   });
 });
+
+// Navigation, quiet labels and financial actions must remain readable in both modes.
+describe('핵심 화면 색 대비', () => {
+  for (const scope of [':root', '.dark']) {
+    for (const [foreground, background] of [
+      ['foreground', 'background'], ['muted-foreground', 'background'],
+      ['muted-foreground', 'card'], ['primary', 'card'],
+      ['primary-foreground', 'primary'], ['accent-foreground', 'accent'],
+      ['destructive', 'card'], ['destructive-foreground', 'destructive'],
+    ]) {
+      it(`${scope} ${foreground}/${background}: AA 본문 대비`, () => {
+        expect(contrast(token(scope, foreground!), token(scope, background!))).toBeGreaterThanOrEqual(AA_TEXT);
+      });
+    }
+  }
+});

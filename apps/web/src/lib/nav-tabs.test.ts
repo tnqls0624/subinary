@@ -18,13 +18,12 @@ describe("path boundaries", () => {
   });
 });
 
-describe("V2 primary destinations", () => {
+describe("simplified primary destinations", () => {
   it("keeps the agreed order, routes and labels", () => {
     expect(PRIMARY_TABS.map(({ href, label }) => [href, label])).toEqual([
-      ["/dashboard", "홈"], ["/assets", "자산"], ["/transactions", "가계부"],
-      ["/plan", "계획"], ["/more", "전체"],
+      ["/dashboard", "홈"], ["/transactions", "가계부"], ["/assets", "자산"],
     ]);
-    expect(TAB_ROOTS).toHaveLength(5);
+    expect(TAB_ROOTS).toHaveLength(3);
     for (const tab of PRIMARY_TABS) {
       expect(activeTabFor(tab.href)).toBe(tab.key);
       expect(isTabRoot(tab.href + "/")).toBe(true);
@@ -33,14 +32,15 @@ describe("V2 primary destinations", () => {
 
   it.each([
     ["/cards", "assets"], ["/cards/abc/", "assets"], ["/assets/accounts", "assets"],
+    ["/assets/loan-import/", "assets"],
     ["/budgets", "ledger"], ["/ledger/analysis/", "ledger"], ["/transactions/abc", "ledger"],
-    ["/plan/housing", "plan"], ["/plan/funding/", "plan"],
-    ["/todo", "more"], ["/declines", "more"], ["/ai/", "more"],
-    ["/ai-operations", "more"], ["/play/app/", "more"], ["/household", "more"],
-    ["/devices", "more"], ["/categories", "more"], ["/notifications", "more"],
-    ["/more/merchants", "more"], ["/more/recurring", "more"],
-    ["/more/category-rules", "more"], ["/more/privacy/", "more"],
-    ["/more/notifications", "more"], ["/more/password", "more"],
+    ["/plan/housing", "assets"], ["/plan/funding/", "assets"],
+    ["/todo", "ledger"], ["/declines", "ledger"], ["/ai/", null],
+    ["/ai-operations", null], ["/play/app/", null], ["/household", null],
+    ["/devices", null], ["/categories", null], ["/notifications", null],
+    ["/more/merchants", null], ["/more/recurring", "ledger"],
+    ["/more/category-rules", null], ["/more/privacy/", null],
+    ["/more/notifications", null], ["/more/password", null],
   ])("preserves legacy route %s under %s", (path, expected) => {
     expect(activeTabFor(path)).toBe(expected);
     expect(isTabRoot(path)).toBe(false);
@@ -50,7 +50,20 @@ describe("V2 primary destinations", () => {
 describe("cold-entry parent destinations", () => {
   it("keeps failed payments inside their existing task flow", () => {
     expect(parentTabHref("/declines/")).toBe("/todo");
-    expect(parentTabHref("/todo")).toBe("/more");
+    expect(parentTabHref("/todo")).toBe("/transactions");
+  });
+
+  it("keeps settings and housing as secondary destinations", () => {
+    expect(isTabRoot("/more")).toBe(false);
+    expect(isTabRoot("/plan")).toBe(false);
+    expect(parentTabHref("/plan")).toBe("/assets");
+    expect(parentTabHref("/more/privacy")).toBe("/more");
+    expect(parentTabHref("/more")).toBe("/dashboard");
+  });
+
+  it("returns a cold loan-import deep link to assets without making it an exit root", () => {
+    expect(parentTabHref("/assets/loan-import/")).toBe("/assets");
+    expect(isTabRoot("/assets/loan-import/")).toBe(false);
   });
 
   it("all legacy subpages reach a primary destination without a loop", () => {

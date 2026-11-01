@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Building2, CreditCard, Plus } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Building2, CreditCard, House, Plus } from "lucide-react";
 import type {
   ManualAsset,
   ManualAssetKind,
@@ -14,6 +14,8 @@ import { EmptyState } from "@/components/widgets";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
 import { manualFinanceApi, useManualAssets } from "@/lib/manual-finance-client";
+import { useFinancialOverview } from "@/lib/loan-import-client";
+import { LoanOverviewRow } from "@/components/loan-import/loan-rows";
 import {
   ASSET_LABELS,
   ASSET_VALUE_LABELS,
@@ -28,7 +30,7 @@ import {
 import {
   FinanceLoading,
   FinanceLoadError,
-  FinanceScopeTabs,
+  LegacyPrivateNotice,
 } from "@/components/manual-finance/shared";
 import { ManualAssetsSummary } from "@/components/manual-finance/asset-summary";
 import { AssetEditor } from "@/components/manual-finance/asset-editor";
@@ -36,15 +38,14 @@ import { AssetEditor } from "@/components/manual-finance/asset-editor";
 function ScopedAssets({
   householdId,
   scope,
-  changeScope,
   canCreate,
 }: {
   householdId: string;
   scope: ManualFinanceScope;
-  changeScope: (scope: ManualFinanceScope) => void;
   canCreate: boolean;
 }) {
   const records = useManualAssets(scope);
+  const overview = useFinancialOverview(scope);
   const { authedFetch, user } = useAuth();
   const [kind, setKind] = useState<ManualAssetKind | "all">("all");
   const [editor, setEditor] = useState<ManualAsset | "new" | null>(null);
@@ -74,7 +75,7 @@ function ScopedAssets({
         setOpening(null);
         if (read.item.visibility !== scope) {
           setNotice(
-            "공개 범위가 바뀌었어요. 현재 범위의 목록을 다시 확인해 주세요."
+            "공개 범위가 바뀌었어요. 목록을 다시 확인해 주세요."
           );
           void records.refetch();
           return;
@@ -84,16 +85,25 @@ function ScopedAssets({
       () => {
         setOpening(null);
         setNotice(
-          "기록을 열 수 없어요. 권한과 연결 상태를 확인한 뒤 다시 열어 주세요."
+          "자산 정보를 열지 못했어요. 목록에서 다시 선택해 주세요."
         );
         void records.refetch();
       }
     );
   };
   const items =
-    records.data?.items.filter(
+    overview.data?.manualItems.filter(
       (item) => kind === "all" || item.kind === kind
     ) ?? [];
+  const importedLoans = kind === "all" || kind === "loan"
+    ? overview.data?.loanItems ?? []
+    : [];
+  const hasRecords = Boolean(overview.data && (overview.data.manualItems.length || overview.data.loanItems.length));
+  const replacedManualIds = new Set(
+    overview.data?.loanItems
+      .filter((item) => item.includedInTotals && item.totalMode === "replacement")
+      .map((item) => item.replacesManualAssetId) ?? []
+  );
   const sharedCacheCleared = hideManualSharedEditor({
     item: editor && editor !== "new" ? editor : null,
     actorUserId: user?.id ?? null,
@@ -115,7 +125,7 @@ function ScopedAssets({
     if (editorIsUnavailable) {
       setEditor(null);
       setNotice(
-        "기록의 공개 범위나 상태가 바뀌어 상세를 닫았어요. 현재 목록을 다시 확인해 주세요."
+        "자산의 공개 범위나 상태가 바뀌었어요. 목록을 다시 확인해 주세요."
       );
     }
   }, [editorIsUnavailable]);
@@ -124,26 +134,22 @@ function ScopedAssets({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">자산</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            직접 기록한 현재값과 기준일을 함께 봐요.
-          </p>
         </div>
-        {canCreate ? (
+        {canCreate && (hasRecords || overview.isError) ? (
           <Button
             className="min-h-11 shrink-0"
             disabled={opening !== null}
             onClick={() => setEditor("new")}
           >
             <Plus className="size-4" />
-            기록
+            자산 추가
           </Button>
         ) : null}
       </div>
-      <FinanceScopeTabs value={scope} onChange={changeScope} />
-      {!canCreate ? (
+      {scope === "private" ? <LegacyPrivateNotice href="/assets" /> : null}
+      {!canCreate && scope === "household" ? (
         <p role="status" className="text-muted-foreground text-sm">
-          조회 전용 구성원은 수동 기록을 조회만 할 수 있어요. 새 기록
-          생성·수정·삭제는 할 수 없어요.
+          현재 권한으로는 조회만 가능해요.
         </p>
       ) : null}
       {notice ? (
@@ -151,18 +157,28 @@ function ScopedAssets({
           {notice}
         </p>
       ) : null}
-      {records.isPending ? (
+      {overview.isPending ? (
         <FinanceLoading />
-      ) : records.isError ? (
+      ) : overview.isError ? (
         <FinanceLoadError
           retry={() => {
-            void records.refetch();
+            void overview.refetch();
           }}
         />
-      ) : records.data ? (
+      ) : overview.data ? (
         <>
-          <ManualAssetsSummary summary={records.data.summary} scope={scope} />
-          <div
+          {hasRecords ? (
+            <ManualAssetsSummary
+              summary={overview.data.summary}
+              scope={scope}
+              hasImportedBalance={overview.data.loanItems.some((item) => item.includedInTotals)}
+              sourceLabel={overview.data.loanItems.some((item) => item.includedInTotals) ? "직접 입력·신한 대출 파일" : "직접 입력"}
+            />
+          ) : null}
+          {overview.data.unresolvedLoans > 0 ? (
+            <p role="status" className="text-muted-foreground text-sm">확인이 필요한 대출 {overview.data.unresolvedLoans}건은 합계에서 제외했어요. 아래 대출의 반영 상태를 확인해 주세요.</p>
+          ) : null}
+          {hasRecords ? <div
             role="group"
             aria-label="자산 종류 필터"
             className="flex flex-wrap gap-2"
@@ -182,13 +198,14 @@ function ScopedAssets({
                 {label}
               </Button>
             ))}
-          </div>
+          </div> : null}
           <section
-            className="min-w-0 rounded-xl border"
-            aria-label="수동 자산 기록 목록"
+            className="bg-card min-w-0 rounded-2xl border"
+            aria-label="자산 목록"
           >
-            {items.length ? (
-              items.map((item) => (
+            {items.length || importedLoans.length ? (
+              <>
+              {items.map((item) => (
                 <button
                   type="button"
                   key={item.id}
@@ -209,9 +226,12 @@ function ScopedAssets({
                       기준일 {item.asOfDate ?? "미입력"} ·{" "}
                       {item.source === "manual" ? "직접 입력" : "출처 미입력"}
                     </span>
+                    {replacedManualIds.has(item.id) ? (
+                      <span className="text-muted-foreground mt-2 block text-xs">새로 가져온 대출로 대체 · 합계 제외</span>
+                    ) : null}
                   </span>
                   <span className="min-w-0 max-w-[52%] text-right">
-                    <strong className="block break-all text-base tabular-nums">
+                    <strong className={`block break-all text-base tabular-nums ${replacedManualIds.has(item.id) ? "text-muted-foreground font-medium" : ""}`}>
                       {displayManualKrw(item.amount)}
                     </strong>
                     <small className="text-muted-foreground text-xs">
@@ -220,59 +240,85 @@ function ScopedAssets({
                     </small>
                   </span>
                 </button>
-              ))
+              ))}
+              {importedLoans.map((item) => <LoanOverviewRow key={item.id} item={item} />)}
+              </>
             ) : (
               <EmptyState
                 icon={<Building2 />}
                 title={
-                  kind === "all"
-                    ? "이 범위에 표시할 자산 기록이 없어요"
-                    : "선택한 종류의 기록이 없어요"
+                  !hasRecords
+                    ? "등록된 자산이 없어요"
+                    : "이 종류의 자산이 없어요"
                 }
                 description={
                   canCreate
-                    ? "직접 확인한 잔액·평가액·남은 원금을 기준일과 함께 기록할 수 있어요. 모르는 값은 빈칸으로 남겨요."
-                    : "현재 보기 범위에 표시할 기록이 없어요. 조회 전용 구성원은 새 기록을 만들 수 없어요."
+                    ? hasRecords ? "다른 종류를 선택하거나 자산을 추가해 보세요." : "통장 잔액이나 대출부터 기록해 보세요."
+                    : "현재 선택한 목록에 자산이 없어요."
                 }
                 action={
-                  canCreate ? (
+                  canCreate && !hasRecords ? (
                     <Button
                       className="min-h-11 w-full"
                       disabled={opening !== null}
                       onClick={() => setEditor("new")}
                     >
-                      자산 직접 기록
+                      자산 추가
                     </Button>
                   ) : undefined
                 }
               />
             )}
           </section>
-          {records.isFetching ? (
+          {overview.isFetching ? (
             <p role="status" className="text-muted-foreground text-xs">
-              현재 기록을 다시 확인하고 있어요.
+              자산 정보를 새로 불러오는 중이에요.
             </p>
           ) : null}
         </>
       ) : null}
       {opening ? (
         <p role="status" className="text-muted-foreground text-sm">
-          현재 기록의 공개 범위와 권한을 확인하고 있어요.
+          자산 정보를 여는 중이에요.
         </p>
       ) : null}
+      <section className="bg-card divide-y rounded-2xl border" aria-label="자산 관리">
+      <Link
+        href="/assets/loan-import"
+        className="hover:bg-muted/50 flex min-h-14 items-center gap-3 p-4 text-sm font-medium"
+      >
+        <Building2 className="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block">신한 대출 파일 가져오기</span>
+          <span className="text-muted-foreground mt-1 block text-xs font-normal">전세·중도금 대출 기록 관리</span>
+        </span>
+        <span className="text-muted-foreground" aria-hidden="true">→</span>
+      </Link>
+      <Link
+        href="/plan"
+        className="hover:bg-muted/50 flex min-h-14 items-center gap-3 p-4 text-sm font-medium"
+      >
+        <House className="size-5" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block">주택 납부 일정</span>
+          <span className="text-muted-foreground mt-1 block text-xs font-normal">계약금·중도금·잔금 일정</span>
+        </span>
+        <span className="text-muted-foreground" aria-hidden="true">→</span>
+      </Link>
       <Link
         href="/cards"
-        className="hover:bg-muted/50 flex min-h-14 items-center gap-3 rounded-xl border p-4 text-sm font-medium"
+        className="hover:bg-muted/50 flex min-h-14 items-center gap-3 p-4 text-sm font-medium"
       >
         <CreditCard className="size-5" />
         결제 카드 관리
-        <span className="text-muted-foreground ml-auto">기존 카드 →</span>
+        <span className="text-muted-foreground ml-auto" aria-hidden="true">→</span>
       </Link>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        입력한 기록의 합계예요. 카드 한도·주택 계약금액·적금 만기 예상액을
-        자산으로 더하지 않아요. 계좌 연결·주식 거래·외화 자동 환산은 제공하지
-        않아요.
-      </p>
+      </section>
+      <details className="text-muted-foreground text-xs leading-relaxed">
+        <summary className="min-h-11 cursor-pointer py-3">자산 합계 기준</summary>
+        <p className="pb-3">직접 입력한 금액과 합계 반영을 선택한 신한 대출을 합산해요. 기존 대출과 연결한 경우 가져온 원금만 반영해요. 참고용·중복·연결 확인이 필요한 대출과 카드 한도·주택 계약금액·적금 만기 예상액은 제외해요.</p>
+        <p className="pb-3">가져온 대출은 브라우저에서 확인한 시점의 남은 원금이에요. 은행의 별도 금액 기준일은 제공되지 않아요. 계좌 자동 조회와 외화 환산은 지원하지 않아요.</p>
+      </details>
       {editor && !editorIsUnavailable && (editor !== "new" || canCreate) ? (
         <AssetEditor
           householdId={householdId}
@@ -293,7 +339,6 @@ function ScopedAssets({
 function AssetsScreen() {
   const { householdId, activeMembership } = useHousehold();
   const { user } = useAuth();
-  const router = useRouter();
   const params = useSearchParams();
   const scope: ManualFinanceScope =
     params.get("scope") === "private" ? "private" : "household";
@@ -301,7 +346,7 @@ function AssetsScreen() {
     return (
       <EmptyState
         title="가족을 선택해 주세요"
-        description="현재 가족의 허용된 수동 기록만 확인할 수 있어요."
+        description="가족을 선택하면 자산 목록을 볼 수 있어요."
       />
     );
   return (
@@ -314,10 +359,7 @@ function AssetsScreen() {
       )}
       householdId={householdId}
       scope={scope}
-      canCreate={manualFinanceCanCreate(activeMembership?.role)}
-      changeScope={(next) =>
-        router.replace(`/assets?scope=${next}`, { scroll: false })
-      }
+      canCreate={manualFinanceCanCreate(activeMembership?.role, scope)}
     />
   );
 }

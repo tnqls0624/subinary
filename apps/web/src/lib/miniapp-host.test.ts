@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMiniappHostRuntime, createMiniappStateHandlers, type MiniappStateStore, type MiniappFrame } from './miniapp-host';
 import { createMiniappClient } from './miniapp-client-test-utils';
 import { MINIAPPS } from './miniapp-registry';
-import { activeTabFor } from './nav-tabs';
+import { activeTabFor, parentTabHref } from './nav-tabs';
 
 const request = (method = 'state.get', params: Record<string, unknown> = { key: 'garden' }, requestId = 'r') => ({ v: 1, kind: 'request', requestId, method, params });
 function deferred<T>() {
@@ -48,7 +48,8 @@ describe('호스트 메시지 경계', () => {
     expect(frame.postMessage).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', permissions: [] }), '*');
     await runtime.receive({ source: frame, data: request('merchant.list') });
     expect(frame.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ error: expect.objectContaining({ code: 'permission_denied' }) }), '*');
-    expect(activeTabFor('/play/app/')).toBe('more');
+    expect(activeTabFor('/play/app/')).toBeNull();
+    expect(parentTabHref('/play/app/')).toBe('/more');
   });
 
   it('등록부의 모든 항목이 iframe 실행 계약을 지킨다', () => {

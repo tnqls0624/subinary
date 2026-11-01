@@ -1,12 +1,10 @@
 /** Primary destinations share one route map with native back navigation. */
-export type TabKey = "home" | "assets" | "ledger" | "plan" | "more";
+export type TabKey = "home" | "assets" | "ledger";
 
 export const PRIMARY_TABS = [
   { key: "home", href: "/dashboard", label: "홈" },
-  { key: "assets", href: "/assets", label: "자산" },
   { key: "ledger", href: "/transactions", label: "가계부" },
-  { key: "plan", href: "/plan", label: "계획" },
-  { key: "more", href: "/more", label: "전체" },
+  { key: "assets", href: "/assets", label: "자산" },
 ] as const satisfies ReadonlyArray<{ key: TabKey; href: string; label: string }>;
 
 /** Existing task and management URLs remain available under 전체. */
@@ -15,7 +13,7 @@ export const ACCOUNT_PATHS: ReadonlyArray<string> = [
   "/more", "/play", "/household", "/devices", "/categories", "/ai-operations",
 ];
 
-/** Only these five destinations use Android's double-back exit behavior. */
+/** Only these three destinations use Android's double-back exit behavior. */
 export const TAB_ROOTS: ReadonlyArray<string> = PRIMARY_TABS.map((tab) => tab.href);
 
 /** Capacitor exports may add trailing slashes. */
@@ -36,10 +34,8 @@ export function isTabRoot(pathname: string): boolean {
 
 export function activeTabFor(pathname: string): TabKey | null {
   if (isUnder(pathname, "/dashboard")) return "home";
-  if (isUnder(pathname, "/assets") || isUnder(pathname, "/cards")) return "assets";
-  if (["/transactions", "/ledger", "/budgets"].some((p) => isUnder(pathname, p))) return "ledger";
-  if (isUnder(pathname, "/plan")) return "plan";
-  if ([...ACCOUNT_PATHS, ...TODO_PATHS, "/ai", "/notifications"].some((p) => isUnder(pathname, p))) return "more";
+  if (isUnder(pathname, "/assets") || isUnder(pathname, "/cards") || isUnder(pathname, "/plan")) return "assets";
+  if (["/transactions", "/ledger", "/budgets", ...TODO_PATHS, "/more/recurring"].some((p) => isUnder(pathname, p))) return "ledger";
   return null;
 }
 
@@ -49,6 +45,8 @@ export function activeTabFor(pathname: string): TabKey | null {
  */
 export function parentTabHref(pathname: string): string {
   if (isUnder(pathname, "/declines")) return "/todo";
+  if (normalizePath(pathname) === "/more") return "/dashboard";
+  if ([...ACCOUNT_PATHS, "/ai", "/notifications"].some((p) => isUnder(pathname, p)) && !isUnder(pathname, "/more/recurring")) return "/more";
   const tab = activeTabFor(pathname);
   return PRIMARY_TABS.find((item) => item.key === tab)?.href ?? "/dashboard";
 }

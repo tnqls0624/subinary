@@ -50,5 +50,7 @@ jobs:
           node --test scripts/ops/auto-investigate.verify.mjs
           node --test scripts/lib/verification-database-guard.test.mjs
           node --test scripts/lib/dockerfile-workspaces.test.mjs
+          node --test packages/contracts/test/*.test.mjs
+          node --test tools/shinhan-loan-collector/test/*.test.mjs
           pnpm test:auth-validation
           pnpm test:config-validation

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>신한 대출 직접 확인</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>대출 하나 직접 가져오기</h1>
+      <p>직접 로그인한 신한은행의 <strong>대출계좌명세</strong> 화면에서 실행해 주세요.</p>
+      <p class="notice">실험용 로컬 도구입니다. 실제 은행 DOM은 검증하지 않았습니다. 지원되는 표가 아니면 중단합니다.</p>
+      <button id="capture" type="button">현재 탭에서 확인</button>
+      <p id="status" role="status" aria-live="polite">확인 버튼을 누르기 전에는 페이지를 읽지 않습니다.</p>
+      <section id="review" hidden>
+        <label for="loan">가져올 대출 하나 선택</label>
+        <select id="loan"><option value="">직접 선택해 주세요</option></select>
+        <dl id="details" hidden>
+          <dt>종류 / 계좌 끝 4자리</dt><dd id="identity"></dd>
+          <dt>현재 대출잔액</dt><dd id="principal"></dd>
+          <dt>만기일</dt><dd id="maturity"></dd>
+          <dt>화면 확인 시각</dt><dd id="captured-at"></dd>
+        </dl>
+        <p>은행 기준일은 확인할 수 없어 비워 둡니다. 은행 화면과 잔액·만기일을 직접 대조해 주세요.</p>
+        <label class="check"><input id="confirmed" type="checkbox"> 선택한 대출과 표시된 값을 확인했습니다.</label>
+        <button id="export" type="button" disabled>선택한 대출 JSON 저장</button>
+      </section>
+      <p class="privacy">전체 계좌번호·상품명·주소는 저장하지 않습니다. 파일의 계좌 지문은 익명 정보가 아닌 가명 정보입니다. 파일도 금융정보로 관리해 주세요.</p>
+      <p class="privacy">로그인·인증정보를 읽거나 저장하지 않으며 전송 기능이 없습니다. 팝업을 닫으면 수집 결과가 사라집니다.</p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

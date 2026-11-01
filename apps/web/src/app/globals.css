@@ -1,12 +1,7 @@
-/* ---------------------------------------------------------------------------
- * Family Memory AI — web · 전역 스타일 (Tailwind v4 + shadcn/ui, 오늘의집 벤치마킹)
- *
- * 디자인 언어: 오늘의집(bucketplace) 벤치마크.
- *  - 화이트 베이스 + 연한 보더(#EAEDEF) 카드, 섹션 회색(#F7F9FA)으로 위계.
- *  - 시그니처 민트 primary(#35C5F0), 텍스트/링크용 진한 민트(#0AA5DC).
- *  - 컴팩트 라운드(버튼 8px · 카드 16px), 금액은 tabular-nums 볼드.
- *  - 주 네비게이션은 하단 탭바(전 뷰포트 공통) — 레이아웃에서 구현.
- * ------------------------------------------------------------------------- */
+/* 모아 — 숫자와 상태를 먼저 읽을 수 있는 가족 가계부.
+ * 밝은 바탕, 흰 카드, 짙은 청록색 행동 버튼. 실제 금액은 tabular-nums로 정렬한다.
+ * 라이트·다크의 본문/버튼/상태색 대비는 color-contrast.test.ts에서 확인한다.
+ */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -16,27 +11,27 @@
 :root {
   --radius: 0.75rem;
 
-  --background: #ffffff;
-  --foreground: #2f3438;
+  --background: #f5f7f8;
+  --foreground: #202d35;
 
   --card: #ffffff;
-  --card-foreground: #2f3438;
+  --card-foreground: #202d35;
   --popover: #ffffff;
-  --popover-foreground: #2f3438;
+  --popover-foreground: #202d35;
 
-  --primary: #35c5f0;
+  --primary: #116c5d;
   --primary-foreground: #ffffff;
 
-  --secondary: #f7f9fa;
-  --secondary-foreground: #454c53;
+  --secondary: #edf1f3;
+  --secondary-foreground: #3d515c;
 
-  --muted: #f7f9fa;
-  --muted-foreground: #828c94;
+  --muted: #edf1f3;
+  --muted-foreground: #586b76;
 
-  --accent: #e9f9fe;
-  --accent-foreground: #0aa5dc;
+  --accent: #e6f3ef;
+  --accent-foreground: #116c5d;
 
-  --destructive: #f04452;
+  --destructive: #c43443;
   --destructive-foreground: #ffffff;
 
   /* 표면용(진행바 채우기·반투명 틴트 배경). 텍스트로 쓰지 말 것 — 아래 -strong을 쓴다. */
@@ -50,50 +45,50 @@
   --success-strong: #017044;
   --warning-strong: #b45309;
 
-  --border: #eaedef;
-  --input: #dbdfe3;
-  --ring: #35c5f0;
+  --border: #e0e6e9;
+  --input: #cbd5db;
+  --ring: #116c5d;
 
-  --chart-1: #35c5f0;
+  --chart-1: #116c5d;
   --chart-2: #00a05b;
   --chart-3: #ff9500;
   --chart-4: #f04452;
   --chart-5: #7b61ff;
 
   --sidebar: #ffffff;
-  --sidebar-foreground: #2f3438;
-  --sidebar-primary: #35c5f0;
+  --sidebar-foreground: #202d35;
+  --sidebar-primary: #116c5d;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e9f9fe;
-  --sidebar-accent-foreground: #0aa5dc;
-  --sidebar-border: #eaedef;
-  --sidebar-ring: #35c5f0;
+  --sidebar-accent: #e6f3ef;
+  --sidebar-accent-foreground: #116c5d;
+  --sidebar-border: #e0e6e9;
+  --sidebar-ring: #116c5d;
 }
 
 /* --- 디자인 토큰 (다크) ---------------------------------------------------- */
 .dark {
-  --background: #121212;
-  --foreground: #e9ebed;
+  --background: #131b21;
+  --foreground: #edf2f5;
 
-  --card: #1e1e1e;
-  --card-foreground: #e9ebed;
-  --popover: #2a2a2a;
-  --popover-foreground: #e9ebed;
+  --card: #1c282f;
+  --card-foreground: #edf2f5;
+  --popover: #24343d;
+  --popover-foreground: #edf2f5;
 
-  --primary: #35c5f0;
-  --primary-foreground: #06222e;
+  --primary: #79d6bd;
+  --primary-foreground: #10372e;
 
-  --secondary: #2a2a2a;
-  --secondary-foreground: #c8cdd2;
+  --secondary: #273740;
+  --secondary-foreground: #d3dfe5;
 
-  --muted: #2a2a2a;
-  --muted-foreground: #8b95a1;
+  --muted: #273740;
+  --muted-foreground: #adbdc6;
 
-  --accent: #0d3542;
-  --accent-foreground: #6fd6f7;
+  --accent: #203d35;
+  --accent-foreground: #79d6bd;
 
-  --destructive: #f55b66;
-  --destructive-foreground: #ffffff;
+  --destructive: #ff8a96;
+  --destructive-foreground: #3b111a;
 
   --success: #34c77b;
   --warning: #ffb020;
@@ -104,22 +99,22 @@
 
   --border: #ffffff14;
   --input: #ffffff1f;
-  --ring: #35c5f0;
+  --ring: #79d6bd;
 
-  --chart-1: #35c5f0;
+  --chart-1: #79d6bd;
   --chart-2: #34c77b;
   --chart-3: #ffb020;
   --chart-4: #f55b66;
   --chart-5: #9b8afb;
 
-  --sidebar: #121212;
-  --sidebar-foreground: #e9ebed;
-  --sidebar-primary: #35c5f0;
-  --sidebar-primary-foreground: #06222e;
-  --sidebar-accent: #0d3542;
-  --sidebar-accent-foreground: #6fd6f7;
+  --sidebar: #1c282f;
+  --sidebar-foreground: #edf2f5;
+  --sidebar-primary: #79d6bd;
+  --sidebar-primary-foreground: #10372e;
+  --sidebar-accent: #203d35;
+  --sidebar-accent-foreground: #79d6bd;
   --sidebar-border: #ffffff14;
-  --sidebar-ring: #35c5f0;
+  --sidebar-ring: #79d6bd;
 }
 
 /* --- @theme inline: 토큰 → Tailwind 유틸리티 매핑 -------------------------- */

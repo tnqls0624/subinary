@@ -90,7 +90,7 @@ export function HouseholdSwitcher() {
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
-            className="h-9 max-w-56 justify-between gap-2"
+            className="min-h-11 min-w-0 max-w-56 shrink justify-between gap-2"
           >
             <span className="flex min-w-0 items-center gap-2">
               <Users className="text-muted-foreground size-4 shrink-0" />

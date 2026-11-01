@@ -96,20 +96,22 @@ describe("decideBackAction — 하위 화면", () => {
 
 
 describe("V2 route hierarchy and native back", () => {
-  it("only the five primary destinations offer exit confirmation", () => {
+  it("only the three primary destinations offer exit confirmation", () => {
+    expect(TAB_ROOTS).toHaveLength(3);
     for (const path of TAB_ROOTS) {
       expect(decideBackAction({ ...base, atTabRoot: isTabRoot(path) })).toBe("confirm-exit");
     }
   });
 
   it.each([
-    ["/todo", "/more"],
+    ["/todo", "/transactions"],
     ["/ai/", "/more"],
     ["/declines", "/todo"],
     ["/budgets", "/transactions"],
     ["/ledger/analysis/", "/transactions"],
     ["/cards", "/assets"],
-    ["/plan/housing", "/plan"],
+    ["/plan/housing", "/assets"],
+    ["/assets/loan-import/", "/assets"],
   ])("cold entry %s returns to %s without exiting", (path, parent) => {
     const decision = decideBackAction({ ...base, atTabRoot: isTabRoot(path) });
     expect(decision).toBe("parent");
@@ -117,7 +119,7 @@ describe("V2 route hierarchy and native back", () => {
   });
 
   it("a task opened from an existing list returns to that actual list", () => {
-    for (const path of ["/todo", "/declines", "/budgets", "/cards", "/ledger/analysis"]) {
+    for (const path of ["/todo", "/declines", "/budgets", "/cards", "/ledger/analysis", "/assets/loan-import/"]) {
       expect(decideBackAction({ ...base, atTabRoot: isTabRoot(path), canGoBackInApp: true })).toBe("back");
     }
   });

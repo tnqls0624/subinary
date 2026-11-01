@@ -7,7 +7,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card"
       className={cn(
-        // 오늘의집 스타일: 화이트 베이스 + 연한 보더 카드(그림자 없음), 16px 라운드.
+        // 읽는 내용별로 묶고, 배경과 경계로 구분한다.
         "bg-card text-card-foreground flex flex-col gap-5 rounded-xl border py-5 shadow-none",
         className,
       )}

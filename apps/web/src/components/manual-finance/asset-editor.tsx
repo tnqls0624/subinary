@@ -83,11 +83,13 @@ export function AssetEditor({
       title={
         editor.current
           ? editor.canEdit
-            ? "자산 기록 수정"
-            : "공유 자산 기록"
-          : "자산 직접 기록"
+            ? "자산 수정"
+            : editor.current.item.visibility === "private"
+              ? "비공개 자산"
+              : "공유 자산"
+          : "자산 추가"
       }
-      description="직접 확인한 현재값만 적어요. 은행·증권 계좌나 실제 자금을 변경하지 않아요."
+      description="잔액과 금액을 확인한 날짜를 입력해 주세요."
       dirty={editor.dirty}
       busy={editor.busy}
       pending={editor.pending}
@@ -103,13 +105,13 @@ export function AssetEditor({
               className="min-h-11 w-full"
               disabled={disabled}
             >
-              {editor.phase === "saving" ? "저장 중…" : "수동 기록 저장"}
+              {editor.phase === "saving" ? "저장 중…" : "저장"}
             </Button>
             {editor.current ? (
               <ConfirmAction
-                label="이 수동 기록 삭제"
-                title="수동 기록을 삭제할까요?"
-                description="이 기록은 자산 목록과 합계에서 빠져요. 실제 계좌·잔액·카드 거래는 바뀌지 않아요. 이 삭제는 개인정보의 완전한 파기를 뜻하지 않아요."
+                label="자산 삭제"
+                title="이 자산을 삭제할까요?"
+                description="목록과 합계에서 제외돼요. 실제 계좌와 잔액은 그대로예요. 개인정보 전체 삭제와는 달라요."
                 destructive
                 disabled={disabled}
                 onConfirm={() => void editor.remove()}
@@ -118,7 +120,7 @@ export function AssetEditor({
           </>
         ) : (
           <p className="text-muted-foreground text-sm">
-            기록한 사람만 내용을 수정하거나 공개 범위를 바꿀 수 있어요.
+            추가한 사람만 수정할 수 있어요.
           </p>
         )
       }
@@ -147,7 +149,7 @@ export function AssetEditor({
           </select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
-          기록 이름
+          이름
           <Input
             className="h-11"
             value={editor.draft.label}
@@ -171,8 +173,7 @@ export function AssetEditor({
             onChange={(e) => set("amount", e.target.value)}
           />
           <span className="text-muted-foreground text-xs font-normal">
-            원화로 직접 확인한 값만 입력해요. 빈칸과 실제 0원을 구분해요. 적금
-            만기 예상액·대출 한도는 넣지 않아요.
+            현재 금액을 원 단위로 입력해 주세요. 모르면 비워두세요.
           </span>
         </label>
         <label className="grid gap-2 text-sm font-medium">
@@ -185,15 +186,14 @@ export function AssetEditor({
             onChange={(e) => set("asOfDate", e.target.value)}
           />
           <span className="text-muted-foreground text-xs font-normal">
-            금액이 있으면 기준일이 필요해요. 모르는 날짜를 오늘로 채우지 않아요.
+            금액을 확인한 날짜예요. 금액을 입력하면 꼭 적어주세요.
           </span>
         </label>
         <p className="bg-muted rounded-lg p-3 text-xs">
-          출처: {editor.draft.amount.trim() ? "직접 입력" : "금액 미입력"} ·
-          자동 조회·환산한 금액이 아니에요.
+          출처: {editor.draft.amount.trim() ? "직접 입력" : "금액 미입력"}
         </p>
         <label className="grid gap-2 text-sm font-medium">
-          명의 메모 · 선택
+          명의자 메모 · 선택
           <Input
             className="h-11"
             value={editor.draft.legalOwnerLabel}
@@ -204,16 +204,15 @@ export function AssetEditor({
             onChange={(e) => set("legalOwnerLabel", e.target.value)}
           />
           <span className="text-muted-foreground text-xs font-normal">
-            직접 적은 메모이며 법적 소유권·공동 지분을 확인하는 기능은 아니에요.
+            참고용 메모예요. 소유권이나 공동 지분을 확인하지는 않아요.
           </span>
         </label>
         <VisibilityField
           value={editor.draft.visibility}
-          disabled={disabled}
-          onChange={(value) => set("visibility", value)}
+          creating={!editor.current}
         />
         <label className="grid gap-2 text-sm font-medium">
-          기준·출처 메모 · 선택
+          메모 · 선택
           <textarea
             rows={3}
             maxLength={1000}
@@ -224,6 +223,11 @@ export function AssetEditor({
             onChange={(e) => set("note", e.target.value)}
           />
         </label>
+        <details className="text-muted-foreground text-xs leading-relaxed">
+          <summary className="min-h-11 cursor-pointer py-3">금액 입력 기준</summary>
+          <p className="pb-3">통장·현금은 잔액, 적금은 현재 적립액, 주식은 현재 평가액, 대출은 남은 원금을 적어주세요. 만기 예상액이나 대출 한도는 제외해요.</p>
+          <p className="pb-3">금액과 날짜는 직접 확인한 원화 기준이에요. 계좌 자동 조회나 외화 환산 없이 입력한 값을 사용해요. 모르는 금액은 비워두고, 실제로 0원일 때만 0을 입력해 주세요.</p>
+        </details>
       </form>
       {editor.error ? (
         <p role="alert" className="text-destructive text-sm break-words">
@@ -241,7 +245,7 @@ export function AssetEditor({
             ? "현재 기록을 확인하고 있어요."
             : editor.phase === "removing"
             ? "삭제 결과를 확인하고 있어요."
-            : "수동 기록을 저장하고 있어요."}
+            : "자산을 저장하고 있어요."}
         </p>
       ) : null}
       {editor.readRequired ? (
@@ -252,7 +256,7 @@ export function AssetEditor({
           disabled={editor.busy}
           onClick={() => void editor.read()}
         >
-          다시 보내기 전 현재 기록 확인
+          저장 상태 확인
         </Button>
       ) : null}
       {editor.latest ? (
@@ -266,9 +270,9 @@ export function AssetEditor({
             {editor.latest.item.asOfDate ?? "미입력"}
           </p>
           <ConfirmAction
-            label="입력을 버리고 현재 기록 불러오기"
-            title="현재 저장된 기록으로 다시 시작할까요?"
-            description="아직 저장되지 않은 입력은 사라지고, 방금 확인한 최신 기록을 불러와요."
+            label="저장된 내용 불러오기"
+            title="저장된 내용으로 바꿀까요?"
+            description="지금 입력한 내용은 사라지고, 최신 저장 내용으로 바뀌어요."
             disabled={editor.busy}
             onConfirm={editor.resetLatest}
           />

@@ -9,10 +9,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type {
-  ManualFinanceScope,
-  ManualFinanceVisibility,
-} from "@family/contracts";
+import type { ManualFinanceVisibility } from "@family/contracts";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,72 +37,41 @@ const RecordDialogContext = createContext<{
   registerOverlay: (close: () => void) => () => void;
 } | null>(null);
 
-export function FinanceScopeTabs({
-  value,
-  onChange,
-}: {
-  value: ManualFinanceScope;
-  onChange: (value: ManualFinanceScope) => void;
-}) {
+export function LegacyPrivateNotice({ href }: { href: "/assets" | "/plan" }) {
   return (
-    <div>
-      <div
-        role="group"
-        aria-label="수동 기록 보기 범위"
-        className="bg-muted grid grid-cols-2 gap-1 rounded-xl p-1"
-      >
-        {(
-          [
-            ["household", "가족 공유"],
-            ["private", "나만 보기"],
-          ] as const
-        ).map(([scope, label]) => (
-          <Button
-            key={scope}
-            type="button"
-            variant={value === scope ? "default" : "ghost"}
-            className="min-h-11"
-            aria-pressed={scope === value}
-            onClick={() => onChange(scope)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-        선택한 범위의 수동 기록만 보여요. 기존 카드의 가족공개·요약만·비공개
-        정책을 바꾸지 않아요.
+    <section aria-label="기존 비공개 기록" className="rounded-xl border bg-muted/30 p-4">
+      <h2 className="text-sm font-semibold">기존 비공개 기록</h2>
+      <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+        예전에 비공개로 등록한 내용이에요. 수정해도 공개 범위는 유지돼요.
       </p>
-    </div>
+      <Link href={href} className="text-primary mt-1 inline-flex min-h-11 items-center text-sm font-medium">
+        공유 목록으로 돌아가기 →
+      </Link>
+    </section>
   );
 }
+
+/** Display only: editing an existing private record never widens its visibility. */
 export function VisibilityField({
   value,
-  onChange,
-  disabled,
+  creating = false,
 }: {
   value: ManualFinanceVisibility;
-  onChange: (value: ManualFinanceVisibility) => void;
-  disabled: boolean;
+  creating?: boolean;
 }) {
   return (
-    <label className="grid gap-2 text-sm font-medium">
-      이 기록의 공개 범위
-      <select
-        aria-label="이 기록의 공개 범위"
-        className="bg-background h-11 min-w-0 rounded-md border px-3 font-normal"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value as ManualFinanceVisibility)}
-      >
-        <option value="private">비공개 · 나만 보기</option>
-        <option value="household">가족 공개 · 내용과 금액 공유</option>
-      </select>
-      <span className="text-muted-foreground text-xs font-normal leading-relaxed">
-        새 기록은 비공개예요. 가족 공개를 선택하면 현재 가족 구성원에게 이
-        기록의 상세와 금액이 공개돼요. 카드 공개 정책과는 별개예요.
-      </span>
-    </label>
+    <section aria-label="공개 범위" className="rounded-lg bg-muted/50 p-3">
+      <p className="text-sm font-medium">
+        {value === "household" ? "가족과 공유" : "기존 비공개 기록"}
+      </p>
+      <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+        {value === "household"
+          ? creating
+            ? "저장하면 현재 선택한 가족의 모든 구성원이 내용과 금액을 볼 수 있어요."
+            : "현재 선택한 가족의 모든 구성원이 내용과 금액을 볼 수 있어요."
+          : "나만 볼 수 있어요. 수정해도 가족에게 공유되지 않아요."}
+      </p>
+    </section>
   );
 }
 export function FinanceLoadError({ retry }: { retry: () => void }) {
@@ -112,8 +79,7 @@ export function FinanceLoadError({ retry }: { retry: () => void }) {
     <section role="alert" className="rounded-xl border p-5">
       <h2 className="font-semibold">기록을 불러오지 못했어요</h2>
       <p className="text-muted-foreground mt-2 text-sm">
-        확인할 수 없는 값을 0원으로 바꾸지 않아요. 연결·권한을 확인한 뒤 다시
-        불러와 주세요.
+        잠시 후 다시 불러와 주세요.
       </p>
       <Button variant="outline" className="mt-4 min-h-11" onClick={retry}>
         다시 불러오기
@@ -125,7 +91,7 @@ export function FinanceLoading() {
   return (
     <div role="status" aria-busy="true" className="space-y-3">
       <p className="text-muted-foreground text-sm">
-        선택한 범위의 수동 기록을 확인하고 있어요.
+        불러오는 중이에요.
       </p>
       <div className="bg-muted h-40 animate-pulse rounded-2xl" />
     </div>
@@ -239,7 +205,7 @@ export function RecordDialog({
       return;
     }
     if (latest.current.busy || latest.current.pending()) {
-      setNotice("저장 중이에요. 결과를 확인할 때까지 잠시 기다려 주세요.");
+      setNotice("저장 중이에요. 잠시 기다려 주세요.");
       return;
     }
     if (latest.current.dirty) {
@@ -332,11 +298,11 @@ export function RecordDialog({
           <AlertDialog open={discard} onOpenChange={setDiscard}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>입력을 버리고 닫을까요?</AlertDialogTitle>
+                <AlertDialogTitle>저장하지 않고 닫을까요?</AlertDialogTitle>
                 <AlertDialogDescription>
                   {readRequired
-                    ? "입력한 내용은 닫으면 사라져요. 이전 저장의 처리 여부는 현재 기록을 다시 확인해 주세요."
-                    : "저장하지 않은 입력은 사라져요. 실제 카드 거래와 자금은 바뀌지 않아요."}
+                    ? "입력한 내용은 사라져요. 이전 저장이 완료됐는지는 기록을 다시 열어 확인해 주세요."
+                    : "저장하지 않은 내용은 사라져요."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -344,7 +310,7 @@ export function RecordDialog({
                   계속 입력하기
                 </AlertDialogCancel>
                 <AlertDialogAction className="min-h-11" onClick={finish}>
-                  버리고 닫기
+                  저장 안 함
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

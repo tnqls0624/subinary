@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  // 오늘의집 스타일: 굵은 라벨 + 눌림 피드백(active scale) + 컴팩트 라운드(8px).
+  // 행동의 우선순위와 키보드 포커스를 일관되게 표시한다.
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
   {
     variants: {
@@ -17,7 +17,7 @@ const buttonVariants = cva(
           "border bg-card hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/70",
-        // 오늘의집의 '연민트' 보조 CTA(민트 틴트 배경 + 진한 민트 텍스트).
+        // 보조 행동은 옅은 배경으로 구분한다.
         tint: "bg-accent text-accent-foreground hover:bg-accent/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",

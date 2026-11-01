@@ -17,6 +17,7 @@ import {
   check,
   date,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -4755,3 +4756,79 @@ export const manualFinanceAudit = pgTable('manual_finance_audit', {
   check('manual_finance_audit_version_check', sql`${table.version} > 0`),
 ]);
 export type ManualFinanceAuditRecord = typeof manualFinanceAudit.$inferSelect;
+
+/* -------------------------------------------------------------------------- */
+/* Reviewed Shinhan browser observations — no provider credentials or sessions */
+/* -------------------------------------------------------------------------- */
+
+export const loanRecords = pgTable('loan_records', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  accountFingerprint: text('account_fingerprint').notNull(),
+  accountLast4: text('account_last4').notNull(),
+  loanType: text('loan_type').$type<'interim' | 'jeonse'>().notNull(),
+  label: text('label').notNull(),
+  visibility: text('visibility').$type<'private' | 'household'>().notNull().default('private'),
+  totalMode: text('total_mode').$type<'reference' | 'distinct' | 'replacement'>().notNull().default('reference'),
+  replacesManualAssetId: uuid('replaces_manual_asset_id').references(() => manualAssets.id),
+  manualExpectedVersion: integer('manual_expected_version'),
+  /** A sharing grant belongs to one membership incarnation, never a later rejoin. */
+  sharedMemberId: uuid('shared_member_id').references(() => householdMembers.id),
+  sharedJoinedAt: timestamp('shared_joined_at', { withTimezone: true }),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => [
+  // One active record per household/owner/account. A record left in a former
+  // household must not block a fresh reviewed import in the current household.
+  uniqueIndex('loan_records_owner_fingerprint_unique').on(table.householdId, table.ownerUserId, table.accountFingerprint)
+    .where(sql`${table.deletedAt} IS NULL`),
+  unique('loan_records_snapshot_scope_unique').on(table.id, table.householdId, table.ownerUserId),
+  uniqueIndex('loan_records_manual_replacement_unique').on(table.replacesManualAssetId)
+    .where(sql`${table.deletedAt} IS NULL AND ${table.replacesManualAssetId} IS NOT NULL`),
+  index('loan_records_household_scope_idx').on(table.householdId, table.visibility, table.ownerUserId),
+  check('loan_records_fingerprint_check', sql`${table.accountFingerprint} ~ '^[0-9a-f]{64}$'`),
+  check('loan_records_last4_check', sql`${table.accountLast4} ~ '^[0-9]{4}$'`),
+  check('loan_records_type_check', sql`${table.loanType} IN ('interim', 'jeonse')`),
+  check('loan_records_label_check', sql`char_length(btrim(${table.label})) BETWEEN 1 AND 100`),
+  check('loan_records_visibility_check', sql`${table.visibility} IN ('private', 'household')`),
+  check('loan_records_total_mode_check', sql`${table.totalMode} IN ('reference', 'distinct', 'replacement')`),
+  check('loan_records_mapping_check', sql`(${table.totalMode} = 'replacement' AND ${table.replacesManualAssetId} IS NOT NULL AND ${table.manualExpectedVersion} IS NOT NULL AND ${table.manualExpectedVersion} > 0) OR (${table.totalMode} IN ('reference', 'distinct') AND ${table.replacesManualAssetId} IS NULL AND ${table.manualExpectedVersion} IS NULL)`),
+  check('loan_records_sharing_grant_check', sql`(${table.visibility} = 'household' AND ${table.sharedMemberId} IS NOT NULL AND ${table.sharedJoinedAt} IS NOT NULL) OR (${table.visibility} = 'private' AND ${table.sharedMemberId} IS NULL AND ${table.sharedJoinedAt} IS NULL)`),
+  check('loan_records_version_check', sql`${table.version} > 0`),
+]);
+export type LoanRecord = typeof loanRecords.$inferSelect;
+export type NewLoanRecord = typeof loanRecords.$inferInsert;
+
+/** Immutable observations; metadata changes may advance the record beyond its latest snapshot. */
+export const loanSnapshots = pgTable('loan_snapshots', {
+  /** The client's commit request UUID is also its global idempotency identity. */
+  id: uuid('id').primaryKey(),
+  recordId: uuid('record_id').notNull(),
+  householdId: uuid('household_id').notNull(),
+  ownerUserId: uuid('owner_user_id').notNull(),
+  outstandingPrincipalKrw: numeric('outstanding_principal_krw', { precision: 20, scale: 0 }).notNull(),
+  maturityDate: date('maturity_date', { mode: 'string' }),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+  source: text('source').$type<'browser_assisted'>().notNull().default('browser_assisted'),
+  formatVersion: integer('format_version').notNull().default(1),
+  payloadHash: text('payload_hash').notNull(),
+  recordVersion: integer('record_version').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  foreignKey({ name: 'loan_snapshots_record_scope_fk',
+    columns: [table.recordId, table.householdId, table.ownerUserId],
+    foreignColumns: [loanRecords.id, loanRecords.householdId, loanRecords.ownerUserId] }),
+  unique('loan_snapshots_record_version_unique').on(table.recordId, table.recordVersion),
+  check('loan_snapshots_amount_check', sql`${table.outstandingPrincipalKrw} >= 0`),
+  check('loan_snapshots_maturity_check', sql`${table.maturityDate} IS NULL OR ${table.maturityDate} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31'`),
+  check('loan_snapshots_capture_check', sql`${table.capturedAt} >= TIMESTAMPTZ '0001-01-01 00:00:00+00' AND ${table.capturedAt} <= CURRENT_TIMESTAMP + INTERVAL '5 minutes'`),
+  check('loan_snapshots_source_check', sql`${table.source} = 'browser_assisted'`),
+  check('loan_snapshots_format_version_check', sql`${table.formatVersion} = 1`),
+  check('loan_snapshots_payload_hash_check', sql`${table.payloadHash} ~ '^[0-9a-f]{64}$'`),
+  check('loan_snapshots_record_version_check', sql`${table.recordVersion} > 0`),
+]);
+export type LoanSnapshot = typeof loanSnapshots.$inferSelect;
+export type NewLoanSnapshot = typeof loanSnapshots.$inferInsert;

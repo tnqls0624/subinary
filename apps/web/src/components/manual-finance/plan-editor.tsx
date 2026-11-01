@@ -89,10 +89,12 @@ export function PlanEditor({
         editor.current
           ? editor.canEdit
             ? "주택 계획 수정"
-            : "공유 주택 계획"
-          : "주택 계획 직접 기록"
+            : editor.current.item.visibility === "private"
+              ? "비공개 주택 계획"
+              : "공유 주택 계획"
+          : "주택 계획 추가"
       }
-      description="계약서에서 확인한 일정만 정리해요. 실제 지급·자산 잔액 변경·카드 거래를 실행하지 않아요."
+      description="계약서에서 확인한 납부 일정과 금액을 입력해 주세요."
       dirty={editor.dirty}
       busy={editor.busy}
       pending={editor.pending}
@@ -108,13 +110,13 @@ export function PlanEditor({
               className="min-h-11 w-full"
               disabled={disabled}
             >
-              {editor.phase === "saving" ? "저장 중…" : "주택 계획 저장"}
+              {editor.phase === "saving" ? "저장 중…" : "저장"}
             </Button>
             {editor.current ? (
               <ConfirmAction
-                label="이 수동 계획 삭제"
-                title="수동 주택 계획을 삭제할까요?"
-                description="이 계획과 그 지급 기록이 목록·예정 지급 안내에서 빠져요. 실제 주택 계약·납부·계좌·카드 거래는 취소되지 않아요. 개인정보의 완전한 파기는 아니에요."
+                label="계획 삭제"
+                title="이 주택 계획을 삭제할까요?"
+                description="계획과 납부 일정이 목록에서 제외돼요. 실제 계약과 납부는 취소되지 않아요. 개인정보 전체 삭제와는 달라요."
                 destructive
                 disabled={disabled}
                 onConfirm={() => void editor.remove()}
@@ -123,7 +125,7 @@ export function PlanEditor({
           </>
         ) : (
           <p className="text-muted-foreground text-sm">
-            기록한 사람만 내용과 공개 범위를 수정할 수 있어요.
+            추가한 사람만 내용을 수정할 수 있어요.
           </p>
         )
       }
@@ -147,8 +149,7 @@ export function PlanEditor({
             onChange={(e) => set("label", e.target.value)}
           />
           <span className="text-muted-foreground text-xs font-normal">
-            이름은 직접 입력해요. 예시 이름이 계약·소유 사실을 확인한 것은
-            아니에요.
+            알아보기 쉬운 주택 이름을 적어주세요.
           </span>
         </label>
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -180,21 +181,18 @@ export function PlanEditor({
         </div>
         <VisibilityField
           value={editor.draft.visibility}
-          disabled={disabled}
-          onChange={(value) => set("visibility", value)}
+          creating={!editor.current}
         />
-        <section className="grid min-w-0 gap-3" aria-label="주택 지급 기록">
+        <section className="grid min-w-0 gap-3" aria-label="주택 납부 일정">
           <div>
             <h3 className="font-semibold">계약금·중도금·잔금·옵션</h3>
             <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-              금액·일정·납부 여부는 확인한 값만 입력해요. 옵션을 0원으로
-              채우거나 미확인을 완납으로 표시하지 않아요.
+              확인한 금액과 날짜를 적고, 아직 모르는 항목은 비워두세요.
             </p>
           </div>
           {editor.draft.payments.length === 0 ? (
             <p className="bg-muted rounded-lg p-4 text-sm">
-              지급 기록 미입력 · 예정 금액과 남은 준비액을 아직 계산할 수
-              없어요.
+              납부 일정을 추가해 주세요.
             </p>
           ) : null}
           {editor.draft.payments.map((payment, index) => (
@@ -204,13 +202,13 @@ export function PlanEditor({
               className="grid min-w-0 gap-3 rounded-xl border p-3"
             >
               <legend className="px-1 text-sm font-semibold">
-                지급 기록 {index + 1}
+                납부 일정 {index + 1}
               </legend>
               <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm">
                   항목
                   <select
-                    aria-label={`지급 기록 ${index + 1} 항목`}
+                    aria-label={`납부 일정 ${index + 1} 항목`}
                     className="bg-background h-11 rounded-md border px-3"
                     value={payment.kind}
                     onChange={(e) =>
@@ -256,7 +254,7 @@ export function PlanEditor({
                 />
               </label>
               <label className="grid gap-2 text-sm">
-                지급 예정일 · 선택
+                납부 예정일 · 선택
                 <Input
                   type="date"
                   className="h-11 min-w-0"
@@ -279,8 +277,7 @@ export function PlanEditor({
                   }
                 />
                 <span className="text-muted-foreground text-xs">
-                  납부 없음이 확인된 경우에만 0을 입력해요. 예정 금액을 초과할
-                  수 없어요.
+                  아직 낸 돈이 없으면 0을, 확인하지 못했다면 빈칸으로 두세요.
                 </span>
               </label>
               <label className="grid gap-2 text-sm">
@@ -306,7 +303,7 @@ export function PlanEditor({
                     )
                   }
                 >
-                  저장 전 이 입력 빼기
+                  이 일정 빼기
                 </Button>
               ) : null}
             </fieldset>
@@ -325,26 +322,30 @@ export function PlanEditor({
               }
             >
               <Plus className="size-4" />
-              지급 기록 추가
+              납부 일정 추가
             </Button>
           ) : null}
         </section>
         <label className="grid gap-2 text-sm font-medium">
-          재원 용도 메모 · 선택
+          자금 마련 메모 · 선택
           <textarea
             rows={4}
             maxLength={2000}
             className="bg-background min-h-24 min-w-0 rounded-md border p-3 font-normal"
             value={editor.draft.fundingNote}
             disabled={disabled}
-            placeholder="공유하면 가족에게 보이는 메모예요. 비공개 계좌 정보·전체 번호·인증정보는 적지 마세요."
+            placeholder="어디서 자금을 마련할지 적어주세요. 전체 계좌번호나 비밀번호는 적지 마세요."
             onChange={(e) => set("fundingNote", e.target.value)}
           />
           <span className="text-muted-foreground text-xs font-normal leading-relaxed">
-            용도 메모만 기록해요. 통장 재원 배정·예약·대출 실행·현금 전망 계산은
-            하지 않아요. 주택 계약금액은 자산 시가로 합산하지 않아요.
+            가족과 공유한 계획은 이 메모도 함께 보여요.
           </span>
         </label>
+        <details className="text-muted-foreground text-xs leading-relaxed">
+          <summary className="min-h-11 cursor-pointer py-3">납부 기록 안내</summary>
+          <p className="pb-3">이 화면은 일정과 납부 내역을 적는 곳이에요. 실제 이체나 계약 변경은 하지 않아요. 아직 확인하지 못한 금액과 날짜는 비워두세요.</p>
+          <p className="pb-3">자금 마련 메모는 참고용이며 자금 배정이나 현금 흐름 예측에 반영되지 않아요. 계약금액과 납부액도 현재 자산 합계에 포함하지 않아요.</p>
+        </details>
       </form>
       {editor.error ? (
         <p role="alert" className="text-destructive text-sm break-words">
@@ -373,7 +374,7 @@ export function PlanEditor({
           disabled={editor.busy}
           onClick={() => void editor.read()}
         >
-          다시 보내기 전 현재 기록 확인
+          저장 상태 확인
         </Button>
       ) : null}
       {editor.latest ? (
@@ -381,13 +382,13 @@ export function PlanEditor({
           <h3 className="font-semibold">현재 저장된 기록</h3>
           <p className="break-words">
             {editor.latest.item.label} · 입주연도{" "}
-            {editor.latest.item.occupancyYear ?? "미확인"} · 지급 기록{" "}
+            {editor.latest.item.occupancyYear ?? "미확인"} · 납부 일정{" "}
             {editor.latest.payments.length}개
           </p>
           <ConfirmAction
-            label="입력을 버리고 현재 기록 불러오기"
-            title="현재 저장된 기록으로 다시 시작할까요?"
-            description="저장되지 않은 입력은 사라지고, 방금 확인한 계획과 모든 지급 기록을 불러와요."
+            label="저장된 내용 불러오기"
+            title="저장된 내용으로 바꿀까요?"
+            description="지금 입력한 내용은 사라지고, 최신 계획과 납부 일정으로 바뀌어요."
             disabled={editor.busy}
             onConfirm={editor.resetLatest}
           />

@@ -225,6 +225,15 @@ export {
   summarizeManualAssets,
   summarizeManualHousingPlans,
 } from './manual-finance.js';
+
+export { composeFinancialOverview } from './loan-overview.js';
+export type {
+  LoanOverviewManualItem,
+  LoanOverviewLoanItem,
+  LoanOverviewInput,
+  LoanOverviewResult,
+  LoanOverviewExclusionReason,
+} from './loan-overview.js';
 export type {
   ManualFinancePolicyActor,
   ManualFinancePolicyRecord,

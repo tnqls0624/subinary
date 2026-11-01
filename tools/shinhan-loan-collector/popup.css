@@ -1,0 +1,19 @@
+:root { color-scheme: light; font: 14px/1.55 system-ui, sans-serif; color: #17283b; background: #f5f8fc; }
+body { margin: 0; width: 380px; }
+main { padding: 20px; }
+h1 { margin: 0 0 12px; font-size: 21px; }
+p { margin: 10px 0; }
+button, select { font: inherit; width: 100%; border-radius: 7px; padding: 10px; }
+button { border: 0; background: #1456ab; color: white; font-weight: 650; cursor: pointer; }
+button:disabled { background: #69798b; cursor: default; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #d38312; outline-offset: 2px; }
+select { margin: 6px 0; background: white; border: 1px solid #98a9be; }
+section { border-top: 1px solid #c8d4e3; padding-top: 14px; }
+.notice { padding: 10px; background: #fff2d8; border-radius: 6px; }
+.privacy { color: #46566b; font-size: 12px; }
+.check { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0; }
+dl { background: white; border-radius: 6px; padding: 12px; }
+dt { color: #46566b; font-size: 12px; }
+dd { margin: 0 0 9px; overflow-wrap: anywhere; }
+dd:last-child { margin-bottom: 0; }
+[hidden] { display: none !important; }

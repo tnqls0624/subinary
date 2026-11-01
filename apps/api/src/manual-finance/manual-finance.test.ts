@@ -25,6 +25,7 @@ const AT = '2026-01-01T00:00:00.000Z';
 type Row = Record<string, unknown>;
 const tables = [schema.users, schema.households, schema.householdMembers, schema.manualAssets,
   schema.manualHousingPlans, schema.manualHousingPayments, schema.manualFinanceAudit,
+  schema.loanRecords, schema.loanSnapshots,
   schema.registeredDevices, schema.deviceCredentials, schema.householdConsents];
 const tableMap = new Map<string, Table>(tables.map(table => [getTableName(table), table as Table]));
 const assetInput = (extra: Partial<ManualAssetCreateRequest> = {}): ManualAssetCreateRequest => ({
@@ -81,7 +82,7 @@ function setup() {
       if (query.includes('inner join "users"') && rows.users.some(u => u.id === row.userId && u.deletedAt !== null)) return false;
     }
     if (where.includes('"' + name + '"."deleted_at" is null') && row.deletedAt !== null) return false;
-    if (name === 'manual_assets' || name === 'manual_housing_plans') {
+    if (name === 'manual_assets' || name === 'manual_housing_plans' || name === 'loan_records') {
       const owner = bound(where, name, 'ownerUserId', params), visibility = bound(where, name, 'visibility', params);
       if (where.includes(' or ') && visibility !== undefined && owner !== undefined) {
         if (row.visibility !== visibility && row.ownerUserId !== owner) return false;
@@ -383,6 +384,51 @@ describe('housing plan atomicity and privacy', () => {
 });
 
 describe('membership removal ends manual-record sharing', () => {
+  it.each([
+    { version: 1, rejoinedAt: '2026-02-01T00:00:00.000Z', incarnation: 'new timestamp' },
+    { version: 2_147_483_647, rejoinedAt: '2026-02-01T00:00:00.000Z', incarnation: 'new timestamp' },
+    { version: 1, rejoinedAt: AT, incarnation: 'reused timestamp' },
+    { version: 2_147_483_647, rejoinedAt: AT, incarnation: 'reused timestamp' },
+  ])('revokes imported-loan sharing at version $version with $incarnation without altering evidence', async ({ version, rejoinedAt }) => {
+    const { service, household, rows, queries, publisher, transactionState } = setup();
+    await service.createAsset(O, assetInput({ kind: 'loan', visibility: 'household',
+      amount: '130000000', asOfDate: '2026-01-01', source: 'manual' }));
+    publisher.publish.mockClear();
+    const recordId = randomUUID();
+    const loan = { id: recordId, householdId: H, ownerUserId: O,
+      accountFingerprint: 'a'.repeat(64), accountLast4: '1234', loanType: 'interim',
+      label: '합성 중도금', visibility: 'household', totalMode: 'replacement',
+      replacesManualAssetId: A, manualExpectedVersion: 1, sharedMemberId: MO,
+      sharedJoinedAt: AT, version, createdAt: AT, updatedAt: AT, deletedAt: null };
+    const privateId = randomUUID(), otherId = randomUUID();
+    rows.loan_records.push(loan,
+      { ...loan, id: privateId, accountFingerprint: 'c'.repeat(64), visibility: 'private',
+        totalMode: 'distinct', replacesManualAssetId: null, manualExpectedVersion: null,
+        sharedMemberId: null, sharedJoinedAt: null },
+      { ...loan, id: otherId, ownerUserId: U, sharedMemberId: M,
+        totalMode: 'distinct', replacesManualAssetId: null, manualExpectedVersion: null });
+    rows.loan_snapshots.push({ id: randomUUID(), recordId, householdId: H, ownerUserId: O,
+      outstandingPrincipalKrw: '120000000', maturityDate: '2028-01-01', capturedAt: AT,
+      source: 'browser_assisted', formatVersion: 1, payloadHash: 'b'.repeat(64), recordVersion: 1, createdAt: AT });
+    const beforeSnapshots = structuredClone(rows.loan_snapshots);
+    const beforePrivate = structuredClone(rows.loan_records[1]), beforeOther = structuredClone(rows.loan_records[2]);
+    const observed: boolean[] = [];
+    publisher.publish.mockImplementation(async () => { observed.push(transactionState.active); });
+    await household.removeMember(H, U, MO);
+    expect(rows.loan_records[0]).toMatchObject({ visibility: 'private', totalMode: 'reference',
+      replacesManualAssetId: null, manualExpectedVersion: null, sharedMemberId: null, sharedJoinedAt: null,
+      version: Math.min(version + 1, 2_147_483_647) });
+    expect(rows.loan_records[1]).toEqual(beforePrivate); expect(rows.loan_records[2]).toEqual(beforeOther);
+    expect(rows.loan_snapshots).toEqual(beforeSnapshots);
+    expect(queries.filter(query => query.sql.startsWith('update "loan_records"')).every(query => query.transaction)).toBe(true);
+    expect(queries.some(query => /^(update|delete).*"loan_snapshots"/.test(query.sql))).toBe(false);
+    expect(publisher.publish.mock.calls).toEqual([[H, 'manual-finance.changed']]); expect(observed).toEqual([false]);
+    // The rollback-compatible removal must revoke the grant itself. A
+    // timestamp comparison alone cannot protect a reused clock value.
+    rows.household_members[1]!.status = 'active'; rows.household_members[1]!.joinedAt = rejoinedAt;
+    expect(rows.loan_records[0]).toMatchObject({ visibility: 'private', sharedMemberId: null,
+      sharedJoinedAt: null, totalMode: 'reference', replacesManualAssetId: null, manualExpectedVersion: null });
+  });
   it('unshares only the removed owner records in the membership transaction and does not reshare on rejoin', async () => {
     const { service, household, rows, queries } = setup();
     await service.createAsset(O, assetInput({ visibility: 'household' }));

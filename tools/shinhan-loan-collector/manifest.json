@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "신한 대출 직접 확인 도우미 (로컬)",
+  "version": "0.1.0",
+  "description": "현재 탭의 지원되는 대출계좌명세에서 직접 고른 대출 하나를 로컬 JSON으로 저장합니다.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "신한 대출 직접 확인",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+  }
+}

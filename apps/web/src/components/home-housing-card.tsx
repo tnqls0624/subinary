@@ -15,25 +15,38 @@ export function HomeHousingCard({ summary, loading, error, scope }: {
   scope: "household" | "private";
 }) {
   const next = !loading && !error ? summary?.nextPayment : null;
+  if (!next) {
+    const incomplete = !loading && !error && summary?.hasIncompletePayments;
+    return (
+      <section className="bg-card rounded-2xl border px-5 py-3" aria-label="주택 납부 일정">
+        <Link href={`/plan?scope=${scope}`} className="flex min-h-11 items-center gap-3 py-2">
+          <House className="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">주택 납부 일정</span>
+            <span className={`mt-1 block text-xs leading-relaxed ${error ? "text-destructive" : "text-muted-foreground"}`} role={error ? "alert" : loading ? "status" : undefined}>
+              {loading ? "납부 일정을 불러오는 중이에요." : error ? "납부 일정을 불러오지 못했어요." : incomplete ? "금액·날짜·납부 내역이 비어 있는 항목이 있어요." : "예정된 납부 일정이 없어요."}
+            </span>
+          </span>
+          <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+        </Link>
+      </section>
+    );
+  }
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><House className="size-4" aria-hidden="true" />주택 지급에 필요한 돈</CardTitle>
-        <CardDescription>{scope === "household" ? "공유한" : "내 비공개"} 계획의 수동 지급 기록이에요</CardDescription>
+        <CardTitle className="flex items-center gap-2"><House className="size-4" aria-hidden="true" />다음 주택 납부</CardTitle>
+        <CardDescription>{scope === "household" ? "가족과 공유한 일정" : "나만 보는 일정"}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-muted-foreground text-xs">입력된 미지급 일정 중 가장 이른 지급</p>
-        <p className="break-words text-2xl font-bold tracking-tight tabular-nums">{manualKrwText(next?.remainingAmountKrw)}</p>
-        {loading ? <p className="text-muted-foreground text-sm" role="status">주택 지급 기록을 확인하고 있어요.</p> : error ? <p className="text-destructive text-sm" role="alert">주택 지급 기록을 불러오지 못했어요.</p> : next ? (
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">계획</dt><dd className="break-words">{next.label}</dd>
-            <dt className="text-muted-foreground">항목</dt><dd>{PAYMENT_LABEL[next.kind]}{next.installment !== null ? ` ${next.installment}회차` : ""}</dd>
-            <dt className="text-muted-foreground">지급일</dt><dd>{manualDateText(next.dueDate)}</dd>
-          </dl>
-        ) : <p className="text-muted-foreground text-sm">확정해서 표시할 미지급 일정이 없어요. 금액·지급일·납부 기록을 계획에서 확인해 주세요.</p>}
-        {!loading && !error && summary?.hasIncompletePayments ? <p className="text-muted-foreground text-xs leading-relaxed">미입력 정보가 있어 전체 필요자금은 확정할 수 없어요. 모르는 금액이나 납부 여부를 0원·완납으로 채우지 않아요.</p> : null}
-        <p className="text-muted-foreground text-xs leading-relaxed">계약금액을 현재 자산 가치로 더하지 않아요. 재원 배정·자동 잔액 변경·현금 전망은 계산하지 않아요.</p>
-        <Link href={`/plan?scope=${scope}`} className="text-primary inline-flex min-h-11 items-center gap-1 text-sm font-medium">지급 일정과 재원 메모 보기 <ArrowRight className="size-4" aria-hidden="true" /></Link>
+        <p className="break-words text-2xl font-bold tracking-tight tabular-nums">{manualKrwText(next.remainingAmountKrw)}</p>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">주택</dt><dd className="break-words">{next.label}</dd>
+          <dt className="text-muted-foreground">항목</dt><dd>{PAYMENT_LABEL[next.kind]}{next.installment !== null ? ` ${next.installment}회차` : ""}</dd>
+          <dt className="text-muted-foreground">납부일</dt><dd>{manualDateText(next.dueDate)}</dd>
+        </dl>
+        {!loading && !error && summary?.hasIncompletePayments ? <p className="text-muted-foreground text-xs leading-relaxed">금액·날짜·납부 내역이 비어 있는 항목이 있어요.</p> : null}
+        <Link href={`/plan?scope=${scope}`} className="text-primary inline-flex min-h-11 items-center gap-1 text-sm font-medium">납부 일정 보기 <ArrowRight className="size-4" aria-hidden="true" /></Link>
       </CardContent>
     </Card>
   );

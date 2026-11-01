@@ -1,12 +1,10 @@
 "use client";
-/** Five primary destinations; existing tools remain reachable through 전체. */
+/** Three main destinations; management tools remain reachable through 설정. */
 import {
   Bell,
   CreditCard,
   Home,
   Landmark,
-  Menu,
-  Flag,
   Receipt,
   type LucideIcon,
 } from "lucide-react";
@@ -22,7 +20,6 @@ import {
 } from "@/components/activity-provider";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { HouseholdSwitcher } from "@/components/household-switcher";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { activeTabFor, PRIMARY_TABS, type TabKey } from "@/lib/nav-tabs";
 import { useUnreadCount } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -38,8 +35,6 @@ const NAV_ICONS: Readonly<Record<TabKey, LucideIcon>> = {
   home: Home,
   assets: Landmark,
   ledger: Receipt,
-  plan: Flag,
-  more: Menu,
 };
 const NAV_ITEMS: ReadonlyArray<NavItem> = PRIMARY_TABS.map((tab) => ({
   ...tab,
@@ -48,7 +43,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = PRIMARY_TABS.map((tab) => ({
 
 function BrandMark() {
   return (
-    <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
+    <Link href="/dashboard" aria-label="모아 홈" className="flex min-h-11 min-w-11 shrink-0 items-center gap-2">
       <span className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg">
         <CreditCard className="size-4" />
       </span>
@@ -123,9 +118,9 @@ function PrimaryNav({ pathname }: { pathname: string }) {
     <nav
       aria-label="주 메뉴"
       data-bottom-nav
-      className="bg-background/95 fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:inset-x-auto lg:top-[var(--app-header-h)] lg:bottom-0 lg:left-0 lg:w-52 lg:border-r lg:border-t-0 lg:bg-card lg:p-4"
+      className="bg-card/95 fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:inset-x-auto lg:top-[var(--app-header-h)] lg:bottom-0 lg:left-0 lg:w-52 lg:border-r lg:border-t-0 lg:bg-card lg:p-4"
     >
-      <div className="mx-auto grid h-20 w-full max-w-lg grid-cols-5 items-center lg:h-auto lg:grid-cols-1 lg:gap-2">
+      <div className="mx-auto grid h-20 w-full max-w-lg grid-cols-3 items-center lg:h-auto lg:grid-cols-1 lg:gap-2">
         {NAV_ITEMS.map((item) => (
           <NavigationItem
             key={item.href}
@@ -147,16 +142,15 @@ function AppShell({
     <div className="flex min-h-dvh flex-col">
       <a href="#app-main" className="sr-only z-50 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:rounded-lg focus:bg-background focus:p-3 focus:shadow-lg">본문으로 건너뛰기</a>
       {/* pt-[env(safe-area-inset-top)]: 상태바(노치) 영역만큼 헤더를 밀어 겹침 방지 */}
-      <header className="bg-background/90 sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] backdrop-blur">
+      <header className="bg-card/95 sticky top-0 z-30 border-b pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="flex h-14 items-center justify-between gap-2 px-4">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <BrandMark />
             <HouseholdSwitcher />
           </div>
           {/* 기존 내 계정·관리 진입을 유지한다. */}
           <div className="flex shrink-0 items-center gap-1">
             <NotificationBell />
-            <ThemeToggle />
             <AccountLink />
           </div>
         </div>
@@ -169,7 +163,7 @@ function AppShell({
           마지막 콘텐츠가 탭바 밑에 깔렸다 — 변수 참조로 기기별 편차를 흡수한다. */}
       {/* 당겨서 새로고침 — 화면의 활성 쿼리만 다시 가져온다(전역 1회 배선). */}
       <main id="app-main" tabIndex={-1} className="min-w-0 flex-1 px-4 pt-6 pb-[calc(var(--app-tabbar-h)+1.5rem)] focus:outline-none lg:ml-52 lg:px-8 lg:pb-8">
-        <PullToRefresh>{children}</PullToRefresh>
+        <PullToRefresh><div className="mx-auto w-full max-w-6xl">{children}</div></PullToRefresh>
       </main>
 
       {/* 전역 결제 활동 레이어 — SSE/폴링으로 새 거래를 감지해 무효화+토스트+배지. */}

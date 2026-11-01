@@ -2,7 +2,7 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 거래 내역 페이지 (오늘의집 디자인 언어)
  *
- * 상단 필터 칩 행(기간/카테고리/카드/구성원/유형/상태) + 무한 스크롤(useInfiniteQuery).
+ * 기간·검색 + 접는 상세 필터 + 무한 스크롤(useInfiniteQuery).
  * 목록은 날짜별 그룹("7월 17일" 헤더) + ListRow(카테고리 아이콘 · 가맹점 ·
  * 카드/구성원/카테고리 · 금액 · 상태 배지). 행 클릭 → 상세 Dialog에서
  * 카테고리 변경(applyRule)/공개 범위/메모/정상·중복 표시/취소연결을 처리한다.
@@ -109,6 +109,8 @@ import { registerTransactionDetailBack, type TransactionDetailBackSource } from 
 import { AddTransactionDialog } from "./add-transaction-dialog";
 import { TransactionFxDetails } from "@/components/transaction-fx-details";
 import { LedgerNav } from "@/components/ledger-nav";
+import { TransactionFilters } from "./transaction-filters";
+import type { ActiveTransactionFilter, TransactionFilterKey } from "./filter-summary";
 import { initialTransactionMonth, transactionReviewPeriodQuery } from "@/lib/transaction-review-filter";
 import {
   matchesCandidateSearch,
@@ -142,8 +144,6 @@ const SEARCH_DEBOUNCE_MS = 300;
 /** 검색어 최대 길이(서버 절삭 기준과 동일). */
 const SEARCH_MAX_LENGTH = 100;
 
-/** 전체(필터 없음) sentinel — SelectItem은 빈 문자열 value 금지. */
-const ALL = "all";
 /** 상세에서 카드 연결을 해제('카드 미연결')하기 위한 Select sentinel(빈 값 금지). */
 const CARD_NONE = "__none__";
 
@@ -252,14 +252,6 @@ const dayLabelWithYearFormatter = new Intl.DateTimeFormat("ko-KR", {
   day: "numeric",
 });
 
-/** 필터 칩 클래스(기본 = 화이트 칩, 활성 = 오늘의집 검정 칩). */
-function chipClass(active: boolean): string {
-  return cn(
-    "h-8 rounded-full border bg-card px-3 text-[13px] font-medium shadow-none",
-    active && "border-foreground bg-foreground text-background",
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /* Page                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -330,12 +322,21 @@ function TransactionsView() {
   /** 인라인 카테고리 변경 시 merchant_category_rules로 저장할지(applyRule). */
   const [applyRule, setApplyRule] = useState(false);
 
-  // 무한 스크롤: 필터 변경 시 queryKey가 바뀌어 자동으로 첫 페이지부터 새로 로드된다
-  // (별도 페이지 리셋 불필요). (Radix Select는 문자열 값을 직접 준다)
-  const bindFilter =
-    (setter: (value: string) => void) => (value: string) => {
-      setter(value);
-    };
+  // 필터는 닫아도 유지한다. 표시 조건만 지울 때 기간·검색은 바꾸지 않는다.
+  const filterSetters = { categoryId: setCategoryId, cardId: setCardId, memberId: setMemberId, type: setType, status: setStatus };
+  const changeFilter = (key: TransactionFilterKey, value: string) => filterSetters[key](value);
+  const clearFilter = (key: ActiveTransactionFilter["key"]) => {
+    if (key === "reviewOnly") setReviewOnly(false);
+    else if (key === "excludedOnly") setExcludedOnly(false);
+    else if (key === "sharedOnly") setSharedOnly(false);
+    else changeFilter(key, "");
+  };
+  const clearConditions = () => {
+    for (const setter of Object.values(filterSetters)) setter("");
+    setReviewOnly(false);
+    setExcludedOnly(false);
+    setSharedOnly(false);
+  };
 
   /** 모든 필터를 기본값(이번 달·전체)으로 되돌린다(빈 상태 CTA). */
   const resetFilters = () => {
@@ -461,6 +462,10 @@ function TransactionsView() {
     value: m,
     label: formatMonth(m),
   }));
+  // 오래된 기간의 딥링크도 현재 선택값이 빈칸으로 보이지 않도록 유지한다.
+  if (month && !monthOptions.some((option) => option.value === month)) {
+    monthOptions.unshift({ value: month, label: formatMonth(month) });
+  }
 
   // --- 목록 쿼리 ---
   const { from, to } = useMemo(() => monthRange(month), [month]);
@@ -777,28 +782,11 @@ function TransactionsView() {
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="sr-only">거래 내역</h1>
-          <p className="text-muted-foreground text-sm">
-            우리 가족의 카드 소비를 한곳에서 볼 수 있어요
-          </p>
+          <p className="text-muted-foreground text-sm">카드 사용 내역</p>
         </div>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
+        <Button size="sm" className="min-h-11" onClick={() => setAddOpen(true)}>
           거래 추가
         </Button>
-      </div>
-
-      <div className="space-y-2">
-        <Button
-          variant={reviewOnly ? "tint" : "outline"}
-          aria-pressed={reviewOnly}
-          className="min-h-11"
-          onClick={() => {
-            setReviewOnly(!reviewOnly);
-            if (!reviewOnly) { setMonth(""); setStatus(""); setExcludedOnly(false); }
-          }}
-        >
-          확인 필요한 거래
-        </Button>
-        {reviewOnly ? <p className="text-muted-foreground text-xs">직접 확인할 수 있는 거래만 모아요. 문자 처리·환율 대기는 포함하지 않아요.</p> : null}
       </div>
 
       {/* 검색 — 가맹점 이름과 메모를 부분 일치로 찾는다. 타인의 summary_only 거래는
@@ -813,148 +801,34 @@ function TransactionsView() {
           maxLength={SEARCH_MAX_LENGTH}
           placeholder="가맹점이나 메모로 찾기"
           aria-label="거래 검색"
-          className="pl-9"
+          className="min-h-11 pl-9 pr-12"
         />
         {qInput ? (
           <button
             type="button"
             onClick={() => setQInput("")}
             aria-label="검색어 지우기"
-            className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full"
+            className="text-muted-foreground hover:text-foreground absolute top-1/2 right-0 flex size-11 -translate-y-1/2 items-center justify-center rounded-full"
           >
             <X className="size-4" />
           </button>
         ) : null}
       </div>
 
-      {/* 필터 칩 행 — Select 로직/sentinel 매핑은 그대로, 트리거만 칩 스타일 */}
-      <div className="flex flex-wrap gap-2">
-        <Select
-          value={month || ALL}
-          onValueChange={(v) => bindFilter(setMonth)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="기간 필터"
-            className={chipClass(month !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 기간</SelectItem>
-            {monthOptions.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={categoryId || ALL}
-          onValueChange={(v) => bindFilter(setCategoryId)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="카테고리 필터"
-            className={chipClass(categoryId !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 카테고리</SelectItem>
-            {categoryFilterOptions.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={cardId || ALL}
-          onValueChange={(v) => bindFilter(setCardId)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="카드 필터"
-            className={chipClass(cardId !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 카드</SelectItem>
-            {cardOptions.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={memberId || ALL}
-          onValueChange={(v) => bindFilter(setMemberId)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="구성원 필터"
-            className={chipClass(memberId !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 구성원</SelectItem>
-            {memberOptions.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={type || ALL}
-          onValueChange={(v) => bindFilter(setType)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="유형 필터"
-            className={chipClass(type !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 유형</SelectItem>
-            {TYPE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={status || ALL}
-          onValueChange={(v) => bindFilter(setStatus)(v === ALL ? "" : v)}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="상태 필터"
-            className={chipClass(status !== "")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>전체 상태</SelectItem>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <TransactionFilters
+        month={month}
+        monthOptions={monthOptions}
+        values={{ categoryId, cardId, memberId, type, status, reviewOnly, excludedOnly, sharedOnly }}
+        choices={{ categoryId: categoryFilterOptions, cardId: cardOptions, memberId: memberOptions, type: TYPE_OPTIONS, status: STATUS_OPTIONS }}
+        onMonthChange={setMonth}
+        onChange={changeFilter}
+        onClear={clearFilter}
+        onClearAll={clearConditions}
+        onToggleReview={() => {
+          setReviewOnly(!reviewOnly);
+          if (!reviewOnly) { setMonth(""); setStatus(""); setExcludedOnly(false); }
+        }}
+      />
 
       {actionError ? (
         <div
@@ -962,35 +836,6 @@ function TransactionsView() {
           className="bg-destructive/10 text-destructive rounded-lg px-4 py-3 text-sm"
         >
           {actionError}
-        </div>
-      ) : null}
-
-      {/*
-        '빼놓은 거래만' 상태를 눈에 보이게 한다. 이 필터는 Select에 없고 URL로만
-        들어오므로, 표시가 없으면 사용자는 필터가 걸린 줄 모르고 "거래가 사라졌다"로
-        읽는다. 해제는 한 번에 되어야 한다.
-      */}
-      {excludedOnly ? (
-        <div className="border-warning/40 bg-warning/10 flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
-          <p className="text-warning-strong text-sm">
-            합계에서 빼놓은 거래만 보고 있어요
-          </p>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setExcludedOnly(false)}
-          >
-            전체 보기
-          </Button>
-        </div>
-      ) : null}
-
-      {sharedOnly ? (
-        <div className="bg-muted/50 flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
-          <p className="text-sm">함께 쓰는 카드로 결제한 내역만 보고 있어요</p>
-          <Button size="sm" variant="ghost" onClick={() => setSharedOnly(false)}>
-            전체 보기
-          </Button>
         </div>
       ) : null}
 
@@ -1023,7 +868,7 @@ function TransactionsView() {
               {hasActiveFilter ? (
                 <>
                   <p className="pt-1 text-[15px] font-semibold">
-                    {reviewOnly ? "조건에 맞는 확인 필요한 거래가 없어요" : "조건에 맞는 거래가 없어요"}
+                    {reviewOnly ? "조건에 맞는 확인할 거래가 없어요" : "조건에 맞는 거래가 없어요"}
                   </p>
                   <p className="text-muted-foreground text-sm">
                     필터를 바꿔서 다시 찾아볼까요?

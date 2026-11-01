@@ -51,7 +51,7 @@ describe("page back keeps legacy pages inside the new hierarchy", () => {
     expect(navigation.replace).not.toHaveBeenCalled();
   });
 
-  it("cold declines → todo → more never invents an earlier history entry", () => {
+  it("cold declines → todo → ledger never invents an earlier history entry", () => {
     navigation.path = "/declines";
     noteInAppNavigation(navigation.path);
     pressBack();
@@ -60,10 +60,10 @@ describe("page back keeps legacy pages inside the new hierarchy", () => {
     noteInAppNavigation(navigation.path);
     expect(canGoBackInApp()).toBe(false);
     pressBack();
-    expect(navigation.replace).toHaveBeenLastCalledWith("/more");
-    noteInAppNavigation("/more");
+    expect(navigation.replace).toHaveBeenLastCalledWith("/transactions");
+    noteInAppNavigation("/transactions");
     expect(canGoBackInApp()).toBe(false);
-    expect(isTabRoot("/more")).toBe(true);
+    expect(isTabRoot("/transactions")).toBe(true);
     expect(navigation.back).not.toHaveBeenCalled();
   });
 });

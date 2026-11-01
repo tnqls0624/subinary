@@ -419,6 +419,18 @@ export class HouseholdService {
         ...row, householdId, actorUserId: userId, action: 'membership_removed' as const,
       })));
 
+      // Imported evidence survives departure, but its sharing grant and totals
+      // choice do not. Clearing the mapping avoids silently moving a shared
+      // replacement into private totals if this member later rejoins.
+      const unsharedLoans = await tx.update(schema.loanRecords).set({
+        visibility: 'private', sharedMemberId: null, sharedJoinedAt: null,
+        totalMode: 'reference', replacesManualAssetId: null, manualExpectedVersion: null,
+        version: sql`CASE WHEN ${schema.loanRecords.version} < 2147483647 THEN ${schema.loanRecords.version} + 1 ELSE ${schema.loanRecords.version} END`,
+        updatedAt: now,
+      }).where(and(eq(schema.loanRecords.householdId, householdId),
+        eq(schema.loanRecords.ownerUserId, target.userId), eq(schema.loanRecords.visibility, 'household'),
+        isNull(schema.loanRecords.deletedAt))).returning({ id: schema.loanRecords.id, version: schema.loanRecords.version });
+
       const revokedDevices = await tx
         .update(schema.registeredDevices)
         .set({
@@ -470,7 +482,7 @@ export class HouseholdService {
             eq(schema.householdConsents.status, 'granted'),
           ),
         );
-      return manualRevocations.length > 0;
+      return manualRevocations.length > 0 || unsharedLoans.length > 0;
     });
 
     // Only shared records produce a household hint, and only after commit.

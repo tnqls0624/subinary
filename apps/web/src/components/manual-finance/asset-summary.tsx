@@ -5,58 +5,73 @@ import { displayManualKrw } from "./model";
 export function ManualAssetsSummary({
   summary,
   scope = "household",
+  sourceLabel = "직접 입력",
+  hasImportedBalance = false,
 }: {
   summary: ManualAssetSummary;
   scope?: ManualFinanceScope;
+  sourceLabel?: string;
+  hasImportedBalance?: boolean;
 }) {
-  const range = summary.mixedAsOfDates
-    ? `기준일 혼재 · ${summary.oldestAsOfDate ?? "미입력"} ~ ${
+  if (summary.completeness === "empty") {
+    return (
+      <section className="bg-card rounded-2xl border p-5 sm:p-6" aria-label="등록한 자산 요약">
+        <p className="text-muted-foreground text-xs">{scope === "household" ? "가족과 공유한 자산" : "나만 보는 자산"}</p>
+        <h2 className="mt-2 text-lg font-semibold">등록된 자산이 없어요</h2>
+        <p className="text-muted-foreground mt-2 text-sm">통장·적금·주식·대출을 추가해 보세요.</p>
+      </section>
+    );
+  }
+  const range = hasImportedBalance
+    ? "은행 잔액 기준일 미확인"
+    : summary.mixedAsOfDates
+    ? `항목별 기준일 ${summary.oldestAsOfDate ?? "미입력"} ~ ${
         summary.newestAsOfDate ?? "미입력"
       }`
     : `기준일 ${summary.asOfDate ?? "미입력"}`;
+  const netKnown = summary.completeness === "complete" && summary.netAssets !== null;
   return (
     <section
-      className="bg-primary text-primary-foreground min-w-0 rounded-2xl p-5 sm:p-6"
-      aria-label="입력한 자산 요약"
+      className="bg-card text-card-foreground min-w-0 rounded-2xl border p-5 sm:p-6"
+      aria-label="등록한 자산 요약"
     >
-      <p className="text-sm opacity-85">
-        {scope === "household" ? "공유한 수동 기록" : "내 비공개 수동 기록"}
+      <p className="text-muted-foreground text-sm">
+        {scope === "household" ? "가족과 공유한 자산" : "나만 보는 자산"}
       </p>
-      <h2 className="mt-3 text-sm font-medium">입력한 순자산</h2>
-      <p className="mt-2 break-all text-3xl font-bold tabular-nums sm:text-4xl">
-        {displayManualKrw(summary.netAssets)}
-      </p>
-      <p className="mt-2 text-xs leading-relaxed opacity-85">
-        자산과 대출의 값이 모두 입력된 경우에만 계산해요. 실제 전체 재산을
-        뜻하지 않아요.
-      </p>
-      <dl className="mt-5 grid min-w-0 grid-cols-2 gap-4 border-t border-current/20 pt-4 text-sm">
+      {netKnown ? (
+        <>
+          <h2 className="mt-3 text-sm font-medium">순자산</h2>
+          <p className="mt-2 break-all text-3xl font-bold tracking-tight tabular-nums sm:text-4xl">
+            {displayManualKrw(summary.netAssets)}
+          </p>
+          <p className="text-muted-foreground mt-2 text-xs">등록한 자산에서 남은 대출을 뺀 금액</p>
+        </>
+      ) : <h2 className="sr-only">입력한 자산과 대출</h2>}
+      <dl className={`mt-5 grid min-w-0 grid-cols-2 gap-4 text-sm ${netKnown ? "border-t pt-4" : ""}`}>
         <div className="min-w-0">
-          <dt className="text-xs opacity-85">
+          <dt className="text-muted-foreground text-xs">
             {summary.assetsCompleteness === "partial"
-              ? "알려진 자산 부분합"
-              : "입력한 자산"}
+              ? "자산 (일부 입력)"
+              : "등록한 자산"}
           </dt>
-          <dd className="mt-1 break-all font-semibold tabular-nums">
-            {displayManualKrw(summary.grossAssets)}
+          <dd className={`mt-2 break-all font-semibold tabular-nums ${summary.grossAssets === null ? "text-muted-foreground text-sm" : netKnown ? "text-base" : "text-xl sm:text-2xl"}`}>
+            {summary.grossAssets === null ? "미입력" : displayManualKrw(summary.grossAssets)}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs opacity-85">
+          <dt className="text-muted-foreground text-xs">
             {summary.debtCompleteness === "partial"
-              ? "알려진 대출 부분합"
-              : "입력한 대출 원금"}
+              ? "대출 (일부 입력)"
+              : "남은 대출"}
           </dt>
-          <dd className="mt-1 break-all font-semibold tabular-nums">
-            {displayManualKrw(summary.debt)}
+          <dd className={`mt-2 break-all font-semibold tabular-nums ${summary.debt === null ? "text-muted-foreground text-sm" : netKnown ? "text-base" : "text-xl sm:text-2xl"}`}>
+            {summary.debt === null ? "미입력" : displayManualKrw(summary.debt)}
           </dd>
         </div>
       </dl>
-      <p className="mt-4 text-xs leading-relaxed opacity-85">
-        {range} · 직접 입력
-        {summary.completeness !== "complete"
-          ? " · 일부 또는 전체 값 미입력"
-          : ""}
+      {!netKnown ? <p className="text-muted-foreground mt-4 text-xs leading-relaxed">미입력 금액이 있어 순자산은 아직 계산하지 않았어요.</p> : null}
+      <p className="text-muted-foreground mt-4 text-xs leading-relaxed">
+        {range} · {sourceLabel}
       </p>
     </section>
   );
