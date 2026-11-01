@@ -12,6 +12,8 @@ import type { FastifyRequest } from 'fastify';
 export interface AuthenticatedUser {
   userId: string;
   email: string;
+  /** Verified JWT expiry in epoch milliseconds; raw token/payload is never retained. */
+  accessTokenExpiresAt?: number;
 }
 
 /** Fastify request carrying the authenticated principal. */

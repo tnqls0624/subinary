@@ -32,6 +32,7 @@ import {
   vector,
 } from 'drizzle-orm/pg-core';
 
+
 /* -------------------------------------------------------------------------- */
 /* pgEnum                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -4643,3 +4644,114 @@ export const playStates = pgTable(
 
 export type PlayState = typeof playStates.$inferSelect;
 export type NewPlayState = typeof playStates.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/* manual finance — 수동 기록, 카드 원장·법적 소유권과 분리                    */
+/* -------------------------------------------------------------------------- */
+
+export const manualAssets = pgTable('manual_assets', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  /** 작성·공유 권한의 소유자이며 법적 명의를 뜻하지 않는다. */
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  kind: text('kind').$type<'account' | 'saving' | 'stock' | 'loan'>().notNull(),
+  label: text('label').notNull(),
+  visibility: text('visibility').$type<'private' | 'household'>().notNull().default('private'),
+  amount: numeric('amount', { precision: 20, scale: 0 }),
+  currency: text('currency').notNull().default('KRW'),
+  asOfDate: date('as_of_date', { mode: 'string' }),
+  source: text('source').$type<'manual'>(),
+  legalOwnerLabel: text('legal_owner_label'),
+  note: text('note'),
+  version: integer('version').notNull().default(1),
+  /** 최초 입력의 SHA-256. 수정·삭제 뒤에도 같은 작성 요청이 재생성되지 않는다. */
+  creationPayloadHash: text('creation_payload_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => [
+  index('manual_assets_household_scope_idx').on(table.householdId, table.visibility, table.ownerUserId),
+  check('manual_assets_kind_check', sql`${table.kind} IN ('account', 'saving', 'stock', 'loan')`),
+  check('manual_assets_visibility_check', sql`${table.visibility} IN ('private', 'household')`),
+  check('manual_assets_amount_check', sql`${table.amount} IS NULL OR ${table.amount} >= 0`),
+  check('manual_assets_currency_check', sql`${table.currency} = 'KRW'`),
+  check('manual_assets_snapshot_check', sql`(${table.amount} IS NULL AND ${table.asOfDate} IS NULL AND ${table.source} IS NULL) OR (${table.amount} IS NOT NULL AND ${table.asOfDate} IS NOT NULL AND ${table.source} IS NOT NULL AND ${table.source} = 'manual')`),
+  check('manual_assets_date_check', sql`${table.asOfDate} IS NULL OR (${table.asOfDate} >= DATE '0001-01-01' AND ${table.asOfDate} <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date)`),
+  check('manual_assets_label_check', sql`char_length(btrim(${table.label})) BETWEEN 1 AND 100`),
+  check('manual_assets_notes_check', sql`(${table.legalOwnerLabel} IS NULL OR char_length(btrim(${table.legalOwnerLabel})) BETWEEN 1 AND 100) AND (${table.note} IS NULL OR char_length(btrim(${table.note})) BETWEEN 1 AND 1000)`),
+  check('manual_assets_version_check', sql`${table.version} > 0`),
+  check('manual_assets_creation_hash_check', sql`${table.creationPayloadHash} ~ '^[0-9a-f]{64}$'`),
+]);
+export type ManualAssetRecord = typeof manualAssets.$inferSelect;
+export type NewManualAssetRecord = typeof manualAssets.$inferInsert;
+
+export const manualHousingPlans = pgTable('manual_housing_plans', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  label: text('label').notNull(),
+  visibility: text('visibility').$type<'private' | 'household'>().notNull().default('private'),
+  occupancyYear: integer('occupancy_year'),
+  contractStage: text('contract_stage'),
+  /** 자유 메모. 통장 재원 ID·배정·차입 예측을 저장하지 않는다. */
+  fundingNote: text('funding_note'),
+  version: integer('version').notNull().default(1),
+  creationPayloadHash: text('creation_payload_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => [
+  index('manual_housing_plans_household_scope_idx').on(table.householdId, table.visibility, table.ownerUserId),
+  check('manual_housing_plans_visibility_check', sql`${table.visibility} IN ('private', 'household')`),
+  check('manual_housing_plans_label_check', sql`char_length(btrim(${table.label})) BETWEEN 1 AND 100`),
+  check('manual_housing_plans_notes_check', sql`(${table.contractStage} IS NULL OR char_length(btrim(${table.contractStage})) BETWEEN 1 AND 100) AND (${table.fundingNote} IS NULL OR char_length(btrim(${table.fundingNote})) BETWEEN 1 AND 2000)`),
+  check('manual_housing_plans_year_check', sql`${table.occupancyYear} IS NULL OR ${table.occupancyYear} BETWEEN 1 AND 9999`),
+  check('manual_housing_plans_version_check', sql`${table.version} > 0`),
+  check('manual_housing_plans_creation_hash_check', sql`${table.creationPayloadHash} ~ '^[0-9a-f]{64}$'`),
+]);
+export type ManualHousingPlanRecord = typeof manualHousingPlans.$inferSelect;
+export type NewManualHousingPlanRecord = typeof manualHousingPlans.$inferInsert;
+
+export const manualHousingPayments = pgTable('manual_housing_payments', {
+  id: uuid('id').primaryKey(),
+  planId: uuid('plan_id').notNull().references(() => manualHousingPlans.id, { onDelete: 'cascade' }),
+  /** 부모 version CAS와 같은 트랜잭션에서 전체 교체하며 입력 순서를 보존한다. */
+  position: integer('position').notNull().default(0),
+  kind: text('kind').$type<'contract' | 'interim' | 'balance' | 'option'>().notNull(),
+  installment: integer('installment'),
+  dueDate: date('due_date', { mode: 'string' }),
+  amount: numeric('amount', { precision: 20, scale: 0 }),
+  paidAmount: numeric('paid_amount', { precision: 20, scale: 0 }),
+  paidDate: date('paid_date', { mode: 'string' }),
+}, (table) => [
+  unique('manual_housing_payments_plan_position_unique').on(table.planId, table.position),
+  check('manual_housing_payments_position_check', sql`${table.position} BETWEEN 0 AND 99`),
+  check('manual_housing_payments_kind_check', sql`${table.kind} IN ('contract', 'interim', 'balance', 'option')`),
+  check('manual_housing_payments_installment_check', sql`${table.installment} IS NULL OR ${table.installment} BETWEEN 1 AND 1000`),
+  check('manual_housing_payments_amount_check', sql`${table.amount} IS NULL OR ${table.amount} >= 0`),
+  check('manual_housing_payments_paid_check', sql`${table.paidAmount} IS NULL OR (${table.amount} IS NOT NULL AND ${table.paidAmount} >= 0 AND ${table.paidAmount} <= ${table.amount})`),
+  check('manual_housing_payments_paid_date_check', sql`(${table.paidAmount} IS NOT NULL AND ${table.paidAmount} > 0 AND ${table.paidDate} IS NOT NULL) OR ((${table.paidAmount} IS NULL OR ${table.paidAmount} = 0) AND ${table.paidDate} IS NULL)`),
+  check('manual_housing_payments_calendar_check', sql`(${table.dueDate} IS NULL OR ${table.dueDate} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31') AND (${table.paidDate} IS NULL OR (${table.paidDate} >= DATE '0001-01-01' AND ${table.paidDate} <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date))`),
+]);
+export type ManualHousingPaymentRecord = typeof manualHousingPayments.$inferSelect;
+export type NewManualHousingPaymentRecord = typeof manualHousingPayments.$inferInsert;
+
+/** 변경의 식별자와 버전만 보관한다. 금액·이름·메모·입력 본문을 복제하지 않는다. */
+export const manualFinanceAudit = pgTable('manual_finance_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+  entityType: text('entity_type').$type<'asset' | 'housing_plan'>().notNull(),
+  entityId: uuid('entity_id').notNull(),
+  action: text('action').$type<'create' | 'update' | 'delete' | 'membership_removed'>().notNull(),
+  version: integer('version').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  // MAX 버전의 일반 수정 이력과 개인정보 공유 철회는 서로 다른 사건이다.
+  unique('manual_finance_audit_entity_version_action_unique').on(table.entityType, table.entityId, table.version, table.action),
+  index('manual_finance_audit_household_idx').on(table.householdId, table.createdAt),
+  check('manual_finance_audit_entity_type_check', sql`${table.entityType} IN ('asset', 'housing_plan')`),
+  check('manual_finance_audit_action_check', sql`${table.action} IN ('create', 'update', 'delete', 'membership_removed')`),
+  check('manual_finance_audit_version_check', sql`${table.version} > 0`),
+]);
+export type ManualFinanceAuditRecord = typeof manualFinanceAudit.$inferSelect;

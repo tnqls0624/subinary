@@ -15,6 +15,7 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { DevicesModule } from '../devices/devices.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { HouseholdPrivacyController } from './household-privacy.controller';
 import { HouseholdPrivacyService } from './household-privacy.service';
 import { HouseholdController } from './household.controller';
@@ -22,7 +23,7 @@ import { HouseholdService } from './household.service';
 import { InvitationController } from './invitation.controller';
 
 @Module({
-  imports: [AuthModule, DevicesModule],
+  imports: [AuthModule, DevicesModule, RealtimeModule],
   controllers: [
     HouseholdController,
     HouseholdPrivacyController,

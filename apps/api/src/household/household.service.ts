@@ -20,8 +20,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { CURRENT_HOUSEHOLD_CONSENT_VERSION } from '@family/contracts';
 import type {
@@ -44,6 +45,7 @@ import { schema, type Db, type DbExecutor } from '@family/database';
 import { TokenService } from '../auth/token.service';
 import { DB } from '../database/database.constants';
 import { HOUSEHOLD_JOIN_CONSENT } from './household-consent';
+import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 
 /** Projection used for member listings (user profile joined onto membership). */
 const MEMBER_COLUMNS = {
@@ -134,6 +136,7 @@ export class HouseholdService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly tokenService: TokenService,
+    @Optional() private readonly realtimePublisher?: RealtimePublisherService,
   ) {}
 
   /* ---------------------------------------------------------------------- */
@@ -359,44 +362,62 @@ export class HouseholdService {
     userId: string,
     targetMemberId: string,
   ): Promise<{ removed: true }> {
-    const actor = await this.requireMembership(householdId, userId);
-    const target = await this.loadMember(householdId, targetMemberId);
-
-    const isSelf = target.userId === userId;
-    if (actor.role !== 'owner' && !isSelf) {
-      throw new ForbiddenException('insufficient role');
-    }
-
-    if (target.status === 'removed') {
-      return { removed: true };
-    }
-
-    if (target.role === 'owner') {
-      const activeOwners = await this.db
-        .select({ id: schema.householdMembers.id })
-        .from(schema.householdMembers)
-        .where(
-          and(
-            eq(schema.householdMembers.householdId, householdId),
-            eq(schema.householdMembers.role, 'owner'),
-            eq(schema.householdMembers.status, 'active'),
-          ),
-        );
-      if (activeOwners.length <= 1) {
-        throw new BadRequestException('cannot remove the last owner');
-      }
-    }
+    await this.requireMembership(householdId, userId);
 
     // 멤버십 제거와 장치 폐기는 **같은 트랜잭션**이어야 한다. 멤버십만 removed가 되고
     // 장치가 살아남는 중간 상태에서는 떠난 사람의 폰이 계속 카드 문자를 밀어 넣는다
     // (양방향 침해: 떠난 사람은 동의 철회 후에도 수집되고, 남은 가족은 제거한
     // 구성원의 데이터를 계속 받는다).
-    await this.db.transaction(async (tx) => {
+    const manualSharingRevoked = await this.db.transaction(async (tx) => {
+      // Recheck authority after waiting for locks. Sorting the entire family's
+      // existing membership rows serializes actor removal and two owners
+      // leaving concurrently. New manual writes lock their actor SHARE first.
+      // Card correction takes household UPDATE then membership SHARE NOWAIT:
+      // it aborts on our membership lock instead of forming a wait cycle.
+      const members = await tx.select().from(schema.householdMembers)
+        .where(eq(schema.householdMembers.householdId, householdId))
+        .orderBy(asc(schema.householdMembers.id)).for('update');
+      const actor = members.find(member => member.userId.toLowerCase() === userId.toLowerCase()
+        && member.status === 'active');
+      if (!actor) throw new ForbiddenException('not a household member');
+      const [household] = await tx.select({ id: schema.households.id }).from(schema.households)
+        .where(and(eq(schema.households.id, householdId), isNull(schema.households.deletedAt))).for('share').limit(1);
+      if (!household) throw new ForbiddenException('not a household member');
+      const target = members.find(member => member.id.toLowerCase() === targetMemberId.toLowerCase());
+      if (!target) throw new NotFoundException('member not found');
+      if (actor.role !== 'owner' && target.userId !== actor.userId) throw new ForbiddenException('insufficient role');
+      if (target.status === 'removed') return false;
+      if (target.role === 'owner' && members.filter(member => member.role === 'owner' && member.status === 'active').length <= 1) {
+        throw new BadRequestException('cannot remove the last owner');
+      }
       const now = new Date();
       await tx
         .update(schema.householdMembers)
         .set({ status: 'removed', updatedAt: now })
         .where(eq(schema.householdMembers.id, targetMemberId));
+
+      // A former member's opt-in sharing ends with membership. Manual writes
+      // hold this same membership row SHARE before locking their own records,
+      // so a racing create/share either finishes first and is revoked here, or
+      // observes removed membership and is rejected. Rejoining never restores
+      // the old household visibility. Values and legal-owner notes stay intact.
+      const unsharedAssets = await tx.update(schema.manualAssets).set({
+        visibility: 'private', version: sql`CASE WHEN ${schema.manualAssets.version} < 2147483647 THEN ${schema.manualAssets.version} + 1 ELSE ${schema.manualAssets.version} END`, updatedAt: now,
+      }).where(and(eq(schema.manualAssets.householdId, householdId),
+        eq(schema.manualAssets.ownerUserId, target.userId), eq(schema.manualAssets.visibility, 'household'),
+        isNull(schema.manualAssets.deletedAt))).returning({ id: schema.manualAssets.id, version: schema.manualAssets.version });
+      const unsharedPlans = await tx.update(schema.manualHousingPlans).set({
+        visibility: 'private', version: sql`CASE WHEN ${schema.manualHousingPlans.version} < 2147483647 THEN ${schema.manualHousingPlans.version} + 1 ELSE ${schema.manualHousingPlans.version} END`, updatedAt: now,
+      }).where(and(eq(schema.manualHousingPlans.householdId, householdId),
+        eq(schema.manualHousingPlans.ownerUserId, target.userId), eq(schema.manualHousingPlans.visibility, 'household'),
+        isNull(schema.manualHousingPlans.deletedAt))).returning({ id: schema.manualHousingPlans.id, version: schema.manualHousingPlans.version });
+      const manualRevocations = [
+        ...unsharedAssets.map(row => ({ entityType: 'asset' as const, entityId: row.id, version: row.version })),
+        ...unsharedPlans.map(row => ({ entityType: 'housing_plan' as const, entityId: row.id, version: row.version })),
+      ];
+      if (manualRevocations.length > 0) await tx.insert(schema.manualFinanceAudit).values(manualRevocations.map(row => ({
+        ...row, householdId, actorUserId: userId, action: 'membership_removed' as const,
+      })));
 
       const revokedDevices = await tx
         .update(schema.registeredDevices)
@@ -449,7 +470,15 @@ export class HouseholdService {
             eq(schema.householdConsents.status, 'granted'),
           ),
         );
+      return manualRevocations.length > 0;
     });
+
+    // Only shared records produce a household hint, and only after commit.
+    // Private-only membership changes reveal no manual-record activity.
+    if (manualSharingRevoked) {
+      try { void this.realtimePublisher?.publish(householdId, 'manual-finance.changed').catch(() => {}); }
+      catch { /* Cache hints are best effort; removal has already committed. */ }
+    }
 
     return { removed: true };
   }

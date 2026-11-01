@@ -17,6 +17,7 @@ import type { RequestWithUser } from '../decorators/current-user.decorator';
 interface AccessTokenPayload {
   sub: string;
   email: string;
+  exp?: number;
 }
 
 /**
@@ -66,6 +67,14 @@ export class AccessTokenGuard implements CanActivate {
         { secret: this.accessSecret },
       );
       request.user = { userId: payload.sub, email: payload.email };
+      // Only carry the expiry of the successfully verified token. Optional
+      // metadata keeps existing principals compatible; never retain the token.
+      const expiresAt = typeof payload.exp === 'number'
+        ? Math.floor(payload.exp * 1000)
+        : Number.NaN;
+      if (Number.isSafeInteger(expiresAt)) {
+        request.user.accessTokenExpiresAt = expiresAt;
+      }
     } catch {
       // 검증 실패 세부 정보(만료/서명 오류 등)는 노출하지 않는다.
       throw new UnauthorizedException('unauthorized');

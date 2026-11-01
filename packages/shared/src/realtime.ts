@@ -28,7 +28,8 @@ export function householdIdFromChannel(channel: string): string | null {
 /** 실시간 이벤트 타입. 클라이언트는 종류별 무효화 범위 판단에만 쓴다. */
 export type RealtimeEventType =
   | 'transactions.changed'
-  | 'categories.changed';
+  | 'categories.changed'
+  | 'manual-finance.changed';
 
 /** 발행 페이로드(JSON). PII 금지 — 타입/버전만. */
 export interface RealtimeEvent {

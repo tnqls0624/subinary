@@ -456,6 +456,13 @@
       "when": 1793116800000,
       "tag": "0064_budget_card_group",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1793404800000,
+      "tag": "0065_manual_finance",
+      "breakpoints": true
     }
   ]
 }
