@@ -261,6 +261,8 @@ export class LedgerService {
     const body = parsed.data;
     const txnId = body.id ?? randomUUID();
 
+    // 멱등 재생·23505 재생 모두 구성원 확인 뒤에만 요약을 돌려준다(IDOR 방지).
+    await this.requireMember(this.db, body.householdId, userId);
     const early = await this.loadRecordReplay(body.householdId, body.idempotencyKey);
     if (early) return early;
 
@@ -358,6 +360,7 @@ export class LedgerService {
       });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
+      await this.requireMember(this.db, body.householdId, userId);
       const replay = await this.loadRecordReplay(body.householdId, body.idempotencyKey);
       if (replay) return replay;
       throw new ConflictException('같은 요청이 이미 처리 중이에요.');
@@ -379,6 +382,8 @@ export class LedgerService {
     const outId = randomUUID();
     const inId = randomUUID();
 
+    // 멱등 재생·23505 재생 모두 구성원 확인 뒤에만 요약을 돌려준다(IDOR 방지).
+    await this.requireMember(this.db, body.householdId, userId);
     const early = await this.loadTransferReplay(body.householdId, body.idempotencyKey);
     if (early) return early;
 
@@ -516,6 +521,7 @@ export class LedgerService {
       });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
+      await this.requireMember(this.db, body.householdId, userId);
       const replay = await this.loadTransferReplay(body.householdId, body.idempotencyKey);
       if (replay) return replay;
       throw new ConflictException('같은 요청이 이미 처리 중이에요.');

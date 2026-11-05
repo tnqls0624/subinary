@@ -120,29 +120,28 @@ function serviceWithDb(db: unknown): LedgerService {
   return new LedgerService(db as Db);
 }
 
+/** 바깥 db.select: requireMember → early replay(및 이후) 순서를 흉내낸다. */
+function outerSelectQueue(rowsPerCall: unknown[][]) {
+  let selectCalls = 0;
+  return () => {
+    const call = selectCalls;
+    selectCalls += 1;
+    const rows = rowsPerCall[call] ?? [];
+    const b: Record<string, unknown> = {};
+    b.from = () => b;
+    b.innerJoin = () => b;
+    b.where = () => b;
+    b.limit = async () => rows;
+    return b;
+  };
+}
+
 describe('LedgerService.recordTransaction', () => {
   it('가족 구성원이 아니면 거부한다', async () => {
-    const tx = makeTx({ selectResults: [[]] });
-    const db = {
-      select: tx.select,
-      transaction: async (work: (t: typeof tx) => Promise<unknown>) => work(tx),
-    };
-    // early replay select (empty) then tx membership empty
-    let calls = 0;
-    db.select = () => {
-      calls += 1;
-      const b: Record<string, unknown> = {};
-      const self = () => b;
-      b.from = self;
-      b.where = self;
-      b.limit = async () => (calls === 1 ? [] : []);
-      return b;
-    };
     const service = serviceWithDb({
-      ...db,
-      transaction: async (work: (t: typeof tx) => Promise<unknown>) => {
-        const inner = makeTx({ selectResults: [[]] });
-        return work(inner);
+      select: outerSelectQueue([[]]),
+      transaction: async () => {
+        throw new Error('비멤버는 쓰기 tx를 열지 않는다');
       },
     });
     await expect(
@@ -159,13 +158,7 @@ describe('LedgerService.recordTransaction', () => {
 
   it('잘못된 요청 형식은 400', async () => {
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[]]),
       transaction: async () => {
         throw new Error('should not run');
       },
@@ -177,13 +170,8 @@ describe('LedgerService.recordTransaction', () => {
 
   it('타 가구 계좌는 잠금 조회에서 차단한다', async () => {
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      // member ok, early miss → tx
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           selectResults: [[{ id: member }], []],
@@ -226,13 +214,7 @@ describe('LedgerService.recordTransaction', () => {
       idempotencyKey: key,
     };
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           executeImpl: () => [accountRaw({ balance: '100000' })],
@@ -261,13 +243,7 @@ describe('LedgerService.recordTransaction', () => {
 
   it('잔액 부족이면 422', async () => {
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           executeImpl: () => [accountRaw({ balance: '1000' })],
@@ -290,13 +266,7 @@ describe('LedgerService.recordTransaction', () => {
 
   it('닫힌 계좌면 422', async () => {
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           executeImpl: () => [
@@ -319,7 +289,7 @@ describe('LedgerService.recordTransaction', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('같은 멱등 키면 재생한다', async () => {
+  it('구성원 확인 뒤 같은 멱등 키면 쓰기 tx 없이 재생한다', async () => {
     const now = new Date('2026-11-05T01:00:00.000Z');
     const existing = {
       id: id(8),
@@ -339,22 +309,14 @@ describe('LedgerService.recordTransaction', () => {
       createdByUserId: user,
       idempotencyKey: key,
     };
-    let selectCalls = 0;
     const service = serviceWithDb({
-      select: () => {
-        selectCalls += 1;
-        const call = selectCalls;
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => {
-          if (call === 1) return [existing];
-          return [{ balance: '65000' }];
-        };
-        return b;
-      },
+      select: outerSelectQueue([
+        [{ id: member }],
+        [existing],
+        [{ balance: '65000' }],
+      ]),
       transaction: async () => {
-        throw new Error('should not open tx on early replay');
+        throw new Error('구성원·재생만으로 끝나면 쓰기 tx를 열지 않는다');
       },
     });
     const result = await service.recordTransaction(user, {
@@ -369,7 +331,37 @@ describe('LedgerService.recordTransaction', () => {
     expect(result.accountBalance).toBe('65000');
   });
 
-  it('동시 멱등 경합(23505)이면 기존 결과를 replayed:true로 반환한다', async () => {
+  it('비멤버는 멱등 키가 있어도 거래 요약을 재생하지 못한다', async () => {
+    let selectCalls = 0;
+    const service = serviceWithDb({
+      select: () => {
+        selectCalls += 1;
+        const b: Record<string, unknown> = {};
+        b.from = () => b;
+        b.innerJoin = () => b;
+        b.where = () => b;
+        b.limit = async () => []; // 비멤버 → requireMember에서 거절
+        return b;
+      },
+      transaction: async () => {
+        throw new Error('비멤버는 tx에 들어가지 않는다');
+      },
+    });
+    await expect(
+      service.recordTransaction(user, {
+        householdId: home,
+        accountId: accountA,
+        kind: 'expense',
+        amount: '35000',
+        occurredAt: '2026-11-05T01:00:00.000Z',
+        idempotencyKey: key,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    // requireMember만 호출되고 loadRecordReplay select는 없어야 함(IDOR 방지)
+    expect(selectCalls).toBe(1);
+  });
+
+  it('동시 멱등 경합(23505)이면 구성원 재확인 뒤 replayed:true로 반환한다', async () => {
     const now = new Date('2026-11-05T01:00:00.000Z');
     const existing = {
       id: id(8),
@@ -389,22 +381,14 @@ describe('LedgerService.recordTransaction', () => {
       createdByUserId: user,
       idempotencyKey: key,
     };
-    let outerSelect = 0;
     const service = serviceWithDb({
-      select: () => {
-        outerSelect += 1;
-        const call = outerSelect;
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => {
-          // 1: early miss, 2-3: after 23505 replay load
-          if (call === 1) return [];
-          if (call === 2) return [existing];
-          return [{ balance: '65000' }];
-        };
-        return b;
-      },
+      select: outerSelectQueue([
+        [{ id: member }],
+        [], // early miss
+        [{ id: member }], // after 23505
+        [existing],
+        [{ balance: '65000' }],
+      ]),
       transaction: async () => {
         throw uniqueError();
       },
@@ -419,6 +403,29 @@ describe('LedgerService.recordTransaction', () => {
     });
     expect(result.replayed).toBe(true);
     expect(result.transaction.id).toBe(existing.id);
+  });
+
+  it('23505 재생 직전에 비멤버면 거절한다', async () => {
+    const service = serviceWithDb({
+      select: outerSelectQueue([
+        [{ id: member }],
+        [], // early miss
+        [], // after 23505: no longer a member
+      ]),
+      transaction: async () => {
+        throw uniqueError();
+      },
+    });
+    await expect(
+      service.recordTransaction(user, {
+        householdId: home,
+        accountId: accountA,
+        kind: 'expense',
+        amount: '35000',
+        occurredAt: '2026-11-05T01:00:00.000Z',
+        idempotencyKey: key,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('CAS update가 0행이면 충돌 오류', async () => {
@@ -442,13 +449,7 @@ describe('LedgerService.recordTransaction', () => {
       idempotencyKey: key,
     };
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           executeImpl: () => [accountRaw()],
@@ -515,13 +516,7 @@ describe('LedgerService.transferBetweenAccounts', () => {
     };
 
     const service = serviceWithDb({
-      select: () => {
-        const b: Record<string, unknown> = {};
-        b.from = () => b;
-        b.where = () => b;
-        b.limit = async () => [];
-        return b;
-      },
+      select: outerSelectQueue([[{ id: member }], []]),
       transaction: async (work: (t: ReturnType<typeof makeTx>) => Promise<unknown>) => {
         const tx = makeTx({
           executeImpl: (sqlText) => {
