@@ -236,11 +236,14 @@ export {
   countsTowardRecentSpend,
   isSpendableAccountKind,
   judgeCanSpend,
+  remainingForBudgetRule,
   sumSpendableBalances,
+  tightestBudgetRemaining,
 } from './ledger.js';
 export type {
   BalanceApplyFailure,
   BalanceApplyResult,
+  BudgetRuleSpendInput,
   CanSpendDecision,
   CanSpendJudgment,
   CanSpendJudgmentInput,

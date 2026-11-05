@@ -28,11 +28,14 @@ describe('SnapshotBalancesService', () => {
     const service = new SnapshotBalancesService(db as unknown as Db);
     const result = await service.run(id(1));
     expect(result.accountCount).toBe(0);
+    expect(result.insertedCount).toBe(0);
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it('열린 계좌 잔액을 배치로 저장한다', async () => {
-    const values = vi.fn(async () => undefined);
+  it('열린 계좌 잔액을 배치로 저장하고 ON CONFLICT DO NOTHING을 쓴다', async () => {
+    const returning = vi.fn(async () => [{ id: id(10) }, { id: id(11) }]);
+    const onConflictDoNothing = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoNothing }));
     const insert = vi.fn(() => ({ values }));
     const accounts = [
       {
@@ -56,8 +59,11 @@ describe('SnapshotBalancesService', () => {
     const batchId = id(9);
     const result = await service.run(batchId);
     expect(result.accountCount).toBe(2);
+    expect(result.insertedCount).toBe(2);
     expect(result.batchId).toBe(batchId);
-    expect(insert).toHaveBeenCalledOnce();
+    expect(onConflictDoNothing).toHaveBeenCalledWith({
+      target: expect.any(Array),
+    });
     expect(values).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -66,12 +72,30 @@ describe('SnapshotBalancesService', () => {
           batchId,
           source: 'scheduled',
         }),
-        expect.objectContaining({
-          accountId: id(4),
-          balance: '500',
-          batchId,
-        }),
       ]),
     );
+  });
+
+  it('재시도에서 충돌하면 insertedCount만 줄고 실패하지 않는다', async () => {
+    const returning = vi.fn(async () => []); // 전부 conflict
+    const onConflictDoNothing = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoNothing }));
+    const insert = vi.fn(() => ({ values }));
+    const db = {
+      select: () =>
+        selectChain([
+          {
+            id: id(2),
+            householdId: id(3),
+            balance: '12000',
+            currency: 'KRW',
+          },
+        ]),
+      insert,
+    };
+    const service = new SnapshotBalancesService(db as unknown as Db);
+    const result = await service.run(id(9));
+    expect(result.accountCount).toBe(1);
+    expect(result.insertedCount).toBe(0);
   });
 });

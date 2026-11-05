@@ -7,7 +7,9 @@ import {
   bigintToKrwString,
   countsTowardRecentSpend,
   judgeCanSpend,
+  remainingForBudgetRule,
   sumSpendableBalances,
+  tightestBudgetRemaining,
 } from './ledger.js';
 
 describe('applyRecordTransactionBalance', () => {
@@ -156,5 +158,58 @@ describe('집계 헬퍼', () => {
   it('bigint를 KRW 문자열로 바꾼다', () => {
     expect(bigintToKrwString(0n)).toBe('0');
     expect(bigintToKrwString(12345n)).toBe('12345');
+  });
+});
+
+describe('예산 규칙별 잔여', () => {
+  const personA = '00000000-0000-4000-8000-0000000000aa';
+  const personB = '00000000-0000-4000-8000-0000000000bb';
+  const food = '00000000-0000-4000-8000-0000000000cc';
+  const spends = [
+    {
+      amount: 3000n,
+      categoryId: food,
+      personId: personA,
+      kind: 'expense',
+      goalId: null,
+    },
+    {
+      amount: 7000n,
+      categoryId: food,
+      personId: personB,
+      kind: 'expense',
+      goalId: null,
+    },
+    {
+      amount: 2000n,
+      categoryId: null,
+      personId: personA,
+      kind: 'expense',
+      goalId: null,
+    },
+  ];
+
+  it('카테고리·person 조건을 각각 적용한다', () => {
+    expect(
+      remainingForBudgetRule({
+        amountLimit: 10_000n,
+        categoryId: food,
+        personId: personA,
+        spends,
+      }),
+    ).toBe(7000n);
+    expect(
+      remainingForBudgetRule({
+        amountLimit: 10_000n,
+        categoryId: food,
+        personId: null,
+        spends,
+      }),
+    ).toBe(0n);
+  });
+
+  it('규칙별 잔여 중 최솟값을 고른다', () => {
+    expect(tightestBudgetRemaining([5000n, 1200n, 8000n])).toBe(1200n);
+    expect(tightestBudgetRemaining([])).toBeNull();
   });
 });

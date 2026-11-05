@@ -138,13 +138,54 @@ export interface CanSpendJudgmentInput {
   readonly availableKrw: bigint;
   /** 최근 7일 순지출. */
   readonly recentSpendKrw: bigint;
-  /** 이번 달 예산 잔여. 규칙 없으면 null. */
+  /** 이번 달 예산 잔여(규칙별 잔여의 최솟값). 규칙 없으면 null. */
   readonly budgetRemainingKrw: bigint | null;
 }
 
 export interface CanSpendJudgment {
   readonly decision: CanSpendDecision;
   readonly reasons: string[];
+}
+
+export interface BudgetRuleSpendInput {
+  readonly amount: bigint;
+  readonly categoryId: string | null;
+  readonly personId: string;
+  readonly kind: string;
+  readonly goalId: string | null;
+}
+
+/**
+ * 한 예산 규칙의 잔여 = limit − (category·person 조건에 맞는 지출).
+ * categoryId/personId가 null이면 그 축은 전체.
+ */
+export function remainingForBudgetRule(input: {
+  readonly amountLimit: bigint;
+  readonly categoryId: string | null;
+  readonly personId: string | null;
+  readonly spends: ReadonlyArray<BudgetRuleSpendInput>;
+}): bigint {
+  let spent = 0n;
+  for (const row of input.spends) {
+    if (!countsTowardRecentSpend({ kind: row.kind, goalId: row.goalId })) continue;
+    if (input.categoryId !== null && row.categoryId !== input.categoryId) continue;
+    if (input.personId !== null && row.personId !== input.personId) continue;
+    spent += row.amount;
+  }
+  return input.amountLimit - spent;
+}
+
+/** 규칙별 잔여 중 가장 빡센(작은) 값. 규칙이 없으면 null. */
+export function tightestBudgetRemaining(
+  remainings: ReadonlyArray<bigint>,
+): bigint | null {
+  if (remainings.length === 0) return null;
+  let min = remainings[0]!;
+  for (let i = 1; i < remainings.length; i += 1) {
+    const value = remainings[i]!;
+    if (value < min) min = value;
+  }
+  return min;
 }
 
 /**

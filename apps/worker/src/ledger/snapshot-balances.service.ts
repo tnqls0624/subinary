@@ -1,6 +1,7 @@
 /**
  * SnapshotBalances — 열린 계좌 잔액을 배치로 저장한다.
  * 원장·잔액을 바꾸지 않고 관측만 남긴다.
+ * 같은 (account_id, batch_id) 재시도는 ON CONFLICT DO NOTHING으로 멱등.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
@@ -14,6 +15,7 @@ export interface SnapshotBalancesResult {
   readonly batchId: string;
   readonly capturedAt: string;
   readonly accountCount: number;
+  readonly insertedCount: number;
 }
 
 @Injectable()
@@ -42,23 +44,37 @@ export class SnapshotBalancesService {
         batchId,
         capturedAt: capturedAt.toISOString(),
         accountCount: 0,
+        insertedCount: 0,
       };
     }
 
-    await this.db.insert(schema.accountBalanceSnapshots).values(
-      accounts.map((account) => ({
-        accountId: account.id,
-        householdId: account.householdId,
-        balance: String(account.balance),
-        currency: account.currency,
-        capturedAt,
-        source: 'scheduled' as const,
-        batchId,
-      })),
-    );
+    const inserted = await this.db
+      .insert(schema.accountBalanceSnapshots)
+      .values(
+        accounts.map((account) => ({
+          accountId: account.id,
+          householdId: account.householdId,
+          balance: String(account.balance),
+          currency: account.currency,
+          capturedAt,
+          source: 'scheduled' as const,
+          batchId,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [
+          schema.accountBalanceSnapshots.accountId,
+          schema.accountBalanceSnapshots.batchId,
+        ],
+      })
+      .returning({ id: schema.accountBalanceSnapshots.id });
 
     this.logger.info(
-      { batchId, accountCount: accounts.length },
+      {
+        batchId,
+        accountCount: accounts.length,
+        insertedCount: inserted.length,
+      },
       'snapshot balances stored',
     );
 
@@ -66,6 +82,7 @@ export class SnapshotBalancesService {
       batchId,
       capturedAt: capturedAt.toISOString(),
       accountCount: accounts.length,
+      insertedCount: inserted.length,
     };
   }
 }

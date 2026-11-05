@@ -5,7 +5,8 @@ import { createLogger, QUEUE_NAMES } from '@family/shared';
 import { SnapshotBalancesService } from './snapshot-balances.service';
 
 export interface BalanceSnapshotJob {
-  readonly batchId?: string;
+  readonly batchId: string;
+  readonly hourKey?: string;
   readonly triggeredAt: string;
 }
 
@@ -21,12 +22,15 @@ export class BalanceSnapshotProcessor extends WorkerHost {
 
   async process(job: Job<BalanceSnapshotJob>): Promise<{ accountCount: number }> {
     this.logger.info(
-      { jobId: job.id, triggeredAt: job.data.triggeredAt },
+      {
+        jobId: job.id,
+        batchId: job.data.batchId,
+        hourKey: job.data.hourKey,
+        triggeredAt: job.data.triggeredAt,
+      },
       'balance snapshot job start',
     );
-    const result = await this.snapshots.run(
-      job.data.batchId ?? undefined,
-    );
+    const result = await this.snapshots.run(job.data.batchId);
     return { accountCount: result.accountCount };
   }
 }
