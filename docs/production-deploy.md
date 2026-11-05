@@ -266,6 +266,10 @@ pnpm verify:training-runner:isolated
 NEXT_PUBLIC_API_URL=https://app.subinary.cloud pnpm --filter @family/mobile sync
 ```
 - 딥링크 https를 쓰려면 `AndroidManifest.xml`/`App.entitlements`의 도메인도 교체(→ `apps/mobile/README.md`).
+- Android `google-services.json`은 커밋하지 않는다. GitHub 시크릿 `GOOGLE_SERVICES_JSON`
+  (파일 base64)을 넣고 빌드 전 `pnpm --filter @family/mobile prepare:google-services`로
+  생성한다(→ `apps/mobile/README.md`, `apps/mobile/scripts/write-google-services.sh`).
+  이미 저장소 이력에 키가 올라간 적이 있으면 **회전(재발급)이 우선**이다.
 
 ## 8. 롤백(dev로 복귀)
 
@@ -294,6 +298,8 @@ docker compose up -d          # dev 스택(next dev 등)
 - [x] 격리 Training Runner의 2회 재현성·로컬 alias 서빙·artifact 삭제 전파 검증
 - [ ] 사람 확정 라벨 100개/카테고리 3개/카테고리별 10개를 충족한 뒤 첫 운영 학습·평가·승격
 - [ ] `.env`는 커밋 금지(이미 .gitignore). 저장소 public이므로 특히 주의
+- [ ] `apps/mobile/android/app/google-services.json` 미커밋 · `GOOGLE_SERVICES_JSON` 시크릿 등록 ·
+      GCP 키를 Android 패키지명+SHA-1로 제한하고 허용 API 축소(유출 이력 있으면 키 교체)
 - [ ] Cloudflare에서 필요 시 Access(제로트러스트) 정책으로 접근 제한 가능
 - [x] PostgreSQL/MinIO 일일 자동 백업 서비스와 checksum 생성
 - [x] 격리 PostgreSQL 복구 검증 절차 실행(2026-07-19: 55 tables, 270 objects)

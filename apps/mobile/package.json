@@ -5,6 +5,7 @@
   "description": "Family Memory AI — Capacitor 네이티브 셸(iOS/Android)",
   "scripts": {
     "build:web": "pnpm -C ../.. --filter @family/web build:mobile",
+    "prepare:google-services": "sh scripts/write-google-services.sh",
     "sync": "pnpm build:web && cap sync",
     "copy": "pnpm build:web && cap copy",
     "add:ios": "cap add ios",

@@ -61,7 +61,10 @@ captures/
 .cxx/
 
 # Google Services (e.g. APIs or Firebase)
-# google-services.json
+# 실제 파일은 커밋 금지. 자리표시: app/google-services.json.example
+# CI/로컬 생성: apps/mobile/scripts/write-google-services.sh
+google-services.json
+app/google-services.json
 
 # Freeline
 freeline.py

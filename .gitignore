@@ -18,6 +18,10 @@ out/
 .env.production
 .env.prod
 
+# Firebase Android 클라이언트 설정 — CI 시크릿(GOOGLE_SERVICES_JSON) 또는 로컬 복사본.
+# 자리표시는 apps/mobile/android/app/google-services.json.example 을 쓴다.
+apps/mobile/android/app/google-services.json
+
 # Logs
 *.log
 npm-debug.log*

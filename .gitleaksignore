@@ -1,0 +1,6 @@
+# 테스트 픽스처 오탐 — 실제 운영 비밀값이 아님(합성/자리표시).
+# fingerprint 형식: <path>:<rule-id>:<line>  (gitleaks detect --no-git)
+apps/api/src/learning/learning-operations.access.test.ts:generic-api-key:126
+apps/api/src/money/money-contract-config.test.ts:generic-api-key:33
+apps/web/src/lib/safe-redirect.test.ts:generic-api-key:64
+scripts/lib/config-validation.test.mjs:generic-api-key:22

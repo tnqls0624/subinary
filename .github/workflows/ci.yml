@@ -12,10 +12,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # PR·main 푸시마다 시크릿 유출 검사. --redact 로 로그에 원문을 남기지 않는다.
+  # 테스트 픽스처 오탐은 루트 .gitleaksignore fingerprint 로 제외한다.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # --no-git: 현재 트리만 검사. 이력에 남은 과거 유출은 회전으로 대응하고
+      # force-push/이력 재작성은 하지 않는다(PR 본문·운영 체크리스트 참고).
+      - name: Scan for secrets
+        run: gitleaks detect --source . --no-git --verbose --redact
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Android 네이티브 빌드가 이 job에 붙으면 시크릿으로 파일을 풀어 쓴다.
+      # 시크릿 미등록(빈 값)이면 스킵. 로컬·전용 모바일 CI도 동일 스크립트 사용:
+      #   apps/mobile/scripts/write-google-services.sh
+      - name: Materialize google-services.json (optional)
+        if: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: sh apps/mobile/scripts/write-google-services.sh
 
       # packageManager 필드(pnpm@9.15.4)에서 버전 자동 감지
       - uses: pnpm/action-setup@v4

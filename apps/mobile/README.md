@@ -80,6 +80,32 @@ pnpm --filter @family/mobile copy
 `CURRENT_PROJECT_VERSION`/`MARKETING_VERSION`을 함께 올립니다. 현재 두 플랫폼의 앱 식별자는
 `ai.familymemory.app`입니다.
 
+### Firebase / `google-services.json` (커밋 금지)
+
+Android FCM용 `apps/mobile/android/app/google-services.json`은 **저장소에 올리지 않습니다.**
+GitHub Actions 시크릿 `GOOGLE_SERVICES_JSON`(파일 전체의 base64) 또는 로컬 복사본으로
+빌드 직전에 생성합니다.
+
+```bash
+# 1) CI·로컬 — 시크릿에서 생성(권장)
+export GOOGLE_SERVICES_JSON="$(base64 < /path/to/google-services.json | tr -d '\n')"
+pnpm --filter @family/mobile prepare:google-services
+# = sh apps/mobile/scripts/write-google-services.sh
+
+# 2) 로컬 자리표시만 필요할 때(푸시 없이 컴파일 확인)
+cp apps/mobile/android/app/google-services.json.example \
+   apps/mobile/android/app/google-services.json
+# 실제 키로 채운 뒤 빌드. 이 파일은 .gitignore 대상이다.
+```
+
+CI(`/.github/workflows/ci.yml`)는 `secrets.GOOGLE_SERVICES_JSON`이 있을 때만 동일 스크립트로
+파일을 풀어 쓴다. 시크릿 등록 예:
+
+```bash
+# 값은 채팅·이슈·로그에 붙이지 말 것
+base64 < apps/mobile/android/app/google-services.json | tr -d '\n' | gh secret set GOOGLE_SERVICES_JSON
+```
+
 ### Android — 서명된 AAB
 
 키스토어 파일은 저장소 밖에 보관하고 비밀번호는 셸 세션 또는 CI 비밀 저장소에서만

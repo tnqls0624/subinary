@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "40729713396",
-    "project_id": "subinary-23106",
-    "storage_bucket": "subinary-23106.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "YOUR_PROJECT_ID",
+    "storage_bucket": "YOUR_PROJECT_ID.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:40729713396:android:ec45fb0fec1ee8bdc55ca1",
+        "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:YOUR_MOBILESDK_APP_ID",
         "android_client_info": {
           "package_name": "ai.familymemory.app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyC0i54sDGl_ylRoFs_XZ32OaEXNqnV4b04"
+          "current_key": "YOUR_ANDROID_API_KEY"
         }
       ],
       "services": {
