@@ -37,6 +37,8 @@ export const QUEUE_NAMES = {
   CATEGORY_SUGGEST: 'category-suggest',
   // 거래 승격 완료 시 푸시 알림을 발송하는 큐(promotion=생산자, worker=소비자).
   NOTIFICATION_DISPATCH: 'notification-dispatch',
+  /** 가족 원장 계좌 잔액 정기 스냅샷(SnapshotBalances). */
+  BALANCE_SNAPSHOT: 'balance-snapshot',
 } as const;
 
 /** offline 평가와 serving alias가 공유하는 안정적인 model task 식별자. */

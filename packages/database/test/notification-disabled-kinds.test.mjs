@@ -30,10 +30,9 @@ const body = sql
   .join("\n");
 
 describe("0074 알림 종류별 끄기", () => {
-  it("journal에 파일명과 같은 tag로 마지막 항목으로 등록돼 있다", () => {
+  it("journal에 파일명과 같은 tag로 idx 74에 등록돼 있다", () => {
     const entry = journal.entries.find((e) => e.idx === 74);
     assert.equal(entry?.tag, "0074_notification_disabled_kinds");
-    assert.equal(journal.entries.at(-1)?.idx, 74);
   });
 
   it("빈 배열 기본값의 NOT NULL 컬럼 하나만 더하고 기존 행을 건드리지 않는다", () => {

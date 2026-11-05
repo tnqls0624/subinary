@@ -39,6 +39,7 @@ import { RetrievalModule } from './retrieval/retrieval.module';
 import { SlackModule } from './slack/slack.module';
 import { StorageModule } from './storage/storage.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { LedgerModule } from './ledger/ledger.module';
 
 /**
  * DevModule exposes development-only endpoints (echo, test-job, storage-test)
@@ -68,6 +69,7 @@ const devOnlyModules = process.env.NODE_ENV !== 'production' ? [DevModule] : [];
     // 가맹점 별칭 — 카테고리 규칙이 대표 이름 하나로 모이도록 파편을 병합한다.
     MerchantsModule,
     TransactionsModule,
+    LedgerModule,
     AnalyticsModule,
     BudgetsModule,
     // 정기 지출 Radar. 라우트는 붙지만 사용자 노출은 RECURRING_RADAR_ENABLED(기본 off)가 막는다.

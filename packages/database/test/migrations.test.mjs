@@ -946,3 +946,66 @@ describe('0056 — 공용(공동사용) 카드 표시', () => {
     assert.ok(analytics.includes('paymentCards.isShared'), '집계가 isShared를 읽지 않는다');
   });
 });
+
+describe('0075 — 가족 원장 MVP 1차', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0075_family_ledger_mvp.sql'),
+    'utf8',
+  );
+  const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
+
+  it('journal 마지막 항목이다', () => {
+    assert.equal(journal.entries.at(-1)?.tag, '0075_family_ledger_mvp');
+    assert.equal(journal.entries.at(-1)?.idx, 75);
+  });
+
+  it('추가형이다 — DROP/DELETE/TRUNCATE/기존 테이블 UPDATE가 없다', () => {
+    for (const forbidden of ['DROP TABLE', 'DROP COLUMN', 'DELETE FROM', 'TRUNCATE']) {
+      assert.ok(
+        !new RegExp(`\\b${forbidden.replace(' ', '\\s+')}\\b`, 'i').test(sqlBody),
+        `파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('도메인 테이블을 만든다', () => {
+    for (const table of [
+      'institutions',
+      'accounts',
+      'loan_terms',
+      'goals',
+      'budget_rules',
+      'account_transactions',
+      'account_balance_snapshots',
+    ]) {
+      assert.match(sqlBody, new RegExp(`CREATE TABLE "${table}"`));
+      assert.ok(
+        schemaText.includes(`'${table}'`),
+        `schema.ts에 ${table} 선언이 없다`,
+      );
+    }
+  });
+
+  it('금액은 KRW numeric(20,0)이고 음수를 거부한다', () => {
+    assert.match(sqlBody, /"balance" numeric\(20, 0\).*CHECK \("balance" >= 0\)/s);
+    assert.match(sqlBody, /"amount" numeric\(20, 0\) NOT NULL/);
+    assert.match(sqlBody, /account_transactions_amount_check.*"amount" > 0/s);
+  });
+
+  it('이체 멱등과 스냅샷 배치 유일 제약이 있다', () => {
+    assert.match(
+      sqlBody,
+      /account_transactions_household_idempotency_unique" UNIQUE \("household_id", "idempotency_key"\)/,
+    );
+    assert.match(
+      sqlBody,
+      /account_balance_snapshots_account_batch_unique" UNIQUE \("account_id", "batch_id"\)/,
+    );
+  });
+
+  it('card_transactions·manual_assets를 바꾸지 않는다', () => {
+    assert.ok(!/card_transactions/i.test(sqlBody));
+    assert.ok(!/manual_assets/i.test(sqlBody));
+  });
+});

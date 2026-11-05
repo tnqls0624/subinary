@@ -526,6 +526,13 @@
       "when": 1793750400004,
       "tag": "0074_notification_disabled_kinds",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793836800000,
+      "tag": "0075_family_ledger_mvp",
+      "breakpoints": true
     }
   ]
 }

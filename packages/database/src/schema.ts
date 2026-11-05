@@ -5001,3 +5001,174 @@ export const bankConnectionSnapshots = pgTable('bank_connection_snapshots', {
   check('bank_snapshots_state_check', sql`(${table.state} = 'pending' AND ${table.payload} IS NULL AND ${table.completedAt} IS NULL) OR (${table.state} = 'succeeded' AND ${table.payload} IS NOT NULL AND ${table.completedAt} IS NOT NULL AND ${table.errorCode} IS NULL) OR (${table.state} = 'failed' AND ${table.payload} IS NULL AND ${table.completedAt} IS NOT NULL)`),
   check('bank_snapshots_version_check', sql`${table.connectionVersion} > 0`),
 ]);
+
+/* -------------------------------------------------------------------------- */
+/* Family ledger MVP — Person=household_members, Category=expense_categories  */
+/* OpenAccount / CreateGoal / CloseGoal / UpsertBudgetRule 는 2차 범위.       */
+/* -------------------------------------------------------------------------- */
+
+/** 금융기관(은행·증권 등). 계좌가 소속될 수 있다. */
+export const institutions = pgTable('institutions', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('institutions_household_idx').on(table.householdId),
+  check('institutions_name_check', sql`char_length(btrim(${table.name})) BETWEEN 1 AND 100`),
+]);
+export type Institution = typeof institutions.$inferSelect;
+export type NewInstitution = typeof institutions.$inferInsert;
+
+/**
+ * 가족 원장 계좌. Person은 `person_id`→`household_members`.
+ * 대출은 Account(kind=loan) + LoanTerms 조합이다.
+ */
+export const accounts = pgTable('accounts', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  /** Person — 활성 가구 구성원. */
+  personId: uuid('person_id').notNull().references(() => householdMembers.id),
+  institutionId: uuid('institution_id').references(() => institutions.id),
+  name: text('name').notNull(),
+  kind: text('kind').$type<'checking' | 'savings' | 'cash' | 'loan' | 'investment'>().notNull(),
+  currency: text('currency').notNull().default('KRW'),
+  /** KRW 정수. 자산 계좌는 잔액, 대출(loan)은 남은 원금(양수 부채). */
+  balance: numeric('balance', { precision: 20, scale: 0 }).notNull().default('0'),
+  status: text('status').$type<'open' | 'closed'>().notNull().default('open'),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+}, (table) => [
+  index('accounts_household_status_idx').on(table.householdId, table.status),
+  index('accounts_person_idx').on(table.personId),
+  check('accounts_kind_check', sql`${table.kind} IN ('checking','savings','cash','loan','investment')`),
+  check('accounts_currency_check', sql`${table.currency} = 'KRW'`),
+  check('accounts_balance_check', sql`${table.balance} >= 0`),
+  check('accounts_status_check', sql`(${table.status} = 'open' AND ${table.closedAt} IS NULL) OR (${table.status} = 'closed' AND ${table.closedAt} IS NOT NULL)`),
+  check('accounts_name_check', sql`char_length(btrim(${table.name})) BETWEEN 1 AND 100`),
+  check('accounts_version_check', sql`${table.version} > 0`),
+]);
+export type Account = typeof accounts.$inferSelect;
+export type NewAccount = typeof accounts.$inferInsert;
+
+/** 대출 조건. Account(kind=loan)에 1:1. */
+export const loanTerms = pgTable('loan_terms', {
+  accountId: uuid('account_id').primaryKey().references(() => accounts.id, { onDelete: 'cascade' }),
+  originalPrincipal: numeric('original_principal', { precision: 20, scale: 0 }).notNull(),
+  /** 연이율 베이시스 포인트(1% = 100). 미입력이면 null. */
+  interestRateBps: integer('interest_rate_bps'),
+  maturityDate: date('maturity_date', { mode: 'string' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check('loan_terms_principal_check', sql`${table.originalPrincipal} >= 0`),
+  check('loan_terms_rate_check', sql`${table.interestRateBps} IS NULL OR ${table.interestRateBps} BETWEEN 0 AND 100000`),
+  check('loan_terms_maturity_check', sql`${table.maturityDate} IS NULL OR ${table.maturityDate} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31'`),
+]);
+export type LoanTerms = typeof loanTerms.$inferSelect;
+export type NewLoanTerms = typeof loanTerms.$inferInsert;
+
+/** 저축 목표. 적립은 TransferBetweenAccounts의 goalId로만 표현한다(ContributeToGoal 없음). */
+export const goals = pgTable('goals', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  personId: uuid('person_id').notNull().references(() => householdMembers.id),
+  name: text('name').notNull(),
+  targetAmount: numeric('target_amount', { precision: 20, scale: 0 }).notNull(),
+  savedAmount: numeric('saved_amount', { precision: 20, scale: 0 }).notNull().default('0'),
+  status: text('status').$type<'open' | 'closed'>().notNull().default('open'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+}, (table) => [
+  index('goals_household_status_idx').on(table.householdId, table.status),
+  check('goals_name_check', sql`char_length(btrim(${table.name})) BETWEEN 1 AND 100`),
+  check('goals_target_check', sql`${table.targetAmount} > 0`),
+  check('goals_saved_check', sql`${table.savedAmount} >= 0`),
+  check('goals_status_check', sql`(${table.status} = 'open' AND ${table.closedAt} IS NULL) OR (${table.status} = 'closed' AND ${table.closedAt} IS NOT NULL)`),
+]);
+export type Goal = typeof goals.$inferSelect;
+export type NewGoal = typeof goals.$inferInsert;
+
+/**
+ * 예산 규칙. UpsertBudgetRule은 2차. MVP1은 조회(지금 써도 되나)만 읽는다.
+ * Category는 `expense_categories`. Person null이면 가구 공통.
+ */
+export const budgetRules = pgTable('budget_rules', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  personId: uuid('person_id').references(() => householdMembers.id),
+  categoryId: uuid('category_id').references(() => expenseCategories.id),
+  period: text('period').$type<'monthly'>().notNull().default('monthly'),
+  amountLimit: numeric('amount_limit', { precision: 20, scale: 0 }).notNull(),
+  /** 서울 회계월 첫날(YYYY-MM-01). */
+  effectiveMonth: date('effective_month', { mode: 'string' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('budget_rules_household_month_idx').on(table.householdId, table.effectiveMonth),
+  check('budget_rules_period_check', sql`${table.period} = 'monthly'`),
+  check('budget_rules_limit_check', sql`${table.amountLimit} >= 0`),
+  check('budget_rules_month_check', sql`${table.effectiveMonth} = date_trunc('month', ${table.effectiveMonth}::timestamp)::date`),
+]);
+export type BudgetRule = typeof budgetRules.$inferSelect;
+export type NewBudgetRule = typeof budgetRules.$inferInsert;
+
+/** 원장 거래(Transaction). 카드 문자 승격 `card_transactions`와 별도 계약. */
+export const accountTransactions = pgTable('account_transactions', {
+  id: uuid('id').primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  accountId: uuid('account_id').notNull().references(() => accounts.id),
+  personId: uuid('person_id').notNull().references(() => householdMembers.id),
+  categoryId: uuid('category_id').references(() => expenseCategories.id),
+  kind: text('kind').$type<'expense' | 'income' | 'transfer_out' | 'transfer_in'>().notNull(),
+  /** 항상 양수 KRW 정수. 방향은 kind. */
+  amount: numeric('amount', { precision: 20, scale: 0 }).notNull(),
+  currency: text('currency').notNull().default('KRW'),
+  memo: text('memo'),
+  counterpartyAccountId: uuid('counterparty_account_id').references(() => accounts.id),
+  /** 이체 쌍을 묶는 UUID. transfer_out/in에만 채운다. */
+  transferGroupId: uuid('transfer_group_id'),
+  /** 목표 적립 표현. TransferBetweenAccounts의 선택 파라미터. */
+  goalId: uuid('goal_id').references(() => goals.id),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
+  /** 가구 단위 멱등 키. */
+  idempotencyKey: text('idempotency_key').notNull(),
+}, (table) => [
+  unique('account_transactions_household_idempotency_unique').on(table.householdId, table.idempotencyKey),
+  index('account_transactions_account_occurred_idx').on(table.accountId, table.occurredAt),
+  index('account_transactions_household_occurred_idx').on(table.householdId, table.occurredAt),
+  index('account_transactions_transfer_group_idx').on(table.transferGroupId),
+  check('account_transactions_kind_check', sql`${table.kind} IN ('expense','income','transfer_out','transfer_in')`),
+  check('account_transactions_amount_check', sql`${table.amount} > 0`),
+  check('account_transactions_currency_check', sql`${table.currency} = 'KRW'`),
+  check('account_transactions_memo_check', sql`${table.memo} IS NULL OR char_length(btrim(${table.memo})) BETWEEN 1 AND 500`),
+  check('account_transactions_transfer_check', sql`(${table.kind} IN ('expense','income') AND ${table.counterpartyAccountId} IS NULL AND ${table.transferGroupId} IS NULL AND ${table.goalId} IS NULL) OR (${table.kind} IN ('transfer_out','transfer_in') AND ${table.counterpartyAccountId} IS NOT NULL AND ${table.transferGroupId} IS NOT NULL AND ${table.categoryId} IS NULL)`),
+]);
+export type AccountTransaction = typeof accountTransactions.$inferSelect;
+export type NewAccountTransaction = typeof accountTransactions.$inferInsert;
+
+/** 정기 SnapshotBalances 결과. 잔액 이력이며 원장을 바꾸지 않는다. */
+export const accountBalanceSnapshots = pgTable('account_balance_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  accountId: uuid('account_id').notNull().references(() => accounts.id),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  balance: numeric('balance', { precision: 20, scale: 0 }).notNull(),
+  currency: text('currency').notNull().default('KRW'),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+  source: text('source').$type<'scheduled'>().notNull().default('scheduled'),
+  /** 같은 잡의 스냅샷을 묶는다. */
+  batchId: uuid('batch_id').notNull(),
+}, (table) => [
+  unique('account_balance_snapshots_account_batch_unique').on(table.accountId, table.batchId),
+  index('account_balance_snapshots_household_captured_idx').on(table.householdId, table.capturedAt),
+  check('account_balance_snapshots_balance_check', sql`${table.balance} >= 0`),
+  check('account_balance_snapshots_currency_check', sql`${table.currency} = 'KRW'`),
+  check('account_balance_snapshots_source_check', sql`${table.source} = 'scheduled'`),
+]);
+export type AccountBalanceSnapshot = typeof accountBalanceSnapshots.$inferSelect;
+export type NewAccountBalanceSnapshot = typeof accountBalanceSnapshots.$inferInsert;
