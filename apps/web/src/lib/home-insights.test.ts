@@ -7,6 +7,7 @@ import {
   nextBillingDate,
   paceText,
   previousMonthToDate,
+  thisWeekWindow,
   upcomingUntil,
   weeklyDeltaText,
   whenText,
@@ -78,6 +79,21 @@ describe("지난주 창", () => {
     expect(weeklyDeltaText(30_000, 50_000)).toBe(
       "그 전주보다 20,000원 덜 썼어요"
     );
+  });
+});
+
+describe("이번 주 창", () => {
+  it("월요일 0시 기준으로 이번 주 전체를 잡고 일요일까지를 라벨로 쓴다", () => {
+    // 2026-11-04는 수요일. 이번 주 월요일 = 11월 2일, 다음 주 월요일 = 11월 9일.
+    expect(thisWeekWindow(kst("2026-11-04T22:00:00"))).toEqual({
+      from: kst("2026-11-02T00:00:00").toISOString(),
+      to: kst("2026-11-09T00:00:00").toISOString(),
+      label: "11월 2일 – 11월 8일",
+    });
+  });
+  it("지난주 창의 to와 이번 주 창의 from이 같다", () => {
+    const now = kst("2026-11-04T22:00:00");
+    expect(thisWeekWindow(now).from).toBe(lastWeekWindow(now).to);
   });
 });
 

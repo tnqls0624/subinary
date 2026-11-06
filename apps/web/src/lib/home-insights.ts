@@ -92,22 +92,42 @@ export interface WeekWindow extends TimeWindow {
   label: string;
 }
 
-/** 지난주 월요일 0시 ~ 이번 주 월요일 0시(KST). 서버가 그 앞 같은 길이(그 전주)를 비교 구간으로 준다. */
-export function lastWeekWindow(now: Date): WeekWindow {
+/** 이번 주 월요일 0시(KST)의 UTC epoch ms. 주 시작은 월요일(홈·주간 회고와 동일). */
+function thisMondayUtcMs(now: Date): number {
   const shifted = new Date(now.getTime() + KST_OFFSET_MS);
   const daysSinceMonday = (shifted.getUTCDay() + 6) % 7;
-  const thisMonday =
+  return (
     Date.UTC(
       shifted.getUTCFullYear(),
       shifted.getUTCMonth(),
       shifted.getUTCDate() - daysSinceMonday
-    ) - KST_OFFSET_MS;
+    ) - KST_OFFSET_MS
+  );
+}
+
+/** 지난주 월요일 0시 ~ 이번 주 월요일 0시(KST). 서버가 그 앞 같은 길이(그 전주)를 비교 구간으로 준다. */
+export function lastWeekWindow(now: Date): WeekWindow {
+  const thisMonday = thisMondayUtcMs(now);
   const from = thisMonday - 7 * DAY_MS;
   return {
     from: new Date(from).toISOString(),
     to: new Date(thisMonday).toISOString(),
     label: `${formatMonthDay(new Date(from), now)} – ${formatMonthDay(
       new Date(thisMonday - DAY_MS),
+      now
+    )}`,
+  };
+}
+
+/** 이번 주 월요일 0시 ~ 다음 주 월요일 0시(KST). 「주간 가계 돌아보기」기간. */
+export function thisWeekWindow(now: Date): WeekWindow {
+  const thisMonday = thisMondayUtcMs(now);
+  const nextMonday = thisMonday + 7 * DAY_MS;
+  return {
+    from: new Date(thisMonday).toISOString(),
+    to: new Date(nextMonday).toISOString(),
+    label: `${formatMonthDay(new Date(thisMonday), now)} – ${formatMonthDay(
+      new Date(nextMonday - DAY_MS),
       now
     )}`,
   };

@@ -71,6 +71,7 @@ import type {
   BudgetListResponse,
   BudgetSummary,
   BudgetUpdateRequest,
+  FinanceQuality,
   FinanceQueryRequest,
   FinanceQueryResponse,
   MonthlyInsightsResponse,
@@ -876,6 +877,12 @@ export const api = {
     months: (accessToken: AccessToken, householdId: string) =>
       apiFetch<AnalyticsMonths>(
         `/v1/analytics/months${buildQuery({ householdId })}`,
+        { accessToken },
+      ),
+    /** 금융 품질 건수 — 미분류는 approval · categoryId IS NULL. */
+    quality: (accessToken: AccessToken, householdId: string) =>
+      apiFetch<FinanceQuality>(
+        `/v1/analytics/quality${buildQuery({ householdId })}`,
         { accessToken },
       ),
   },

@@ -36,6 +36,7 @@ import type {
   AnalyticsMonths,
   MerchantLabelCandidateListResponse,
   MerchantListResponse,
+  FinanceQuality,
   MonthlyAnalytics,
   TransactionListResponse,
   BudgetListResponse,
@@ -272,6 +273,19 @@ export function useAnalyticsMonths(): UseQueryResult<AnalyticsMonths> {
     queryFn: () =>
       authedFetch((token) =>
         api.analytics.months(token, householdId as string),
+      ),
+  });
+}
+
+/** 전 기간 미분류·품질 건수. asOf는 서버 조회 시각. */
+export function useFinanceQuality(): UseQueryResult<FinanceQuality> {
+  const { householdId, authedFetch, enabled } = useHouseholdScope();
+  return useQuery({
+    queryKey: queryKeys.analytics("quality", householdId),
+    enabled,
+    queryFn: () =>
+      authedFetch((token) =>
+        api.analytics.quality(token, householdId as string),
       ),
   });
 }

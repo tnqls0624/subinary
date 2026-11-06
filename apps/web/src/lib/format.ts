@@ -213,3 +213,18 @@ export function formatMonthDayTime(
   return parts ? `${monthDayOf(parts, now)} ${timeOf(parts)}` : "—";
 }
 
+/**
+ * 조회·스냅샷 기준 시각을 `YYYY-MM-DD HH:mm Asia/Seoul`로 쓴다.
+ * 스펙 숫자 표기 규칙 — 신선도 배지·상대 시각이 아니라 절대 시각만.
+ */
+export function formatAsOfSeoul(value: DateValue): string {
+  const parts = seoulParts(value);
+  if (!parts) return "—";
+  const y = String(parts.year).padStart(4, "0");
+  const m = String(parts.month).padStart(2, "0");
+  const d = String(parts.day).padStart(2, "0");
+  const hh = String(parts.hour).padStart(2, "0");
+  const mm = String(parts.minute).padStart(2, "0");
+  return `${y}-${m}-${d} ${hh}:${mm} Asia/Seoul`;
+}
+

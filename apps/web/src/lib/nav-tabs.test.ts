@@ -35,7 +35,8 @@ describe("simplified primary destinations", () => {
   it.each([
     ["/cards", "assets"], ["/cards/abc/", "assets"], ["/assets/accounts", "assets"],
     ["/assets/loan-import/", "assets"],
-    ["/budgets", "ledger"], ["/ledger/analysis/", "ledger"], ["/transactions/abc", "ledger"],
+    ["/budgets", "ledger"], ["/ledger/analysis/", "ledger"], ["/ledger/weekly-review", "ledger"],
+    ["/transactions/abc", "ledger"],
     ["/plan/housing", "assets"], ["/plan/funding/", "assets"],
     ["/todo", "ledger"], ["/declines", "ledger"], ["/ai/", "all"],
     ["/ai-operations", "all"], ["/household", "all"],

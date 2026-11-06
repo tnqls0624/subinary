@@ -9,6 +9,7 @@
  */
 import {
   Bell,
+  CalendarDays,
   ChevronRight,
   Fingerprint,
   KeyRound,
@@ -73,6 +74,7 @@ const GROUPS: ReadonlyArray<MoreGroup> = [
     key: "ledger",
     title: "가계부",
     items: [
+      { href: "/ledger/weekly-review", icon: CalendarDays, title: "주간 가계 돌아보기" },
       { href: "/ai", icon: Sparkles, title: "AI 도우미" },
       { href: "/categories", icon: Tags, title: "카테고리" },
       { href: "/more/category-rules", icon: Wand2, title: "자동 분류 규칙" },
