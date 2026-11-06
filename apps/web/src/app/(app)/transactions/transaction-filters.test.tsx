@@ -115,6 +115,13 @@ describe("가계부 기간·조건", () => {
     // 기간 + 카테고리·구성원·카드·취소·환불 = 드롭다운 버튼 5개(시트가 아니다). 확인할 거래는 켜고 끄는 칩.
     expect(idle.match(/aria-haspopup="menu"/g)).toHaveLength(5);
     expect(idle).not.toContain('aria-haspopup="dialog"');
+    // 칩 줄은 손가락 가로 팬을 받는다 — 세로 페이지 스크롤에 가로 제스처를 뺏기지 않게(SOO-46).
+    expect(idle).toMatch(
+      /aria-label="조건"[^>]*class="[^"]*\btouch-pan-x\b[^"]*"/
+    );
+    expect(idle).toMatch(
+      /aria-label="조건"[^>]*class="[^"]*\boverscroll-x-contain\b[^"]*"/
+    );
 
     const filtered = render({
       ...empty,

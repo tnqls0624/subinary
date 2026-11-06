@@ -10,10 +10,15 @@ import { cn } from "@/lib/utils";
  * 터치·펜은 손을 뗄 때 연다(2026-11-06 사용자 지적: 값 고르기 줄에 스크롤하려고 손가락을 대면 메뉴가 바로 열린다 —
  * "거래 상세만이 아니고 전체적으로 다 그래"). Radix DropdownMenu Trigger는 터치에서도 pointerdown에 연다.
  * 손가락을 대고 밀면 브라우저가 pointercancel을 보내고 click은 보내지 않으므로, 열기를 click으로 미루면
- * 스크롤로 이어진 터치에는 열리지 않는다. 마우스는 지금처럼 누르는 순간, 키보드(Enter·Space·↓)는 Radix가 keydown에서 연다.
+ * 스크롤로 이어진 터치에는 열리지 않는다. 다만 가로 칩 줄처럼 세로 페이지 스크롤과 겹치면 pointercancel이
+ * 안 오고 click만 남는 경우가 있어(SOO-46), 손가락이 조금 움직이면 미뤄 둔 터치를 버린다.
+ * 마우스는 지금처럼 누르는 순간, 키보드(Enter·Space·↓)는 Radix가 keydown에서 연다.
  * 이 파일의 DropdownMenu·DropdownMenuTrigger를 쓰는 모든 메뉴(값 고르기·⋯·가족 전환·역할·색)가 같다.
  * Radix Select는 이미 터치에서 click에 연다(react-select의 pointerTypeRef) — 거기는 손대지 않는다.
  */
+
+/** 누른 자리에서 이만큼 넘게 움직이면 탭이 아니라 스크롤·스와이프로 본다(px). */
+export const RELEASE_OPEN_SLOP_PX = 10;
 
 /** 트리거를 누른 한 순간. click의 pointerType은 pointerdown에서 미뤄 둔 터치·펜의 종류다(없으면 null). */
 export type DropdownPress =
@@ -39,8 +44,9 @@ export function dropdownOpensAt(
   );
 }
 
-/** pointerdown에서 미뤄 둔 터치·펜의 종류. 메뉴가 어떤 길로든 열리거나 닫히면 지운다(`DropdownMenu`). */
-type PendingPress = { current: string | null };
+/** pointerdown에서 미뤄 둔 터치·펜. 메뉴가 어떤 길로든 열리거나 닫히면 지운다(`DropdownMenu`). */
+type PendingTouch = { pointerType: string; x: number; y: number };
+type PendingPress = { current: PendingTouch | null };
 
 /** 트리거에 붙는 '뗄 때 열기' 처리. 넘긴 사용처의 핸들러 뒤, Radix 처리 앞에서 돈다. */
 export function releaseOpenHandlers(
@@ -48,7 +54,12 @@ export function releaseOpenHandlers(
   { disabled, openMenu }: { disabled: boolean; openMenu: () => void },
 ) {
   return {
-    onPointerDown(event: { pointerType: string; preventDefault(): void }) {
+    onPointerDown(event: {
+      pointerType: string;
+      clientX: number;
+      clientY: number;
+      preventDefault(): void;
+    }) {
       pending.current = null;
       // 잠김은 Radix도 열지 않고, 마우스는 Radix가 누르는 순간 연다 — 둘 다 건드리지 않는다.
       if (disabled) return;
@@ -63,13 +74,30 @@ export function releaseOpenHandlers(
       // Radix Trigger는 이 onPointerDown을 먼저 부르고, 기본 동작이 막혔으면 자기 처리(바로 열기)를 건너뛴다
       // (@radix-ui/primitive composeEventHandlers). pointerdown을 막아도 스크롤과 click은 그대로 온다.
       event.preventDefault();
-      pending.current = event.pointerType;
+      pending.current = {
+        pointerType: event.pointerType,
+        x: event.clientX,
+        y: event.clientY,
+      };
+    },
+    onPointerMove(event: {
+      isPrimary: boolean;
+      clientX: number;
+      clientY: number;
+    }) {
+      const start = pending.current;
+      if (start == null || !event.isPrimary) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.hypot(dx, dy) > RELEASE_OPEN_SLOP_PX) {
+        pending.current = null;
+      }
     },
     onPointerCancel() {
       pending.current = null;
     },
     onClick(event: { detail: number }) {
-      const pointerType = pending.current;
+      const pointerType = pending.current?.pointerType ?? null;
       pending.current = null;
       if (
         dropdownOpensAt(
@@ -111,7 +139,7 @@ function DropdownMenu({
     defaultOpen ?? false,
   );
   const open = openProp ?? uncontrolledOpen;
-  const pending = React.useRef<string | null>(null);
+  const pending = React.useRef<PendingTouch | null>(null);
   const setOpen = React.useCallback(
     (next: boolean) => {
       // 어떤 길로든(키보드·마우스·바깥 누름·고르기) 열리거나 닫히면 미뤄 둔 터치를 지운다. 열린 채 트리거를
@@ -142,6 +170,7 @@ function DropdownMenu({
 
 function DropdownMenuTrigger({
   onPointerDown,
+  onPointerMove,
   onPointerCancel,
   onClick,
   ...props
@@ -161,6 +190,10 @@ function DropdownMenuTrigger({
       onPointerDown={composeHandlers<React.PointerEvent<HTMLButtonElement>>(
         onPointerDown,
         handlers?.onPointerDown,
+      )}
+      onPointerMove={composeHandlers<React.PointerEvent<HTMLButtonElement>>(
+        onPointerMove,
+        handlers?.onPointerMove,
       )}
       onPointerCancel={composeHandlers<React.PointerEvent<HTMLButtonElement>>(
         onPointerCancel,

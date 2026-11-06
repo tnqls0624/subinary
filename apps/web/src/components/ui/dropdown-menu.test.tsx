@@ -76,6 +76,9 @@ type FakeEvent = {
   key: string;
   button: number;
   ctrlKey: boolean;
+  isPrimary: boolean;
+  clientX: number;
+  clientY: number;
   defaultPrevented: boolean;
   preventDefault(): void;
 };
@@ -87,6 +90,9 @@ function fakeEvent(init: Partial<FakeEvent>): FakeEvent {
     key: "",
     button: 0,
     ctrlKey: false,
+    isPrimary: true,
+    clientX: 0,
+    clientY: 0,
     defaultPrevented: false,
     ...init,
     preventDefault() {
@@ -96,7 +102,7 @@ function fakeEvent(init: Partial<FakeEvent>): FakeEvent {
 }
 
 type TriggerHandlers = Record<
-  "onPointerDown" | "onPointerCancel" | "onClick" | "onKeyDown",
+  "onPointerDown" | "onPointerMove" | "onPointerCancel" | "onClick" | "onKeyDown",
   (event: FakeEvent) => void
 >;
 
@@ -165,6 +171,40 @@ describe("DropdownMenuTrigger — 실제 연결(우리 처리 + Radix)", () => {
     trigger.onPointerCancel(fakeEvent({ pointerType: "touch" }));
     trigger.onClick(fakeEvent({ detail: 1 }));
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("손가락이 조금 움직이면 열지 않는다 — 가로 칩 줄처럼 pointercancel이 안 와도 스와이프는 탭이 아니다", () => {
+    const { trigger, onOpenChange } = controlled(false);
+    trigger.onPointerDown(
+      fakeEvent({ pointerType: "touch", clientX: 40, clientY: 10 })
+    );
+    trigger.onPointerMove(
+      fakeEvent({
+        pointerType: "touch",
+        clientX: 40 + 11,
+        clientY: 10,
+        isPrimary: true,
+      })
+    );
+    trigger.onClick(fakeEvent({ detail: 1 }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("손가락이 슬롭 안이면 손을 뗀 click에서 연다 — 살짝 흔들린 탭은 그대로", () => {
+    const { trigger, onOpenChange } = controlled(false);
+    trigger.onPointerDown(
+      fakeEvent({ pointerType: "touch", clientX: 40, clientY: 10 })
+    );
+    trigger.onPointerMove(
+      fakeEvent({
+        pointerType: "touch",
+        clientX: 44,
+        clientY: 12,
+        isPrimary: true,
+      })
+    );
+    trigger.onClick(fakeEvent({ detail: 1 }));
+    expect(onOpenChange.mock.calls).toEqual([[true]]);
   });
 
   it("마우스는 지금처럼 누르는 순간 Radix가 열고, 뒤따르는 click으로 두 번 열지 않는다", () => {

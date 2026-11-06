@@ -89,12 +89,15 @@ export function TransactionFilters({
       {/*
         칩은 가로로 넘긴다. '초기화'는 넘기는 영역 밖 오른쪽에 고정한다 — 조건을 여러 개 골라도 늘 보이고,
         조건이 생길 때 칩이 옆으로 밀리지 않는다.
+        touch-pan-x: 칩이 전부 버튼·드롭다운이라 세로 페이지 스크롤이 가로 제스처를 가로채기 쉽다(SOO-46).
+        브라우저에 이 줄은 가로 팬이라고 알려 손가락으로 넘기게 한다. 드롭다운은 공용 부품이 손을 뗄 때
+        열고, 손가락이 움직이면 열지 않는다.
       */}
       <div className="flex min-w-0 items-center gap-1">
         <div
           role="group"
           aria-label="조건"
-          className="-ml-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pl-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="-ml-1 flex min-w-0 flex-1 touch-pan-x items-center gap-2 overflow-x-auto overscroll-x-contain pl-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {values.excludedOnly ? (
             <FilterClearChip
