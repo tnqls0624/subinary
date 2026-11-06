@@ -178,7 +178,7 @@ export function HousingBrandPanel({
             <Label htmlFor={`${formId}-brand`}>브랜드</Label>
             <select
               id={`${formId}-brand`}
-              className="border-input bg-background h-11 w-full rounded-md border px-3 text-body"
+              className="border-input bg-background h-11 w-full rounded-control border px-3 text-body"
               value="sujain"
               disabled
               aria-readonly="true"
