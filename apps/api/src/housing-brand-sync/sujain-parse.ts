@@ -102,7 +102,8 @@ export function parseSujainRows(rows: SujainRawRow[]): SujainParseResult {
       continue;
     }
 
-    const amountIdx = headerIndex(row.headers, [/예정/u, /금액/u, /분양가/u, /대금/u]);
+    // `/예정(?!일)/` — 납부예정일 같은 날짜 칸에 `/예정/`이 맞지 않게 한다.
+    const amountIdx = headerIndex(row.headers, [/예정(?!일)/u, /금액/u, /분양가/u, /대금/u]);
     const dueIdx = headerIndex(row.headers, [/예정일/u, /납부일/u, /납입일/u, /일자/u]);
     const paidIdx = headerIndex(row.headers, [/납부액/u, /납입액/u, /이미\s*낸/u, /수납/u]);
     const paidDateIdx = headerIndex(row.headers, [/실\s*납/u, /납부\s*완료/u, /수납일/u]);

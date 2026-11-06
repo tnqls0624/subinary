@@ -87,6 +87,18 @@ describe('sujain parse (synthetic only)', () => {
     expect(result.items[0]?.scheduledAmount).toBe('12000000');
   });
 
+  it('does not treat a date header as the amount column when a synthetic amount header follows', () => {
+    const result = parseSujainRows([
+      {
+        sourcePage: 'payment',
+        headers: ['구분', '납부예정일', '예정금액'],
+        cells: ['계약금', '2026-06-01', '12,000,000'],
+      },
+    ]);
+    expect(result.items[0]?.scheduledAmount).toBe('12000000');
+    expect(result.items[0]?.dueDate).toBe('2026-06-01');
+  });
+
   it('shows only changed fields for an existing matched record', () => {
     const parsed = parseSujainRows([
       {
