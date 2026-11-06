@@ -58,9 +58,23 @@ function detectKind(text: string, page: 'payment' | 'unit-items'): ManualHousing
   return null;
 }
 
+/** 여러 칸이 맞으면 패턴 목록에서 더 앞(더 구체적)인 쪽을 고른다. */
 function headerIndex(headers: string[] | undefined, patterns: RegExp[]): number {
   if (!headers) return -1;
-  return headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)));
+  let bestHeader = -1;
+  let bestRank = patterns.length;
+  for (let i = 0; i < headers.length; i += 1) {
+    const header = headers[i]!;
+    for (let rank = 0; rank < patterns.length; rank += 1) {
+      if (!patterns[rank]!.test(header)) continue;
+      if (rank < bestRank) {
+        bestRank = rank;
+        bestHeader = i;
+      }
+      break;
+    }
+  }
+  return bestHeader;
 }
 
 function cellAt(cells: string[], index: number): string {
@@ -151,13 +165,23 @@ export function parseSujainRows(rows: SujainRawRow[]): SujainParseResult {
         const name = cellAt(row.cells, nameIdx);
         label = name ? name.slice(0, 100) : null;
       } else {
-        const candidate = row.cells.find((cell) => cell.trim() && digitsOnly(cell) === null)?.trim() ?? '';
-        label = candidate ? candidate.slice(0, 100) : null;
+        // 헤더로 열을 알 수 있을 때만 채운다. 첫 비숫자 칸을 이름으로 추정하지 않는다.
+        label = null;
       }
       if (!label && scheduledAmount === null) {
-        note('label', '옵션 이름과 금액을 모두 읽지 못했어요.');
+        note(
+          'label',
+          nameIdx < 0
+            ? '옵션 이름 칸 이름을 확인하지 못했어요.'
+            : '옵션 이름과 금액을 모두 읽지 못했어요.',
+        );
       } else if (!label) {
-        note('label', '옵션 이름 칸을 확인하지 못했어요. 합계만 둘 수 있어요.');
+        note(
+          'label',
+          nameIdx < 0
+            ? '옵션 이름 칸 이름을 확인하지 못했어요.'
+            : '옵션 이름 칸을 확인하지 못했어요. 합계만 둘 수 있어요.',
+        );
       }
     }
 

@@ -62,6 +62,31 @@ describe('sujain parse (synthetic only)', () => {
     expect(result.items[0]?.unreadFields.some((field) => field.field === 'scheduledAmount')).toBe(true);
   });
 
+  it('does not invent an option label from the first non-numeric cell when name headers are missing', () => {
+    const result = parseSujainRows([
+      {
+        sourcePage: 'unit-items',
+        headers: ['비고', '금액'],
+        cells: ['합성 추정 금지 품목', '900,000'],
+      },
+    ]);
+    expect(result.items[0]?.label).toBeNull();
+    expect(result.items[0]?.scheduledAmount).toBe('900000');
+    expect(result.items[0]?.unreadFields.some((field) => field.field === 'label')).toBe(true);
+    expect(result.unreadReasons.some((reason) => /옵션 이름/.test(reason))).toBe(true);
+  });
+
+  it('prefers the more specific amount header when several synthetic headers match', () => {
+    const result = parseSujainRows([
+      {
+        sourcePage: 'payment',
+        headers: ['구분', '금액', '예정금액', '납부예정일'],
+        cells: ['계약금', '1', '12,000,000', '2026-06-01'],
+      },
+    ]);
+    expect(result.items[0]?.scheduledAmount).toBe('12000000');
+  });
+
   it('shows only changed fields for an existing matched record', () => {
     const parsed = parseSujainRows([
       {

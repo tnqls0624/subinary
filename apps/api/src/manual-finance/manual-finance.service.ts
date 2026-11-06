@@ -401,27 +401,27 @@ export class ManualFinanceService {
   ) {
     const amountUnchanged = previous != null && previous.amount === payment.amount;
     const paidUnchanged = previous != null && previous.paidAmount === payment.paidAmount;
-    // 클라이언트가 출처를 빼먹어도, 금액이 같으면 신축 조회·사람 확인 출처를 직접 입력으로 덮지 않는다.
+    // 금액이 그대로면 클라이언트가 manual·새 시각을 보내도 이전 출처·기준 시각을 유지한다.
     const amountSource = payment.amount === null
       ? null
-      : (payment.amountSource
-        ?? (amountUnchanged ? previous!.amountSource : null)
-        ?? 'manual');
+      : (amountUnchanged
+        ? (previous!.amountSource ?? payment.amountSource ?? 'manual')
+        : (payment.amountSource ?? 'manual'));
     const amountAsOfAt = payment.amount === null
       ? null
-      : (payment.amountAsOfAt
-        ? new Date(payment.amountAsOfAt)
-        : (amountUnchanged && previous!.amountAsOfAt ? previous!.amountAsOfAt : asOf));
+      : (amountUnchanged && previous!.amountAsOfAt
+        ? previous!.amountAsOfAt
+        : (payment.amountAsOfAt ? new Date(payment.amountAsOfAt) : asOf));
     const paidAmountSource = payment.paidAmount === null
       ? null
-      : (payment.paidAmountSource
-        ?? (paidUnchanged ? previous!.paidAmountSource : null)
-        ?? 'manual');
+      : (paidUnchanged
+        ? (previous!.paidAmountSource ?? payment.paidAmountSource ?? 'manual')
+        : (payment.paidAmountSource ?? 'manual'));
     const paidAmountAsOfAt = payment.paidAmount === null
       ? null
-      : (payment.paidAmountAsOfAt
-        ? new Date(payment.paidAmountAsOfAt)
-        : (paidUnchanged && previous!.paidAmountAsOfAt ? previous!.paidAmountAsOfAt : asOf));
+      : (paidUnchanged && previous!.paidAmountAsOfAt
+        ? previous!.paidAmountAsOfAt
+        : (payment.paidAmountAsOfAt ? new Date(payment.paidAmountAsOfAt) : asOf));
     return {
       id: payment.id,
       planId,

@@ -85,6 +85,8 @@ function paymentMetaCaption(payment: {
   paidAmount: string;
   amountSource: ManualHousingPayment["amountSource"] | null;
   amountAsOfSeoul: string | null;
+  paidAmountSource: ManualHousingPayment["paidAmountSource"] | null;
+  paidAmountAsOfSeoul: string | null;
   remainingAmount: string | null;
   status: ManualHousingPayment["status"];
 }): string {
@@ -100,9 +102,16 @@ function paymentMetaCaption(payment: {
     remaining = null;
     status = "unknown";
   }
+  const paidMeta = paid !== null
+    ? [
+        `낸 금액 출처 ${paymentSourceLabel(payment.paidAmountSource)}`,
+        payment.paidAmountAsOfSeoul || null,
+      ].filter(Boolean).join(" · ")
+    : null;
   return [
     `출처 ${paymentSourceLabel(payment.amountSource)}`,
     payment.amountAsOfSeoul || null,
+    paidMeta,
     `남은 금액 ${remaining != null ? displayManualKrw(remaining) : "미확인"}`,
     PAYMENT_STATUS_LABEL[status ?? "unknown"],
   ].filter(Boolean).join(" · ");
@@ -159,6 +168,13 @@ function PlanDetailSheet({
                 <span className="text-caption text-muted-foreground mt-1 block">
                   출처 {paymentSourceLabel(payment.amountSource)}
                   {payment.amountAsOfSeoul ? ` · ${payment.amountAsOfSeoul}` : ""}
+                  {payment.paidAmount != null ? (
+                    <>
+                      {" · "}
+                      낸 금액 출처 {paymentSourceLabel(payment.paidAmountSource)}
+                      {payment.paidAmountAsOfSeoul ? ` · ${payment.paidAmountAsOfSeoul}` : ""}
+                    </>
+                  ) : null}
                   {" · "}
                   남은 금액 {payment.remainingAmount != null ? displayManualKrw(payment.remainingAmount) : "미확인"}
                   {" · "}
