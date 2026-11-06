@@ -108,15 +108,14 @@ export function parseSujainRows(rows: SujainRawRow[]): SujainParseResult {
       if (scheduledAmount === null && cellAt(row.cells, amountIdx)) {
         note('scheduledAmount', '예정 금액 칸을 숫자로 읽지 못했어요.');
       }
-    } else if (row.sourcePage === 'payment') {
-      // 헤더가 없으면 금액처럼 보이는 첫 칸을 시도하되, 확신이 없으면 비운다.
-      const moneyLike = row.cells.map(digitsOnly).find((value) => value !== null) ?? null;
-      if (moneyLike === null) note('scheduledAmount', '분양대금조회 표에서 예정 금액 칸 이름을 확인하지 못했어요.');
-      else scheduledAmount = moneyLike;
     } else {
-      const moneyLike = row.cells.map(digitsOnly).find((value) => value !== null) ?? null;
-      if (moneyLike === null) note('scheduledAmount', '세대 내 설치 품목에서 금액 칸을 확인하지 못했어요.');
-      else scheduledAmount = moneyLike;
+      // 헤더로 열을 알 수 있을 때만 채운다. 숫자처럼 보이는 칸을 추정하지 않는다.
+      note(
+        'scheduledAmount',
+        row.sourcePage === 'unit-items'
+          ? '세대 내 설치 품목에서 금액 칸 이름을 확인하지 못했어요.'
+          : '분양대금조회 표에서 예정 금액 칸 이름을 확인하지 못했어요.',
+      );
     }
 
     if (dueIdx >= 0) {

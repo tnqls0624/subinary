@@ -6,10 +6,12 @@ import {
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  housingBrandApplyRequestSchema, housingBrandConnectRequestSchema, housingBrandSyncRequestSchema,
+  housingBrandApplyRequestSchema, housingBrandConnectRequestSchema, housingBrandStoredPreviewSchema,
+  housingBrandSyncRequestSchema,
   type HousingBrandApplyRequest, type HousingBrandConnectRequest, type HousingBrandConnectResponse,
-  type HousingBrandConnection, type HousingBrandFetchedItem, type HousingBrandSyncPreview,
-  type HousingBrandSyncRequest, type ManualHousingPayment, type ManualHousingPlanResponse,
+  type HousingBrandConnection, type HousingBrandFetchedItem, type HousingBrandStoredPreview,
+  type HousingBrandSyncPreview, type HousingBrandSyncRequest, type ManualHousingPayment,
+  type ManualHousingPlanResponse,
 } from '@family/contracts';
 import { schema, type Db } from '@family/database';
 import { DB } from '../database/database.constants';
@@ -356,6 +358,10 @@ export class HousingBrandSyncService {
       })));
 
       const fetchedAt = new Date(capture.capturedAt);
+      const storedPreview: HousingBrandStoredPreview = {
+        fetchedAt: fetchedAt.toISOString(),
+        items: matched,
+      };
       const connection = await this.transaction(async (tx) => {
         const status = matched.length > 0 ? 'needs_confirmation' as const : 'connected' as const;
         const [row] = await tx.update(schema.housingBrandConnections).set({
@@ -365,6 +371,7 @@ export class HousingBrandSyncService {
             : null,
           lastFetchAt: fetchedAt,
           lastSuccessAt: fetchedAt,
+          lastPreview: storedPreview,
           updatedAt: new Date(),
           version: prepared.connection.version + 1,
         }).where(and(
@@ -376,7 +383,7 @@ export class HousingBrandSyncService {
       });
 
       return {
-        fetchedAt: fetchedAt.toISOString(),
+        fetchedAt: storedPreview.fetchedAt,
         fetchedAtSeoul: formatSeoulMinute(fetchedAt),
         source: 'sujain_fetch',
         items: matched,
@@ -413,7 +420,7 @@ export class HousingBrandSyncService {
     const query = parse(householdPlanQuery, { householdId: input.householdId, planId: planIdRaw });
     const householdId = query.householdId.toLowerCase();
     const planId = query.planId.toLowerCase();
-    const itemByKey = new Map(input.items.map((item) => [item.key, item]));
+    const selectedKeys = [...new Set(input.selections.map((item) => item.key))];
 
     return this.transaction(async (tx) => {
       await this.member(tx, householdId, userId, true);
@@ -428,28 +435,31 @@ export class HousingBrandSyncService {
       if (!connection) throw new BadRequestException(publicErrorMessage('not_connected'));
       if (connection.version !== input.expectedConnectionVersion) throw stale();
 
+      const preview = housingBrandStoredPreviewSchema.safeParse(connection.lastPreview);
+      if (!preview.success || preview.data.items.length === 0) {
+        throw new BadRequestException('확인할 미리보기가 없어요. 확인이나 새로고침을 다시 눌러 주세요.');
+      }
+      const itemByKey = new Map(preview.data.items.map((item) => [item.key, item]));
+
       const existing = await tx.select().from(schema.manualHousingPayments)
         .where(eq(schema.manualHousingPayments.planId, planId))
         .orderBy(asc(schema.manualHousingPayments.position), asc(schema.manualHousingPayments.id));
-      const byId = new Map(existing.map((row) => [row.id, row]));
-      const asOf = new Date(input.fetchedAt);
+      const asOf = new Date(preview.data.fetchedAt);
       const nextRows = existing.map((row) => ({ ...row }));
       let position = existing.length;
 
-      for (const selection of input.selections) {
-        const fetched = itemByKey.get(selection.key);
+      for (const key of selectedKeys) {
+        const fetched = itemByKey.get(key);
         if (!fetched) throw new BadRequestException('확인 목록에서 고른 항목을 찾지 못했어요.');
+        const fields = applyFieldsFromPreview(fetched);
+        if (fields.length === 0) continue;
 
-        if (selection.targetPaymentId) {
-          const index = nextRows.findIndex((row) => row.id === selection.targetPaymentId);
+        if (fetched.matchedPaymentId) {
+          const index = nextRows.findIndex((row) => row.id === fetched.matchedPaymentId);
           if (index < 0) throw new BadRequestException('반영할 납부 일정을 찾지 못했어요.');
-          const current = nextRows[index]!;
-          nextRows[index] = applySelection(current, fetched, selection.applyFields, asOf);
+          nextRows[index] = applySelection(nextRows[index]!, fetched, fields, asOf);
         } else {
-          if (fetched.matchedPaymentId) {
-            throw new BadRequestException('이미 있는 일정은 해당 줄을 골라 반영해 주세요.');
-          }
-          const created = applySelection({
+          nextRows.push(applySelection({
             id: randomUUID(),
             planId,
             position: position++,
@@ -464,8 +474,7 @@ export class HousingBrandSyncService {
             paidAmountSource: null,
             paidAmountAsOfAt: null,
             paidDate: null,
-          }, fetched, selection.applyFields, asOf);
-          nextRows.push(created);
+          }, fetched, fields, asOf));
         }
       }
 
@@ -491,6 +500,7 @@ export class HousingBrandSyncService {
       const [updatedConnection] = await tx.update(schema.housingBrandConnections).set({
         status: 'connected',
         statusMessage: null,
+        lastPreview: null,
         version: connection.version + 1,
         updatedAt: new Date(),
       }).where(and(
@@ -504,7 +514,6 @@ export class HousingBrandSyncService {
         .orderBy(asc(schema.manualHousingPayments.position), asc(schema.manualHousingPayments.id)))
         .map(toPayment);
 
-      void byId;
       return {
         item: {
           id: updatedPlan.id,
@@ -527,17 +536,35 @@ export class HousingBrandSyncService {
   }
 }
 
+type ApplyField = 'scheduledAmount' | 'dueDate' | 'paidAmount' | 'paidDate' | 'label' | 'installment';
+
+function applyFieldsFromPreview(fetched: HousingBrandFetchedItem): ApplyField[] {
+  const allowed = new Set<ApplyField>([
+    'scheduledAmount', 'dueDate', 'paidAmount', 'paidDate', 'label', 'installment',
+  ]);
+  const fromChanged = fetched.changedFields.filter((field): field is ApplyField => allowed.has(field as ApplyField));
+  if (fromChanged.length > 0) return fromChanged;
+  const fallback: ApplyField[] = [];
+  if (fetched.scheduledAmount !== null) fallback.push('scheduledAmount');
+  if (fetched.dueDate !== null) fallback.push('dueDate');
+  if (fetched.paidAmount !== null) fallback.push('paidAmount');
+  if (fetched.actualPaidDate !== null || fetched.paidDate !== null) fallback.push('paidDate');
+  if (fetched.label !== null) fallback.push('label');
+  if (fetched.installment !== null) fallback.push('installment');
+  return fallback;
+}
+
 function applySelection(
   current: PaymentRow,
   fetched: HousingBrandFetchedItem,
-  fields: HousingBrandApplyRequest['selections'][number]['applyFields'],
+  fields: ApplyField[],
   asOf: Date,
 ): PaymentRow {
   const next = { ...current, kind: fetched.kind };
   for (const field of fields) {
     if (field === 'scheduledAmount') {
       if (fetched.scheduledAmount === null) continue;
-      // 사람이 적어 둔 값이 있으면 확인 목록에서 고른 뒤에만 덮는다(이미 selection에 포함됨).
+      // 사람이 적어 둔 값이 있어도 고른 뒤에만 덮는다.
       next.amount = fetched.scheduledAmount;
       next.amountSource = 'confirmed';
       next.amountAsOfAt = asOf;

@@ -23,8 +23,10 @@ import {
 import { useHouseholdMembers } from "@/lib/queries";
 import {
   PAYMENT_LABELS,
+  PAYMENT_STATUS_LABEL,
   displayManualKrw,
   paymentDraft,
+  paymentSourceLabel,
   planDraft,
   planRequest,
 } from "./model";
@@ -78,6 +80,34 @@ function paymentCaption(payment: ManualHousingPayment): string {
   return `${due} · ${paid}`;
 }
 
+function paymentMetaCaption(payment: {
+  amount: string;
+  paidAmount: string;
+  amountSource: ManualHousingPayment["amountSource"] | null;
+  amountAsOfSeoul: string | null;
+  remainingAmount: string | null;
+  status: ManualHousingPayment["status"];
+}): string {
+  const amount = payment.amount.trim() === "" ? null : payment.amount.replaceAll(",", "");
+  const paid = payment.paidAmount.trim() === "" ? null : payment.paidAmount.replaceAll(",", "");
+  let remaining = payment.remainingAmount;
+  let status = payment.status ?? "unknown";
+  if (amount !== null && paid !== null && /^(0|[1-9]\d*)$/.test(amount) && /^(0|[1-9]\d*)$/.test(paid)) {
+    const left = BigInt(amount) - BigInt(paid);
+    remaining = left < 0n ? "0" : left.toString();
+    status = left <= 0n ? "paid" : BigInt(paid) > 0n ? "partial" : "unpaid";
+  } else if (amount === null || paid === null) {
+    remaining = null;
+    status = "unknown";
+  }
+  return [
+    `출처 ${paymentSourceLabel(payment.amountSource)}`,
+    payment.amountAsOfSeoul || null,
+    `남은 금액 ${remaining != null ? displayManualKrw(remaining) : "미확인"}`,
+    PAYMENT_STATUS_LABEL[status ?? "unknown"],
+  ].filter(Boolean).join(" · ");
+}
+
 function PlanDetailSheet({
   read,
   onClose,
@@ -126,6 +156,14 @@ function PlanDetailSheet({
                 muted={payment.amount === null}
               >
                 {paymentCaption(payment)}
+                <span className="text-caption text-muted-foreground mt-1 block">
+                  출처 {paymentSourceLabel(payment.amountSource)}
+                  {payment.amountAsOfSeoul ? ` · ${payment.amountAsOfSeoul}` : ""}
+                  {" · "}
+                  남은 금액 {payment.remainingAmount != null ? displayManualKrw(payment.remainingAmount) : "미확인"}
+                  {" · "}
+                  {PAYMENT_STATUS_LABEL[payment.status ?? "unknown"]}
+                </span>
               </FieldRow>
             ))}
           </FieldList>
@@ -211,9 +249,22 @@ function PlanForm({
   const updatePayment = (id: string, key: string, value: string) =>
     editor.setDraft((old) => ({
       ...old,
-      payments: old.payments.map((payment) =>
-        payment.id === id ? { ...payment, [key]: value } : payment
-      ),
+      payments: old.payments.map((payment) => {
+        if (payment.id !== id) return payment;
+        const next = { ...payment, [key]: value };
+        // 금액을 고치면 출처를 비워 서버가 직접 입력으로 두거나, 값이 같으면 기존 출처를 유지하게 한다.
+        if (key === "amount") {
+          next.amountSource = null;
+          next.amountAsOfAt = null;
+          next.amountAsOfSeoul = null;
+        }
+        if (key === "paidAmount") {
+          next.paidAmountSource = null;
+          next.paidAmountAsOfAt = null;
+          next.paidAmountAsOfSeoul = null;
+        }
+        return next;
+      }),
     }));
   const invalid = planFieldError(editor.invalid, editor.draft.payments);
   // 칸을 모르는 검사 오류와 서버 오류는 창 아래(저장 버튼 위) 한 줄로 남는다.
@@ -395,6 +446,9 @@ function PlanForm({
                 <span className="min-w-0">
                   <span className="text-body block font-semibold">납부 일정 {index + 1} · {PAYMENT_LABELS[payment.kind]}{payment.installment ? ` ${payment.installment}회차` : ""}</span>
                   <span className="text-caption text-muted-foreground mt-1 block">{payment.dueDate ? `예정일 ${formatMonthDay(payment.dueDate)}` : "예정일 미입력"}</span>
+                  <span className="text-caption text-muted-foreground mt-1 block">
+                    {paymentMetaCaption(payment)}
+                  </span>
                 </span>
                 <ChevronDown className="text-muted-foreground size-5 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
               </summary>

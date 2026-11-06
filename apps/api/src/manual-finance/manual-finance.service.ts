@@ -392,32 +392,63 @@ export class ManualFinanceService {
     return row ? toBrandConnection(row, userId) : null;
   }
 
-  private paymentInsert(payment: ManualHousingPaymentInput, planId: string, position: number, asOf = new Date()) {
-    const amountSource = payment.amount === null ? null : (payment.amountSource ?? 'manual');
-    const paidAmountSource = payment.paidAmount === null ? null : (payment.paidAmountSource ?? 'manual');
+  private paymentInsert(
+    payment: ManualHousingPaymentInput,
+    planId: string,
+    position: number,
+    previous: PaymentRow | undefined,
+    asOf = new Date(),
+  ) {
+    const amountUnchanged = previous != null && previous.amount === payment.amount;
+    const paidUnchanged = previous != null && previous.paidAmount === payment.paidAmount;
+    // 클라이언트가 출처를 빼먹어도, 금액이 같으면 신축 조회·사람 확인 출처를 직접 입력으로 덮지 않는다.
+    const amountSource = payment.amount === null
+      ? null
+      : (payment.amountSource
+        ?? (amountUnchanged ? previous!.amountSource : null)
+        ?? 'manual');
+    const amountAsOfAt = payment.amount === null
+      ? null
+      : (payment.amountAsOfAt
+        ? new Date(payment.amountAsOfAt)
+        : (amountUnchanged && previous!.amountAsOfAt ? previous!.amountAsOfAt : asOf));
+    const paidAmountSource = payment.paidAmount === null
+      ? null
+      : (payment.paidAmountSource
+        ?? (paidUnchanged ? previous!.paidAmountSource : null)
+        ?? 'manual');
+    const paidAmountAsOfAt = payment.paidAmount === null
+      ? null
+      : (payment.paidAmountAsOfAt
+        ? new Date(payment.paidAmountAsOfAt)
+        : (paidUnchanged && previous!.paidAmountAsOfAt ? previous!.paidAmountAsOfAt : asOf));
     return {
       id: payment.id,
       planId,
       position,
       kind: payment.kind,
       installment: payment.installment,
-      label: payment.label ?? null,
+      label: payment.label ?? previous?.label ?? null,
       dueDate: payment.dueDate,
       amount: payment.amount,
       amountSource,
-      amountAsOfAt: payment.amount === null ? null : (payment.amountAsOfAt ? new Date(payment.amountAsOfAt) : asOf),
+      amountAsOfAt,
       paidAmount: payment.paidAmount,
       paidAmountSource,
-      paidAmountAsOfAt: payment.paidAmount === null ? null : (payment.paidAmountAsOfAt ? new Date(payment.paidAmountAsOfAt) : asOf),
+      paidAmountAsOfAt,
       paidDate: payment.paidDate,
     };
   }
 
   private async replacePayments(tx: Executor, planId: string, payments: ManualHousingPaymentInput[], replacing = false): Promise<ManualHousingPayment[]> {
+    const previousRows = replacing
+      ? await tx.select().from(schema.manualHousingPayments).where(eq(schema.manualHousingPayments.planId, planId))
+      : [];
+    const previousById = new Map(previousRows.map((row) => [row.id, row]));
     if (replacing) await tx.delete(schema.manualHousingPayments).where(eq(schema.manualHousingPayments.planId, planId));
     if (payments.length === 0) return [];
     const rows = await tx.insert(schema.manualHousingPayments).values(
-      payments.map((payment, position) => this.paymentInsert(payment, planId, position)),
+      payments.map((payment, position) => this.paymentInsert(payment, planId, position, previousById.get(payment.id))),
     ).returning();
     return rows.sort((a, b) => a.position - b.position).map(toPayment);
   }

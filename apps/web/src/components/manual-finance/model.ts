@@ -1,4 +1,5 @@
 import {
+  HOUSING_VALUE_SOURCE_LABEL,
   manualAssetCreateRequestSchema,
   manualHousingPlanCreateRequestSchema,
   type ManualAsset,
@@ -10,6 +11,7 @@ import {
   type ManualHousingPaymentKind,
   type ManualHousingPlan,
   type ManualHousingPlanCreateRequest,
+  type ManualHousingValueSource,
   type ManualSavingsPlan,
 } from "@family/contracts";
 
@@ -31,6 +33,14 @@ export const PAYMENT_LABELS: Record<ManualHousingPaymentKind, string> = {
   balance: "잔금",
   option: "옵션",
 };
+export const PAYMENT_STATUS_LABEL = {
+  unpaid: "미납",
+  partial: "일부 납부",
+  paid: "완납",
+  unknown: "상태 미확인",
+} as const;
+export const paymentSourceLabel = (source: ManualHousingValueSource | null | undefined) =>
+  source ? HOUSING_VALUE_SOURCE_LABEL[source] : HOUSING_VALUE_SOURCE_LABEL.manual;
 export const scopeLabel = (scope: ManualFinanceScope) =>
   scope === "household" ? "가족 공유" : "나만 보기";
 export const visibilityLabel = (visibility: ManualFinanceVisibility) =>
@@ -162,6 +172,15 @@ interface PaymentDraft {
   amount: string;
   paidAmount: string;
   paidDate: string;
+  label: string;
+  amountSource: ManualHousingValueSource | null;
+  amountAsOfAt: string | null;
+  amountAsOfSeoul: string | null;
+  paidAmountSource: ManualHousingValueSource | null;
+  paidAmountAsOfAt: string | null;
+  paidAmountAsOfSeoul: string | null;
+  remainingAmount: string | null;
+  status: ManualHousingPayment["status"];
 }
 interface PlanDraft {
   label: string;
@@ -184,6 +203,15 @@ export function paymentDraft(
         amount: item.amount ?? "",
         paidAmount: item.paidAmount ?? "",
         paidDate: item.paidDate ?? "",
+        label: item.label ?? "",
+        amountSource: item.amountSource ?? null,
+        amountAsOfAt: item.amountAsOfAt ?? null,
+        amountAsOfSeoul: item.amountAsOfSeoul ?? null,
+        paidAmountSource: item.paidAmountSource ?? null,
+        paidAmountAsOfAt: item.paidAmountAsOfAt ?? null,
+        paidAmountAsOfSeoul: item.paidAmountAsOfSeoul ?? null,
+        remainingAmount: item.remainingAmount ?? null,
+        status: item.status ?? "unknown",
       }
     : {
         id,
@@ -193,6 +221,15 @@ export function paymentDraft(
         amount: "",
         paidAmount: "",
         paidDate: "",
+        label: "",
+        amountSource: null,
+        amountAsOfAt: null,
+        amountAsOfSeoul: null,
+        paidAmountSource: null,
+        paidAmountAsOfAt: null,
+        paidAmountAsOfSeoul: null,
+        remainingAmount: null,
+        status: "unknown",
       };
 }
 export function planDraft(
@@ -254,15 +291,33 @@ export function planRequest(
     occupancyYear: draft.occupancyYear ? Number(draft.occupancyYear) : null,
     contractStage: nullableText(draft.contractStage),
     fundingNote: nullableText(draft.fundingNote),
-    payments: draft.payments.map((p) => ({
-      id: p.id,
-      kind: p.kind,
-      installment: p.installment ? Number(p.installment) : null,
-      dueDate: p.dueDate || null,
-      amount: parseManualKrwInput(p.amount),
-      paidAmount: parseManualKrwInput(p.paidAmount),
-      paidDate: p.paidDate || null,
-    })),
+    payments: draft.payments.map((p) => {
+      const amount = parseManualKrwInput(p.amount);
+      const paidAmount = parseManualKrwInput(p.paidAmount);
+      const amountEdited = p.amountSource === null && amount !== null;
+      const paidEdited = p.paidAmountSource === null && paidAmount !== null;
+      return {
+        id: p.id,
+        kind: p.kind,
+        installment: p.installment ? Number(p.installment) : null,
+        label: nullableText(p.label),
+        dueDate: p.dueDate || null,
+        amount,
+        paidAmount,
+        paidDate: p.paidDate || null,
+        // 초안에 출처가 있으면 그대로 보낸다. 금액을 고쳐 출처를 비웠으면 직접 입력.
+        amountSource: amount === null ? null : (p.amountSource ?? (amountEdited ? "manual" : null)),
+        amountAsOfAt: amount === null
+          ? null
+          : (p.amountAsOfAt ?? (amountEdited ? new Date().toISOString() : null)),
+        paidAmountSource: paidAmount === null
+          ? null
+          : (p.paidAmountSource ?? (paidEdited ? "manual" : null)),
+        paidAmountAsOfAt: paidAmount === null
+          ? null
+          : (p.paidAmountAsOfAt ?? (paidEdited ? new Date().toISOString() : null)),
+      };
+    }),
   });
   if (!result.success)
     return {

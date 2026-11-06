@@ -88,6 +88,15 @@ describe("manual recorded values", () => {
       amount: "",
       paidAmount: "",
       paidDate: "",
+      label: "",
+      amountSource: null,
+      amountAsOfAt: null,
+      amountAsOfSeoul: null,
+      paidAmountSource: null,
+      paidAmountAsOfAt: null,
+      paidAmountAsOfSeoul: null,
+      remainingAmount: null,
+      status: "unknown",
     });
   });
   it("preserves existing private asset and plan visibility through an edit request", () => {

@@ -4883,6 +4883,8 @@ export const housingBrandConnections = pgTable('housing_brand_connections', {
   version: integer('version').notNull().default(1),
   lastFetchAt: timestamp('last_fetch_at', { withTimezone: true }),
   lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+  /** 확인/새로고침 미리보기. 반영 시 클라이언트가 보낸 금액·날짜가 아니라 이 값을 쓴다. */
+  lastPreview: jsonb('last_preview').$type<{ fetchedAt: string; items: unknown[] }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),

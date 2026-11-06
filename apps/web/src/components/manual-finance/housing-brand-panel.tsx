@@ -119,21 +119,7 @@ export function HousingBrandPanel({
     if (!planId || !connection || !preview || !canEdit || busy || planVersion == null) return;
     const selections = preview.items
       .filter((item) => selected[item.key])
-      .map((item) => ({
-        key: item.key,
-        targetPaymentId: item.matchedPaymentId,
-        applyFields: (item.changedFields.length
-          ? item.changedFields
-          : ["scheduledAmount", "dueDate", "paidAmount", "paidDate", "label", "installment"]
-        ).filter((field): field is
-          | "scheduledAmount"
-          | "dueDate"
-          | "paidAmount"
-          | "paidDate"
-          | "label"
-          | "installment" => field !== "kind" && field !== "actualPaidDate"),
-      }))
-      .filter((item) => item.applyFields.length > 0);
+      .map((item) => ({ key: item.key }));
     if (selections.length === 0) {
       setError("반영할 항목을 골라 주세요.");
       return;
@@ -146,9 +132,7 @@ export function HousingBrandPanel({
           householdId,
           expectedPlanVersion: planVersion,
           expectedConnectionVersion: connection.version,
-          fetchedAt: preview.fetchedAt,
           selections,
-          items: preview.items,
         })
       );
       setPreview(null);

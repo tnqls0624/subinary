@@ -955,9 +955,9 @@ describe('0075 — 가족 원장 MVP 1차', () => {
   );
   const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
 
-  it('journal 마지막 항목이다', () => {
-    assert.equal(journal.entries.at(-1)?.tag, '0075_family_ledger_mvp');
-    assert.equal(journal.entries.at(-1)?.idx, 75);
+  it('journal에 등록되어 있다', () => {
+    const entry = journal.entries.find((item) => item.tag === '0075_family_ledger_mvp');
+    assert.equal(entry?.idx, 75);
   });
 
   it('추가형이다 — DROP/DELETE/TRUNCATE/기존 테이블 UPDATE가 없다', () => {
@@ -1007,5 +1007,50 @@ describe('0075 — 가족 원장 MVP 1차', () => {
   it('card_transactions·manual_assets를 바꾸지 않는다', () => {
     assert.ok(!/card_transactions/i.test(sqlBody));
     assert.ok(!/manual_assets/i.test(sqlBody));
+  });
+});
+
+describe('0076 — 수자인 신축 주택 납부 조회 연결', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0076_housing_brand_sync.sql'),
+    'utf8',
+  );
+  const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
+
+  it('journal 마지막 항목이다', () => {
+    assert.equal(journal.entries.at(-1)?.tag, '0076_housing_brand_sync');
+    assert.equal(journal.entries.at(-1)?.idx, 76);
+  });
+
+  it('추가형이다 — DROP TABLE/DELETE/TRUNCATE가 없다', () => {
+    for (const forbidden of ['DROP TABLE', 'DELETE FROM', 'TRUNCATE']) {
+      assert.ok(
+        !new RegExp(`\\b${forbidden.replace(' ', '\\s+')}\\b`, 'i').test(sqlBody),
+        `파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('housing_brand_connections와 납부 출처 칸을 만든다', () => {
+    assert.match(sqlBody, /CREATE TABLE housing_brand_connections/);
+    assert.match(sqlBody, /ADD COLUMN label text/);
+    assert.match(sqlBody, /ADD COLUMN amount_source text/);
+    assert.match(sqlBody, /last_preview jsonb/);
+    assert.ok(schemaText.includes('housingBrandConnections'));
+    assert.ok(schemaText.includes("amountSource: text('amount_source')"));
+    assert.ok(schemaText.includes("lastPreview: jsonb('last_preview')"));
+  });
+
+  it('수자인만 허용하고 평문 자격증명 컬럼이 없다', () => {
+    assert.match(sqlBody, /brand = 'sujain'/);
+    assert.ok(!/\blogin_id\b/i.test(sqlBody));
+    assert.ok(!/\bpassword\b/i.test(sqlBody));
+    assert.match(sqlBody, /credentials jsonb/);
+  });
+
+  it('finance_connections·bank_connections를 바꾸지 않는다', () => {
+    assert.ok(!/ALTER TABLE finance_connections/i.test(sqlBody));
+    assert.ok(!/ALTER TABLE bank_connections/i.test(sqlBody));
   });
 });

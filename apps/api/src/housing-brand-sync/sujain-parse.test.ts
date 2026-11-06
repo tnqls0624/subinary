@@ -50,6 +50,18 @@ describe('sujain parse (synthetic only)', () => {
     expect(result.unreadReasons[0]).toMatch(/예정 금액|칸/);
   });
 
+  it('does not invent a scheduled amount from a numeric-looking cell when headers are missing', () => {
+    const result = parseSujainRows([
+      {
+        sourcePage: 'payment',
+        cells: ['계약금', '12,000,000', '2026-05-01'],
+      },
+    ]);
+    expect(result.items[0]?.scheduledAmount).toBeNull();
+    expect(result.items[0]?.dueDate).toBeNull();
+    expect(result.items[0]?.unreadFields.some((field) => field.field === 'scheduledAmount')).toBe(true);
+  });
+
   it('shows only changed fields for an existing matched record', () => {
     const parsed = parseSujainRows([
       {

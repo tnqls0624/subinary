@@ -99,13 +99,9 @@ export const housingBrandSyncRequestSchema = z.object({
 }).strict();
 export type HousingBrandSyncRequest = z.infer<typeof housingBrandSyncRequestSchema>;
 
+/** 확인 목록에서 고른 키만 보낸다. 금액·날짜는 서버에 저장한 미리보기를 쓴다. */
 export const housingBrandApplySelectionSchema = z.object({
   key: z.string().uuid(),
-  /** 기존 일정을 갱신할 때. 새 항목이면 null이고 서버가 id를 만든다. */
-  targetPaymentId: z.string().uuid().nullable(),
-  applyFields: z.array(z.enum([
-    'scheduledAmount', 'dueDate', 'paidAmount', 'paidDate', 'label', 'installment',
-  ])).min(1).max(6),
 }).strict();
 export type HousingBrandApplySelection = z.infer<typeof housingBrandApplySelectionSchema>;
 
@@ -113,12 +109,15 @@ export const housingBrandApplyRequestSchema = z.object({
   householdId: z.string().uuid(),
   expectedPlanVersion: z.number().int().positive().max(2147483647),
   expectedConnectionVersion: z.number().int().positive().max(2147483647),
-  fetchedAt: z.string().datetime({ offset: true }),
   selections: z.array(housingBrandApplySelectionSchema).min(1).max(100),
-  /** 확인 직전 미리보기 항목. 서버가 다시 조회하지 않고 고른 항목만 반영한다. */
-  items: z.array(housingBrandFetchedItemSchema).min(1).max(100),
 }).strict();
 export type HousingBrandApplyRequest = z.infer<typeof housingBrandApplyRequestSchema>;
+
+export const housingBrandStoredPreviewSchema = z.object({
+  fetchedAt: z.string().datetime({ offset: true }),
+  items: z.array(housingBrandFetchedItemSchema).max(100),
+}).strict();
+export type HousingBrandStoredPreview = z.infer<typeof housingBrandStoredPreviewSchema>;
 
 export const HOUSING_BRAND_STATUS_LABEL = {
   connected: '연결됨',

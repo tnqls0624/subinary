@@ -13,6 +13,8 @@ CREATE TABLE housing_brand_connections (
   version integer NOT NULL DEFAULT 1,
   last_fetch_at timestamptz,
   last_success_at timestamptz,
+  /** 확인/새로고침 때 읽은 미리보기. 반영은 클라이언트가 보낸 금액이 아니라 이 값을 쓴다. */
+  last_preview jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   disconnected_at timestamptz,
