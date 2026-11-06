@@ -13,7 +13,8 @@ export interface VaultEnvelope {
 }
 export interface VaultContext {
   ownerUserId: string;
-  provider: 'toss_securities' | 'shinhan_bank';
+  /** 수자인(sujain)은 토스증권·신한과 공급자를 섞지 않는 별도 바인딩이다. */
+  provider: 'toss_securities' | 'shinhan_bank' | 'sujain';
   connectionId: string;
   purpose: 'credentials' | 'token' | 'accounts';
 }
@@ -22,14 +23,15 @@ const MAX_PLAINTEXT_BYTES = 256 * 1024;
 const MAX_CIPHERTEXT_BASE64 = Math.ceil(MAX_PLAINTEXT_BYTES / 3) * 4;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PURPOSES = new Set(['credentials', 'token', 'accounts']);
-const PROVIDERS = new Set(['toss_securities', 'shinhan_bank']);
+const PROVIDERS = new Set(['toss_securities', 'shinhan_bank', 'sujain']);
+const CREDENTIALS_ONLY = new Set(['shinhan_bank', 'sujain']);
 const fail = () => new Error('Finance vault operation failed');
 
 function additionalData(context: VaultContext, version: number): Buffer {
   if (!context || typeof context.ownerUserId !== 'string' || context.ownerUserId.length !== 36 || !UUID.test(context.ownerUserId)
     || typeof context.connectionId !== 'string' || context.connectionId.length !== 36 || !UUID.test(context.connectionId)
     || !PROVIDERS.has(context.provider) || !PURPOSES.has(context.purpose)
-    || (context.provider === 'shinhan_bank' && context.purpose !== 'credentials')) throw fail();
+    || (CREDENTIALS_ONLY.has(context.provider) && context.purpose !== 'credentials')) throw fail();
   return Buffer.from(JSON.stringify(['family.finance-vault', 1, context.ownerUserId.toLowerCase(),
     context.provider, context.connectionId.toLowerCase(), context.purpose, version]), 'utf8');
 }

@@ -122,11 +122,22 @@ export type ManualAssetListResponse = z.infer<typeof manualAssetListResponseSche
 
 export const manualHousingPaymentKindSchema = z.enum(['contract', 'interim', 'balance', 'option']);
 export type ManualHousingPaymentKind = z.infer<typeof manualHousingPaymentKindSchema>;
+/** 숫자 출처. null은 예전 직접 입력 행. */
+export const manualHousingValueSourceSchema = z.enum(['manual', 'sujain_fetch', 'confirmed']);
+export type ManualHousingValueSource = z.infer<typeof manualHousingValueSourceSchema>;
+/** Asia/Seoul 표시용 YYYY-MM-DD HH:mm */
+export const manualHousingAsOfSeoulSchema = z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 export const manualHousingPaymentInputSchema = z.object({
   id: z.string().uuid(), kind: manualHousingPaymentKindSchema,
   installment: z.number().int().positive().max(1000).nullable(),
+  /** 옵션 품목 이름. */
+  label: z.string().trim().min(1).max(100).nullable().optional(),
   dueDate: manualFinanceDateSchema.nullable(), amount: manualKrwAmountSchema.nullable(),
   paidAmount: manualKrwAmountSchema.nullable(), paidDate: recordedDateSchema.nullable(),
+  amountSource: manualHousingValueSourceSchema.nullable().optional(),
+  amountAsOfAt: z.string().datetime({ offset: true }).nullable().optional(),
+  paidAmountSource: manualHousingValueSourceSchema.nullable().optional(),
+  paidAmountAsOfAt: z.string().datetime({ offset: true }).nullable().optional(),
 }).strict().superRefine((input, ctx) => {
   // 형식 오류는 기본 스키마가 보고한다. 잘못된 문자열을 BigInt에 넘겨 예외로 바꾸지 않는다.
   if ((input.amount !== null && !manualKrwAmountSchema.safeParse(input.amount).success)
@@ -139,9 +150,23 @@ export const manualHousingPaymentInputSchema = z.object({
   } else if (input.paidDate !== null) {
     ctx.addIssue({ code: 'custom', path: ['paidDate'], message: '지급일에는 0보다 큰 지급액이 필요합니다.' });
   }
+  if (input.amount === null && (input.amountSource != null || input.amountAsOfAt != null)) {
+    ctx.addIssue({ code: 'custom', path: ['amountSource'], message: '예정 금액이 없으면 출처와 기준시각도 비워 주세요.' });
+  }
+  if (input.paidAmount === null && (input.paidAmountSource != null || input.paidAmountAsOfAt != null)) {
+    ctx.addIssue({ code: 'custom', path: ['paidAmountSource'], message: '낸 금액이 없으면 출처와 기준시각도 비워 주세요.' });
+  }
 });
 export type ManualHousingPaymentInput = z.infer<typeof manualHousingPaymentInputSchema>;
-export const manualHousingPaymentSchema = manualHousingPaymentInputSchema.safeExtend({ planId: z.string().uuid() });
+export const manualHousingPaymentSchema = manualHousingPaymentInputSchema.safeExtend({
+  planId: z.string().uuid(),
+  /** 남은 금액. 예정·낸 금액이 있을 때만. */
+  remainingAmount: manualKrwAmountSchema.nullable().optional(),
+  /** unpaid | partial | paid | unknown */
+  status: z.enum(['unpaid', 'partial', 'paid', 'unknown']).optional(),
+  amountAsOfSeoul: manualHousingAsOfSeoulSchema.nullable().optional(),
+  paidAmountAsOfSeoul: manualHousingAsOfSeoulSchema.nullable().optional(),
+});
 export type ManualHousingPayment = z.infer<typeof manualHousingPaymentSchema>;
 const housingFields = {
   label: labelSchema, visibility: manualFinanceVisibilitySchema,
@@ -157,7 +182,25 @@ export const manualHousingPlanUpdateRequestSchema = z.object({ expectedVersion: 
 export type ManualHousingPlanUpdateRequest = z.infer<typeof manualHousingPlanUpdateRequestSchema>;
 export const manualHousingPlanSchema = z.object({ ...recordFields, ...housingFields }).strict();
 export type ManualHousingPlan = z.infer<typeof manualHousingPlanSchema>;
-export const manualHousingPlanResponseSchema = z.object({ item: manualHousingPlanSchema, payments: z.array(manualHousingPaymentSchema) }).strict();
+/** housing-brand-sync와 순환 import를 피하려고 최소 형태만 둔다. */
+const housingBrandConnectionSummarySchema = z.object({
+  id: z.string().uuid(),
+  planId: z.string().uuid(),
+  brand: z.literal('sujain'),
+  status: z.enum(['connected', 'needs_confirmation', 'failed']),
+  statusMessage: z.string().trim().min(1).max(200).nullable(),
+  credentialsStored: z.boolean(),
+  version: z.number().int().positive().max(2147483647),
+  lastFetchAt: z.string().datetime({ offset: true }).nullable(),
+  lastSuccessAt: z.string().datetime({ offset: true }).nullable(),
+  canManage: z.boolean(),
+}).strict();
+export const manualHousingPlanResponseSchema = z.object({
+  item: manualHousingPlanSchema,
+  payments: z.array(manualHousingPaymentSchema),
+  /** 연결한 본인에게만 붙인다. 평문 자격증명은 없다. */
+  brandConnection: housingBrandConnectionSummarySchema.nullable().optional(),
+}).strict();
 export type ManualHousingPlanResponse = z.infer<typeof manualHousingPlanResponseSchema>;
 export const manualHousingSummarySchema = z.object({
   /** 입력된 미지급 일정 중 가장 이른 행. 현금 전망이나 전체 일정의 확정값이 아니다. */

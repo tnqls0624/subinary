@@ -4734,6 +4734,9 @@ export const manualHousingPlans = pgTable('manual_housing_plans', {
 export type ManualHousingPlanRecord = typeof manualHousingPlans.$inferSelect;
 export type NewManualHousingPlanRecord = typeof manualHousingPlans.$inferInsert;
 
+export const manualHousingValueSourceSchema = ['manual', 'sujain_fetch', 'confirmed'] as const;
+export type ManualHousingValueSource = (typeof manualHousingValueSourceSchema)[number];
+
 export const manualHousingPayments = pgTable('manual_housing_payments', {
   id: uuid('id').primaryKey(),
   planId: uuid('plan_id').notNull().references(() => manualHousingPlans.id, { onDelete: 'cascade' }),
@@ -4741,9 +4744,15 @@ export const manualHousingPayments = pgTable('manual_housing_payments', {
   position: integer('position').notNull().default(0),
   kind: text('kind').$type<'contract' | 'interim' | 'balance' | 'option'>().notNull(),
   installment: integer('installment'),
+  /** 옵션 품목 이름. 납부 종류에는 보통 비운다. */
+  label: text('label'),
   dueDate: date('due_date', { mode: 'string' }),
   amount: numeric('amount', { precision: 20, scale: 0 }),
+  amountSource: text('amount_source').$type<ManualHousingValueSource>(),
+  amountAsOfAt: timestamp('amount_as_of_at', { withTimezone: true }),
   paidAmount: numeric('paid_amount', { precision: 20, scale: 0 }),
+  paidAmountSource: text('paid_amount_source').$type<ManualHousingValueSource>(),
+  paidAmountAsOfAt: timestamp('paid_amount_as_of_at', { withTimezone: true }),
   paidDate: date('paid_date', { mode: 'string' }),
 }, (table) => [
   unique('manual_housing_payments_plan_position_unique').on(table.planId, table.position),
@@ -4754,6 +4763,9 @@ export const manualHousingPayments = pgTable('manual_housing_payments', {
   check('manual_housing_payments_paid_check', sql`${table.paidAmount} IS NULL OR (${table.amount} IS NOT NULL AND ${table.paidAmount} >= 0 AND ${table.paidAmount} <= ${table.amount})`),
   check('manual_housing_payments_paid_date_check', sql`(${table.paidAmount} IS NOT NULL AND ${table.paidAmount} > 0 AND ${table.paidDate} IS NOT NULL) OR ((${table.paidAmount} IS NULL OR ${table.paidAmount} = 0) AND ${table.paidDate} IS NULL)`),
   check('manual_housing_payments_calendar_check', sql`(${table.dueDate} IS NULL OR ${table.dueDate} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31') AND (${table.paidDate} IS NULL OR (${table.paidDate} >= DATE '0001-01-01' AND ${table.paidDate} <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date))`),
+  check('manual_housing_payments_label_check', sql`${table.label} IS NULL OR char_length(btrim(${table.label})) BETWEEN 1 AND 100`),
+  check('manual_housing_payments_amount_source_check', sql`(${table.amount} IS NULL AND ${table.amountSource} IS NULL AND ${table.amountAsOfAt} IS NULL) OR (${table.amount} IS NOT NULL AND (${table.amountSource} IS NULL OR (${table.amountSource} IN ('manual', 'sujain_fetch', 'confirmed') AND ${table.amountAsOfAt} IS NOT NULL)))`),
+  check('manual_housing_payments_paid_source_check', sql`(${table.paidAmount} IS NULL AND ${table.paidAmountSource} IS NULL AND ${table.paidAmountAsOfAt} IS NULL) OR (${table.paidAmount} IS NOT NULL AND (${table.paidAmountSource} IS NULL OR (${table.paidAmountSource} IN ('manual', 'sujain_fetch', 'confirmed') AND ${table.paidAmountAsOfAt} IS NOT NULL)))`),
 ]);
 export type ManualHousingPaymentRecord = typeof manualHousingPayments.$inferSelect;
 export type NewManualHousingPaymentRecord = typeof manualHousingPayments.$inferInsert;
@@ -4856,6 +4868,38 @@ export type NewLoanSnapshot = typeof loanSnapshots.$inferInsert;
 
 /** Dedicated provider vault envelope; never shares the SMS device key. */
 export type FinanceSecretEnvelope = { version: number; iv: string; tag: string; ciphertext: string };
+
+/** 수자인 등 신축 브랜드 로그인 금고. 토스증권·신한 연결과 공급자를 섞지 않는다. */
+export const housingBrandConnections = pgTable('housing_brand_connections', {
+  id: uuid('id').primaryKey(),
+  planId: uuid('plan_id').notNull().references(() => manualHousingPlans.id, { onDelete: 'cascade' }),
+  householdId: uuid('household_id').notNull().references(() => households.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  brand: text('brand').$type<'sujain'>().notNull(),
+  loginFingerprint: text('login_fingerprint').notNull(),
+  credentials: jsonb('credentials').$type<FinanceSecretEnvelope>(),
+  status: text('status').$type<'connected' | 'needs_confirmation' | 'failed'>().notNull().default('connected'),
+  statusMessage: text('status_message'),
+  version: integer('version').notNull().default(1),
+  lastFetchAt: timestamp('last_fetch_at', { withTimezone: true }),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+}, (table) => [
+  unique('housing_brand_connections_plan_scope_unique').on(table.id, table.planId, table.householdId, table.ownerUserId),
+  uniqueIndex('housing_brand_connections_active_plan_unique').on(table.planId).where(sql`${table.disconnectedAt} IS NULL`),
+  index('housing_brand_connections_owner_idx').on(table.householdId, table.ownerUserId),
+  check('housing_brand_connections_brand_check', sql`${table.brand} = 'sujain'`),
+  check('housing_brand_connections_status_check', sql`${table.status} IN ('connected', 'needs_confirmation', 'failed')`),
+  check('housing_brand_connections_version_check', sql`${table.version} > 0`),
+  check('housing_brand_connections_fingerprint_check', sql`${table.loginFingerprint} ~ '^[0-9a-f]{64}$'`),
+  check('housing_brand_connections_message_check', sql`${table.statusMessage} IS NULL OR char_length(btrim(${table.statusMessage})) BETWEEN 1 AND 200`),
+  check('housing_brand_connections_disconnected_check', sql`${table.disconnectedAt} IS NULL OR (${table.status} = 'failed' AND ${table.credentials} IS NULL)`),
+]);
+export type HousingBrandConnectionRecord = typeof housingBrandConnections.$inferSelect;
+export type NewHousingBrandConnectionRecord = typeof housingBrandConnections.$inferInsert;
+
 export const financeConnections = pgTable('finance_connections', {
   id: uuid('id').primaryKey(),
   householdId: uuid('household_id').notNull().references(() => households.id),

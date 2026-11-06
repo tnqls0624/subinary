@@ -25,6 +25,7 @@ const AT = '2026-01-01T00:00:00.000Z';
 type Row = Record<string, unknown>;
 const tables = [schema.users, schema.households, schema.householdMembers, schema.manualAssets,
   schema.manualHousingPlans, schema.manualHousingPayments, schema.manualFinanceAudit,
+  schema.housingBrandConnections,
   schema.loanRecords, schema.loanSnapshots,
   schema.registeredDevices, schema.deviceCredentials, schema.householdConsents];
 const tableMap = new Map<string, Table>(tables.map(table => [getTableName(table), table as Table]));

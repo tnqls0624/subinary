@@ -1,7 +1,8 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import type {
+  HousingBrandConnection,
   ManualHousingPayment,
   ManualHousingPaymentKind,
   ManualHousingPlanResponse,
@@ -37,6 +38,7 @@ import {
   RecordSheet,
 } from "./shared";
 import { useRecordEditor } from "./use-record-editor";
+import { HousingBrandPanel } from "./housing-brand-panel";
 
 type PlanEditorProps = {
   householdId: string;
@@ -160,6 +162,9 @@ function PlanForm({
   const { authedFetch } = useAuth();
   const refresh = useManualFinanceRefresh();
   const formId = useId();
+  const [brandConnection, setBrandConnection] = useState<HousingBrandConnection | null>(
+    initial?.brandConnection ?? null
+  );
   const editor = useRecordEditor({
     initial: initial ?? null,
     observedVersion,
@@ -347,6 +352,20 @@ function PlanForm({
             />
           </div>
         </div>
+        <HousingBrandPanel
+          householdId={householdId}
+          planId={editor.current?.item.id ?? null}
+          planVersion={editor.current?.item.version ?? null}
+          connection={brandConnection}
+          canEdit={editor.canEdit && !disabled}
+          requiresSavedPlan={!editor.current}
+          onConnectionChange={setBrandConnection}
+          onApplied={(plan) => {
+            setBrandConnection(plan.brandConnection ?? null);
+            void refresh(false);
+            onChanged();
+          }}
+        />
         <section className="grid min-w-0 gap-3" aria-label="주택 납부 일정">
           <div>
             <h3 className="text-body font-semibold">계약금·중도금·잔금·옵션</h3>

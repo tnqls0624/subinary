@@ -25,6 +25,20 @@ describe('dedicated finance vault', () => {
     failed(() => instance.decrypt(instance.encrypt(value, context), bankContext));
     failed(() => instance.encrypt(value, { ...bankContext, purpose: 'token' }));
   });
+
+  it('sujain housing credentials stay isolated from toss and shinhan provider bindings', () => {
+    const instance = vault();
+    const sujain: VaultContext = { ...context, provider: 'sujain' };
+    const bank: VaultContext = { ...context, provider: 'shinhan_bank' };
+    const value = { loginId: 'synthetic-sujain-id', password: 'SYNTHETIC_SUJAIN_SECRET' };
+    const envelope = instance.encrypt(value, sujain);
+    expect(instance.decrypt(envelope, sujain)).toEqual(value);
+    expect(JSON.stringify(envelope)).not.toContain(value.password);
+    expect(JSON.stringify(envelope)).not.toContain(value.loginId);
+    failed(() => instance.decrypt(envelope, context));
+    failed(() => instance.decrypt(envelope, bank));
+    failed(() => instance.encrypt(value, { ...sujain, purpose: 'token' }));
+  });
   it('is disabled without finance configuration, even if an unrelated device key exists', () => {
     const seen: string[] = [];
     const instance = new FinanceVault({ get: (name: string) => {

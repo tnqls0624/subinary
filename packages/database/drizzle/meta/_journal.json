@@ -533,6 +533,13 @@
       "when": 1793836800000,
       "tag": "0075_family_ledger_mvp",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0076_housing_brand_sync",
+      "breakpoints": true
     }
   ]
 }

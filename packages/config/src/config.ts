@@ -267,6 +267,12 @@ export const configSchema = z.object({
     runnerPath: z.string().min(1).max(1024).optional(),
     browserExecutable: z.string().min(1).max(1024).optional(),
   }).default({ enabled: false }),
+  /** 수자인 신축 조회. 기본 비활성. 신한·토스증권 런타임과 경로를 공유하지 않는다. */
+  sujainWebConnections: z.object({
+    enabled: booleanFromEnv.default(false),
+    runnerPath: z.string().min(1).max(1024).optional(),
+    browserExecutable: z.string().min(1).max(1024).optional(),
+  }).default({ enabled: false }),
   web: z.object({
     corsOrigin: z.string().min(1).default('http://localhost:3000'),
   }),
@@ -403,6 +409,11 @@ export function validateEnv(env: NodeJS.ProcessEnv): AppConfig {
       enabled: optionalEnvValue(env.BANK_WEB_CONNECTIONS_ENABLED),
       runnerPath: optionalEnvValue(env.BANK_WEB_RUNNER_PATH),
       browserExecutable: optionalEnvValue(env.BANK_WEB_BROWSER_EXECUTABLE),
+    },
+    sujainWebConnections: {
+      enabled: optionalEnvValue(env.SUJAIN_WEB_CONNECTIONS_ENABLED),
+      runnerPath: optionalEnvValue(env.SUJAIN_WEB_RUNNER_PATH),
+      browserExecutable: optionalEnvValue(env.SUJAIN_WEB_BROWSER_EXECUTABLE),
     },
     web: {
       corsOrigin: env.CORS_ORIGIN,
