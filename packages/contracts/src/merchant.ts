@@ -113,6 +113,12 @@ export type MerchantListResponse = z.infer<typeof merchantListResponseSchema>;
  *
  * 등록은 멱등이며 기존 거래·규칙을 대표 이름으로 백필한다. `aliases`에 canonical과
  * 같은 값이 섞여 오면 서버가 조용히 버린다(자기참조 금지 — DB check와 이중 방어).
+ *
+ * `brand`·`reason`은 **제안 화면에서 온 확정**일 때만 채운다. 거절
+ * (`merchantIdentityRejectRequestSchema`)과 같은 키로 `feedback_events.label`에 남겨,
+ * `source`(`human_confirmed`)를 바꾸지 않고도 제안 확정과 수동 병합을 나눈다. 수동 병합은
+ * 이 필드를 비운다. 브랜드 제안이면 `brand`가 필요하고, 잘린 이름 제안(`truncation`)에는
+ * `brand`가 없다 — 거절과 같은 규칙이다.
  */
 export const merchantAliasCreateRequestSchema = z.object({
   householdId: z.string().uuid(),
@@ -130,6 +136,10 @@ export const merchantAliasCreateRequestSchema = z.object({
    * 카테고리로 과거 거래가 옮겨가면 확정이 아니라 사고다.
    */
   categoryId: z.string().uuid().optional(),
+  /** 제안 화면 확정일 때만. 거절 label과 같은 키. 수동 병합은 비운다. */
+  brand: z.string().trim().min(1).max(100).optional(),
+  /** 제안 화면 확정일 때만. 있으면 제안 경로, 없으면 수동 병합. */
+  reason: z.enum(['brand_notation', 'brand_branch_prefix', 'truncation']).optional(),
 });
 export type MerchantAliasCreateRequest = z.infer<
   typeof merchantAliasCreateRequestSchema

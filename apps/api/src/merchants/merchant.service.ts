@@ -90,8 +90,10 @@ type MerchantTruncationCandidate = NonNullable<
  * 매 렌더 순수 함수로 계산하므로 같은 후보가 수십 번 쌓인다 — 그 비용으로 얻는
  * 정밀도는 "사용자가 무시했다"와 "아직 안 봤다"를 구분하지 못해 어차피 못 쓴다.
  *
- * `reason`은 거절 쪽에만 있다(확정은 화면을 거치지 않은 수동 병합도 포함하므로
- * 유형을 붙이면 제안 성능을 과대평가한다). 유형별 약점은 거절의 `reason` 분포로 읽는다.
+ * 확정·거절 모두 제안 화면에서 온 것만 `label.reason`(있으면 `brand`)을 갖는다. 수동
+ * 병합 확정은 `decision`·`nameCount`만 남긴다 — `reason`이 있는 확정만 제안 정밀도
+ * 분자로 세면 수동 병합이 제안 성능을 부풀리지 않는다. `source`는 확정
+ * `human_confirmed` / 거절 `human_rejected`를 그대로 둔다.
  */
 
 @Injectable()
@@ -353,6 +355,11 @@ export class MerchantService {
     if (input.canonical === REDACTED_MERCHANT_LABEL || input.aliases.includes(REDACTED_MERCHANT_LABEL)) {
       throw new BadRequestException('비공개 결제는 묶을 수 없어요.');
     }
+    // 제안 경로 표시는 거절과 같은 규칙: 브랜드 제안은 brand가 필요하고, truncation은 없다.
+    // reason이 없으면 수동 병합 — label에 brand·reason을 넣지 않는다.
+    if (input.reason && input.reason !== 'truncation' && !input.brand) {
+      throw new BadRequestException('브랜드 제안에는 브랜드가 필요해요.');
+    }
     await this.requireMembership(input.householdId, userId, ADMIN_ROLES);
     const { householdId } = input;
 
@@ -539,11 +546,9 @@ export class MerchantService {
        * "사용자가 판단한 후보 중 몇 %가 맞았나"를 세려면 확정도 같은 target_type에
        * 들어와야 한다.
        *
-       * 화면을 거치지 않고 직접 고른 병합도 여기로 들어온다 — 그것은 제안이 아니라
-       * 사용자가 스스로 찾은 것이므로 정밀도 분자로 세면 제안 성능을 과대평가한다.
-       * 그래서 label에 `brand`·`reason`을 넣지 않는다: 제안에서 온 것만 그 필드를
-       * 갖는 거절 쪽과 대칭이 깨지지만, 대칭보다 **분자를 부풀리지 않는 것**이 중요하다.
-       * 유형별 정밀도는 거절 쪽 `reason` 분포로 읽는다.
+       * 제안 화면에서 온 확정만 `brand`·`reason`을 넣는다(거절과 같은 키). 수동 병합은
+       * `decision`·`nameCount`만 남긴다 — `reason`이 있는 확정만 제안 정밀도 분자로
+       * 세면 수동 병합이 제안 성능을 부풀리지 않는다. `source`는 항상 `human_confirmed`.
        */
       await tx.insert(schema.feedbackEvents).values({
         householdId,
@@ -553,7 +558,17 @@ export class MerchantService {
           ...allAliases,
         ]),
         labelSchemaVersion: IDENTITY_LABEL_SCHEMA,
-        label: { decision: 'confirmed', nameCount: allAliases.length + 1 },
+        label: {
+          decision: 'confirmed',
+          nameCount: allAliases.length + 1,
+          // reason이 있을 때만 제안 경로로 본다. brand만 온 수동 호출에 경로를 붙이지 않는다.
+          ...(input.reason
+            ? {
+                reason: input.reason,
+                ...(input.brand ? { brand: input.brand } : {}),
+              }
+            : {}),
+        },
         source: 'human_confirmed',
         actorUserId: userId,
         occurredAt: new Date(),

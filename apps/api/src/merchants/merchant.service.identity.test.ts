@@ -126,3 +126,151 @@ describe("잘린 이름 제안은 서버가 계산해 거절한 묶음을 거른
     expect(queries.some((q) => q.sql.startsWith("insert into"))).toBe(false);
   });
 });
+
+/**
+ * 확정 경로 구분 — 제안 화면 확정은 label에 brand·reason을 남기고, 수동 병합은 남기지
+ * 않는다. source는 둘 다 human_confirmed. 기존 행을 고치는 SQL은 없다.
+ */
+function setupAliases() {
+  const queries: Captured[] = [];
+
+  function execute(query: string, params: unknown[]): unknown[][] {
+    if (query.includes('from "household_members"')) return [[MEMBER, "owner"]];
+    if (query.includes('from "merchant_aliases"') && query.includes("select")) {
+      return [];
+    }
+    if (query.includes('from "merchant_category_rules"')) return [];
+    if (query.startsWith('insert into "merchant_aliases"')) {
+      // returning: id, alias, canonical, created_at
+      return [["alias-1", "합성상점", "합성상점본점", NOW]];
+    }
+    if (query.startsWith('update "card_transactions"')) {
+      return [["tx-1"]];
+    }
+    if (query.startsWith('insert into "feedback_events"')) return [];
+    throw new Error(`예상하지 않은 검증용 SQL입니다: ${query.slice(0, 120)}`);
+  }
+
+  const driver = {
+    options: { parsers: {}, serializers: {} },
+    unsafe(query: string, params: unknown[]) {
+      queries.push({ sql: query, params });
+      const response = Promise.resolve().then(() => execute(query, params));
+      return Object.assign(response, { values: () => response });
+    },
+    // createAliases는 트랜잭션 안에서 feedback을 남긴다 — 같은 드라이버로 이어 받는다.
+    async begin(fn: (sql: unknown) => Promise<unknown>) {
+      return fn(driver);
+    },
+  };
+  const service = new MerchantService(
+    drizzle(driver as unknown as postgres.Sql, { schema })
+  );
+  return { service, queries };
+}
+
+function feedbackLabel(queries: Captured[]): {
+  label: Record<string, unknown>;
+  source: unknown;
+} {
+  const insert = queries.find((q) =>
+    q.sql.startsWith('insert into "feedback_events"')
+  );
+  expect(insert).toBeDefined();
+  const labelRaw = insert?.params.find(
+    (p) => typeof p === "string" && p.includes('"decision"')
+  );
+  expect(typeof labelRaw).toBe("string");
+  // source는 label 다음에 오는 enum 문자열이다(human_confirmed / human_rejected).
+  const source = insert?.params.find(
+    (p) => p === "human_confirmed" || p === "human_rejected"
+  );
+  return { label: JSON.parse(labelRaw as string), source };
+}
+
+describe("확정 기록은 제안 경로와 수동 병합을 label로 가른다", () => {
+  it("제안 화면 확정은 source가 human_confirmed이고 label에 reason(있으면 brand)을 남긴다", async () => {
+    const { service, queries } = setupAliases();
+    await service.createAliases(USER, {
+      householdId: HOUSEHOLD,
+      canonical: "합성상점본점",
+      aliases: ["합성상점"],
+      brand: "합성상점",
+      reason: "brand_notation",
+    });
+    const { label, source } = feedbackLabel(queries);
+    expect(source).toBe("human_confirmed");
+    expect(label).toEqual({
+      decision: "confirmed",
+      nameCount: 2,
+      brand: "합성상점",
+      reason: "brand_notation",
+    });
+    expect(queries.every((q) => !q.sql.startsWith("update \"feedback_events\""))).toBe(
+      true
+    );
+  });
+
+  it("잘린 이름 제안 확정은 brand 없이 reason truncation만 남긴다", async () => {
+    const { service, queries } = setupAliases();
+    await service.createAliases(USER, {
+      householdId: HOUSEHOLD,
+      canonical: "합성상점본점",
+      aliases: ["합성상점"],
+      reason: "truncation",
+    });
+    const { label, source } = feedbackLabel(queries);
+    expect(source).toBe("human_confirmed");
+    expect(label).toEqual({
+      decision: "confirmed",
+      nameCount: 2,
+      reason: "truncation",
+    });
+  });
+
+  it("수동 병합 확정은 source가 human_confirmed이고 제안 경로 표시가 없다", async () => {
+    const { service, queries } = setupAliases();
+    await service.createAliases(USER, {
+      householdId: HOUSEHOLD,
+      canonical: "합성상점본점",
+      aliases: ["합성상점"],
+    });
+    const { label, source } = feedbackLabel(queries);
+    expect(source).toBe("human_confirmed");
+    expect(label).toEqual({
+      decision: "confirmed",
+      nameCount: 2,
+    });
+  });
+
+  it("브랜드 제안 확정은 브랜드 없이 받지 않는다", async () => {
+    const { service, queries } = setupAliases();
+    await expect(
+      service.createAliases(USER, {
+        householdId: HOUSEHOLD,
+        canonical: "합성상점본점",
+        aliases: ["합성상점"],
+        reason: "brand_notation",
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(queries.some((q) => q.sql.startsWith("insert into"))).toBe(false);
+  });
+
+  it("거절은 source가 human_rejected이고 기존 label 형태를 유지한다", async () => {
+    const { service, queries } = setup();
+    await service.rejectIdentityCandidate(USER, {
+      householdId: HOUSEHOLD,
+      names: ["합성상점본점", "합성상점"],
+      brand: "합성상점",
+      reason: "brand_notation",
+    });
+    const { label, source } = feedbackLabel(queries);
+    expect(source).toBe("human_rejected");
+    expect(label).toEqual({
+      decision: "rejected",
+      brand: "합성상점",
+      reason: "brand_notation",
+      nameCount: 2,
+    });
+  });
+});

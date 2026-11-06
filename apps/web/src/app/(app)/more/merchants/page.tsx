@@ -109,10 +109,18 @@ interface Suggestion {
   identity: MerchantIdentityCandidate | null;
 }
 
+/** 제안 화면에서 연 확정이면 서버 label에 남길 경로 표시(거절과 같은 키). */
+type ProposalPath = {
+  brand?: string;
+  reason: "brand_notation" | "brand_branch_prefix" | "truncation";
+};
+
 /** 대표 선택 다이얼로그에 올린 이름들. 선택 바에서 열었는지 제안에서 열었는지 기억한다. */
 interface PickerState {
   names: string[];
   fromSelection: boolean;
+  /** 제안에서 열었을 때만 채운다. 수동 병합은 비운다. */
+  proposal?: ProposalPath;
 }
 
 export default function MerchantsPage() {
@@ -254,14 +262,19 @@ export default function MerchantsPage() {
    * 무엇보다 확정은 사람이 해야 한다. 제안에서 열어도 **손으로 고른 선택은 그대로 둔다** —
    * 예전에는 제안의 "묶기"가 고르던 이름들을 지워 버렸다.
    */
-  const openPicker = (names: string[], fromSelection: boolean, preferred?: string) => {
+  const openPicker = (
+    names: string[],
+    fromSelection: boolean,
+    preferred?: string,
+    proposal?: ProposalPath,
+  ) => {
     // 기본 대표는 제안이 고른 이름, 아니면 지출이 가장 큰 이름 — 대개 가장 온전한 표기다.
     const byTotal = items
       .filter((m) => names.includes(m.name))
       .sort((a, b) => b.netTotal - a.netTotal);
     setCanonical(preferred ?? byTotal[0]?.name ?? names[0] ?? null);
     setResolveCategoryId(null);
-    setPicker({ names, fromSelection });
+    setPicker({ names, fromSelection, proposal });
   };
 
   /** 다이얼로그를 닫으면 고르던 대표·카테고리도 버린다 — 다음에 열 때 남아 있으면 안 된다. */
@@ -304,12 +317,20 @@ export default function MerchantsPage() {
     if (needsCategoryChoice && !chosenCategoryId) return;
     const merged = picker.names;
     const fromSelection = picker.fromSelection;
+    const proposal = picker.proposal;
     createAliases.mutate(
       {
         canonical,
         aliases,
         ...(needsCategoryChoice && chosenCategoryId
           ? { categoryId: chosenCategoryId }
+          : {}),
+        // 제안 화면 확정만 brand·reason을 실어 보낸다. 수동 병합은 비운다.
+        ...(proposal
+          ? {
+              reason: proposal.reason,
+              ...(proposal.brand ? { brand: proposal.brand } : {}),
+            }
           : {}),
       },
       {
@@ -430,7 +451,17 @@ export default function MerchantsPage() {
                             size="sm"
                             variant="weak"
                             onClick={() =>
-                              openPicker([s.canonical, ...s.aliases], false, s.canonical)
+                              openPicker(
+                                [s.canonical, ...s.aliases],
+                                false,
+                                s.canonical,
+                                s.identity
+                                  ? {
+                                      brand: s.identity.brand,
+                                      reason: s.identity.reason,
+                                    }
+                                  : { reason: "truncation" },
+                              )
                             }
                           >
                             묶기

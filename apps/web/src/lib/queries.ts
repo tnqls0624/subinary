@@ -584,11 +584,19 @@ export function useCreateMerchantAliases() {
       canonical,
       aliases,
       categoryId,
+      brand,
+      reason,
     }: {
       canonical: string;
       aliases: string[];
       /** 사람이 확정한 카테고리가 갈렸을 때 사용자가 고른 답(없으면 서버가 409). */
       categoryId?: string;
+      /**
+       * 제안 화면 확정일 때만 보낸다. 거절과 같은 키로 서버가 label에 남겨 수동 병합과
+       * 가른다. 수동 병합(이름을 직접 골라 묶기)은 비운다.
+       */
+      brand?: string;
+      reason?: "brand_notation" | "brand_branch_prefix" | "truncation";
     }) =>
       authedFetch((token) =>
         api.merchants.createAliases(token, {
@@ -596,6 +604,8 @@ export function useCreateMerchantAliases() {
           canonical,
           aliases,
           ...(categoryId ? { categoryId } : {}),
+          ...(reason ? { reason } : {}),
+          ...(brand ? { brand } : {}),
         }),
       ),
     onSuccess: () => {
