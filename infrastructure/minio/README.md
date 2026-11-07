@@ -10,7 +10,7 @@ Phase 0의 개발용 Object Storage. **S3 호환 API**를 제공하므로 앱은
 | 서비스 | 역할 |
 |---|---|
 | `minio` | `minio/minio:latest`, `server /data --console-address ":9001"` 로 기동 |
-| `minio-setup` | `minio/mc` 일회성 컨테이너. MinIO가 응답할 때까지 alias 등록을 재시도한 뒤 `mc mb --ignore-existing local/$STORAGE_BUCKET` 로 버킷을 생성하고 종료 |
+| `minio-setup` | `ghcr.io/netvark/mc` 일회성 컨테이너. MinIO가 응답할 때까지 alias 등록을 재시도한 뒤 `mc mb --ignore-existing local/$STORAGE_BUCKET` 로 버킷을 생성하고 종료 |
 
 `api`/`worker` 서비스는 `minio-setup`의 `service_completed_successfully` 조건에 의존하므로,
 앱이 부팅되는 시점에는 버킷(`family-memory`)이 항상 존재한다.

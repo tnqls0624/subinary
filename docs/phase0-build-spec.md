@@ -401,7 +401,7 @@ CMD ["node","-e","console.log('override in compose')"]
   - `postgres`: image `pgvector/pgvector:pg17`, env POSTGRES_*, volume `pgdata:/var/lib/postgresql/data`, `./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro`, healthcheck `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB`, ports 5432.
   - `redis`: image `redis:7-alpine`, healthcheck `redis-cli ping`, volume `redisdata:/data`, ports 6379.
   - `minio`: image `minio/minio:latest`, command `server /data --console-address ":9001"`, env `MINIO_ROOT_USER=${STORAGE_ACCESS_KEY}`,`MINIO_ROOT_PASSWORD=${STORAGE_SECRET_KEY}`, volume `miniodata:/data`, ports 9000/9001. (healthcheck 생략 — setup 완료로 대체)
-  - `minio-setup`: image `minio/mc`, `depends_on: {minio: {condition: service_started}}`, entrypoint sh 스크립트: mc alias(재시도 루프)→`mc mb --ignore-existing local/$BUCKET`→exit 0. `restart: "no"`.
+  - `minio-setup`: image `ghcr.io/netvark/mc`, `depends_on: {minio: {condition: service_started}}`, entrypoint sh 스크립트: mc alias(재시도 루프)→`mc mb --ignore-existing local/$BUCKET`→exit 0. `restart: "no"`.
   - `api`: build/image 위와 같음, `command: pnpm --filter @family/api dev`, env_file `.env`, environment override(HOST 등 불필요), ports 3001, `volumes: ['./apps/api/src:/app/apps/api/src']`, depends_on: postgres(healthy),redis(healthy),minio-setup(completed_successfully), healthcheck(node fetch /v1/health/live), `restart: unless-stopped`.
   - `worker`: `command: pnpm --filter @family/worker dev`, ports 3002, volume `./apps/worker/src:/app/apps/worker/src`, depends_on 동일, healthcheck /v1/health/live.
   - `web`: `command: pnpm --filter @family/web dev`, ports 3000, volume `./apps/web/src:/app/apps/web/src`, depends_on: api(healthy), env NEXT_PUBLIC_API_URL, healthcheck /api/health.
