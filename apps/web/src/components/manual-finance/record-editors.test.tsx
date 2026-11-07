@@ -228,4 +228,35 @@ describe("주택 계획 입력 창", () => {
     expect(html).not.toContain("주택 계획");
     expect(html).toContain("저장하기");
   });
+
+  it("수자인 연결 저장은 주택 폼 submit이 아니라 패널 전용 버튼이다", () => {
+    const editable = {
+      ...plan,
+      item: { ...plan.item, canEdit: true, ownerUserId: "me" },
+    };
+    const html = render(
+      <PlanEditor
+        householdId={asset.householdId}
+        initial={editable}
+        onChanged={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(html).toContain("수자인 신축 조회");
+    expect(html).toContain("수자인 연결 저장");
+    // One housing-plan <form>; brand panel must not nest another or use type=submit.
+    expect(html.match(/<form\b/g)?.length ?? 0).toBe(1);
+    expect(html).toMatch(
+      /<button(?=[^>]*type="button")[^>]*>수자인 연결 저장<\/button>/
+    );
+    expect(html).toMatch(
+      /<button(?=[^>]*type="submit")[^>]*>저장하기<\/button>/
+    );
+    const brandPanel = html.match(
+      /aria-label="수자인 신축 조회"[\s\S]*?<\/section>/
+    )?.[0];
+    expect(brandPanel).toBeTruthy();
+    expect(brandPanel).not.toMatch(/<select\b/);
+    expect(brandPanel).toContain(">수자인</p>");
+  });
 });

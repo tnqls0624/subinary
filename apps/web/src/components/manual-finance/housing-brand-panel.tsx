@@ -4,6 +4,8 @@
  * `/plan` 주택 납부 일정 안의 수자인 연결·확인. 새 화면이 아니다.
  * 연결에 쓰는 아이디·비밀번호 칸으로만 조회한다(별도 조회 로그인 폼 없음).
  * 확인/새로고침을 눌렀을 때만 분양대금·옵션을 함께 읽어 확인 목록을 연다.
+ * PlanEditor의 <form> 안에 들어가므로 여기에는 <form>·type=submit을 두지 않는다
+ * (중첩 submit이 주택 「저장하기」로 버블링되어 편집 창이 닫히던 회귀를 막는다).
  */
 
 import { useId, useRef, useState } from "react";
@@ -64,8 +66,7 @@ export function HousingBrandPanel({
     ? HOUSING_BRAND_STATUS_LABEL[connection.status]
     : "연결 전";
 
-  async function connect(event: React.FormEvent) {
-    event.preventDefault();
+  async function connect() {
     if (!planId || planVersion == null || !canEdit || busy) return;
     const loginId = loginRef.current?.value ?? "";
     const password = passwordRef.current?.value ?? "";
@@ -89,6 +90,14 @@ export function HousingBrandPanel({
     } finally {
       setBusy(null);
     }
+  }
+
+  /** Enter in these fields must not submit the surrounding housing-plan <form>. */
+  function onCredentialKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    void connect();
   }
 
   async function sync() {
@@ -168,23 +177,18 @@ export function HousingBrandPanel({
         </p>
       ) : null}
       {canEdit && !requiresSavedPlan ? (
-        <form
-          id={formId}
-          className="grid min-w-0 gap-3"
-          autoComplete="off"
-          onSubmit={(event) => void connect(event)}
-        >
+        <div className="grid min-w-0 gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor={`${formId}-brand`}>브랜드</Label>
-            <select
+            <span id={`${formId}-brand-label`} className="text-body font-medium">
+              브랜드
+            </span>
+            <p
               id={`${formId}-brand`}
-              className="border-input bg-background h-11 w-full rounded-control border px-3 text-body"
-              value="sujain"
-              disabled
-              aria-readonly="true"
+              className="text-body"
+              aria-labelledby={`${formId}-brand-label`}
             >
-              <option value="sujain">수자인</option>
-            </select>
+              수자인
+            </p>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${formId}-login`}>수자인 아이디</Label>
@@ -196,6 +200,7 @@ export function HousingBrandPanel({
               disabled={busy !== null}
               maxLength={64}
               placeholder={connection?.credentialsStored ? "저장됨 · 바꾸려면 다시 입력" : "아이디"}
+              onKeyDown={onCredentialKeyDown}
             />
           </div>
           <div className="grid gap-1.5">
@@ -209,20 +214,22 @@ export function HousingBrandPanel({
               disabled={busy !== null}
               maxLength={64}
               placeholder={connection?.credentialsStored ? "저장됨 · 다시 보이지 않아요" : "비밀번호"}
+              onKeyDown={onCredentialKeyDown}
             />
             <p className="text-caption text-muted-foreground">
               저장한 뒤에는 비밀번호를 다시 보여 주지 않아요. 조회도 이 칸으로만 해요.
             </p>
           </div>
           <Button
-            type="submit"
+            type="button"
             variant="weak"
             className="min-h-11"
             disabled={busy !== null || !planId}
+            onClick={() => void connect()}
           >
             {busy === "connect" ? "연결 저장 중…" : connection ? "연결 정보 다시 저장" : "수자인 연결 저장"}
           </Button>
-        </form>
+        </div>
       ) : null}
       {canEdit && connection?.credentialsStored && !requiresSavedPlan ? (
         <div className="flex flex-col gap-2 sm:flex-row">
