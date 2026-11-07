@@ -104,6 +104,7 @@ export class SmsRawRetentionCleanupService
         triggeredBy: 'scheduler',
         actorUserId: null,
         deleteObject: (key) => this.storage.deleteObject(key),
+        objectExists: (key) => this.storage.objectExists(key),
       });
       purgedEventCount += result.purgedEventCount;
       purgedSuppressionCount += result.purgedSuppressionCount;

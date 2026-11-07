@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canClaimRawPurged,
+  confirmObjectKeysGone,
   eventRawMatchesRetention,
   resolvePurgeLogDecision,
+  selectPreviewLinkedSuppressionIds,
   suppressionRawMatchesRetention,
 } from '@family/database';
 
@@ -95,6 +97,60 @@ describe('purge 후보 계약', () => {
         },
       }),
     ).toBe(true);
+  });
+});
+
+describe('selectPreviewLinkedSuppressionIds — 미리보기 밖의 억제는 지우지 않는다', () => {
+  it('days_30: 오래된 이벤트에 최근 억제가 있어도 미리보기 후보만 고른다', () => {
+    const oldSuppressionId = 'suppression-old-30d';
+    const recentSuppressionId = 'suppression-recent';
+    const preview = new Set([oldSuppressionId]);
+    const linked = [oldSuppressionId, recentSuppressionId];
+
+    expect(selectPreviewLinkedSuppressionIds(linked, preview)).toEqual([
+      oldSuppressionId,
+    ]);
+    expect(
+      selectPreviewLinkedSuppressionIds(linked, preview),
+    ).not.toContain(recentSuppressionId);
+  });
+
+  it('미리보기 후보 밖의 원문 id는 선택되지 않는다', () => {
+    expect(
+      selectPreviewLinkedSuppressionIds(
+        ['outside-preview', 'also-outside'],
+        new Set(['inside-preview']),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('confirmObjectKeysGone — 객체 저장소 사본이 남아 있으면 지웠다고 세지 않는다', () => {
+  it('모든 키가 없으면 true', async () => {
+    await expect(
+      confirmObjectKeysGone(['card-sms/h/e.txt'], async () => false),
+    ).resolves.toBe(true);
+  });
+
+  it('하나라도 남아 있으면 false — 삭제 호출이 예외 없이 끝나도 재확인한다', async () => {
+    const remaining = new Set(['card-sms/h/still-there.txt']);
+    await expect(
+      confirmObjectKeysGone(
+        ['card-sms/h/gone.txt', 'card-sms/h/still-there.txt'],
+        async (key) => remaining.has(key),
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('키가 없으면 확인 호출 없이 true', async () => {
+    let calls = 0;
+    await expect(
+      confirmObjectKeysGone([], async () => {
+        calls += 1;
+        return true;
+      }),
+    ).resolves.toBe(true);
+    expect(calls).toBe(0);
   });
 });
 

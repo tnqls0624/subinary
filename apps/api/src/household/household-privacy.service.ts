@@ -220,6 +220,7 @@ export class HouseholdPrivacyService {
       triggeredBy: 'user',
       actorUserId: userId,
       deleteObject: (key) => this.objectStorage.deleteObject(key),
+      objectExists: (key) => this.objectStorage.objectExists(key),
     });
 
     return {

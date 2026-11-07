@@ -1,11 +1,11 @@
 /**
  * 문자 원문 사본 purge(SOO-34).
  *
- * "지웠다"고 기록하기 전에 그 건의 DB 원문·객체 저장소·중복 억제 원문이 **모두**
- * 없어져야 한다. 거래·가계부 행은 건드리지 않는다.
+ * "지웠다"고 기록하기 전에 그 건의 DB 원문·객체 저장소·(미리보기 후보인) 억제
+ * 원문이 **모두** 없어져야 한다. 미리보기 후보 밖의 원문은 지우지 않는다.
+ * 거래·가계부 행은 건드리지 않는다.
  *
- * 한 실행에서 일부라도 실패하면 이력을 `completed`로 남기지 않는다. 실패 건수를
- * 이력에 함께 적는다. 원문 텍스트는 이력에 넣지 않는다.
+ * 한 실행에서 일부라도 실패하면 이력을 `completed`로 남기지 않는다.
  */
 import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 
@@ -37,10 +37,11 @@ export interface SmsRawPurgeResult {
 }
 
 type DeleteObject = (objectKey: string) => Promise<void>;
+type ObjectExists = (objectKey: string) => Promise<boolean>;
 
 /**
  * 한 건을 "지웠다"고 세기 전에 세 사본이 모두 없어졌는지 판정한다.
- * 억제 행이 원래 없으면 `suppressionRawsGone=true`로 둔다.
+ * 미리보기 후보 억제가 원래 없으면 `suppressionRawsGone=true`로 둔다.
  */
 export function canClaimRawPurged(copies: {
   dbRawGone: boolean;
@@ -52,6 +53,28 @@ export function canClaimRawPurged(copies: {
     copies.objectStorageGone &&
     copies.suppressionRawsGone
   );
+}
+
+/**
+ * 이벤트에 연결된 억제 중 **미리보기 후보만** 고른다.
+ * 미리보기에 없는 최근 억제(예: days_30)는 지우면 안 된다.
+ */
+export function selectPreviewLinkedSuppressionIds(
+  linkedIds: readonly string[],
+  previewSuppressionIds: ReadonlySet<string>,
+): string[] {
+  return linkedIds.filter((id) => previewSuppressionIds.has(id));
+}
+
+/** 삭제 후 객체 키가 실제로 없어졌는지 확인한다. 하나라도 있으면 false. */
+export async function confirmObjectKeysGone(
+  keys: readonly string[],
+  objectExists: ObjectExists,
+): Promise<boolean> {
+  for (const key of keys) {
+    if (await objectExists(key)) return false;
+  }
+  return true;
 }
 
 /**
@@ -214,8 +237,9 @@ export async function previewSmsRawPurge(
 /**
  * 정책에 맞는 원문 사본을 지운다. 거래 행은 수정하지 않는다.
  *
- * 이벤트 한 건은 객체 저장소 → 짝 억제 원문 → 이벤트 DB 원문 순으로 지우고,
- * 세 곳이 모두 없어진 뒤에만 성공으로 센다.
+ * 이벤트 한 건은 객체 저장소(삭제+존재 확인) → 미리보기 후보 억제 원문 →
+ * 이벤트 DB 원문 순으로 지우고, 세 곳이 모두 없어진 뒤에만 성공으로 센다.
+ * 미리보기 밖의 억제 원문은 건드리지 않는다.
  */
 export async function purgeSmsRawForHousehold(
   db: Db,
@@ -225,6 +249,7 @@ export async function purgeSmsRawForHousehold(
     triggeredBy: 'user' | 'scheduler';
     actorUserId: string | null;
     deleteObject: DeleteObject;
+    objectExists: ObjectExists;
     now?: Date;
   },
 ): Promise<SmsRawPurgeResult> {
@@ -247,6 +272,7 @@ export async function purgeSmsRawForHousehold(
     };
   }
 
+  const previewSuppressionIds = new Set(preview.matchingSuppressionIds);
   let purgedEventCount = 0;
   let failedEventCount = 0;
   let purgedSuppressionCount = 0;
@@ -267,17 +293,32 @@ export async function purgeSmsRawForHousehold(
       if (event.rawContent.length === 0) continue;
       try {
         const linked = await listLinkedSuppressionsWithRaw(db, event.id);
-        await deleteSourceObjectCopies(db, input.deleteObject, event.sourceItemId);
+        const linkedPreviewIds = selectPreviewLinkedSuppressionIds(
+          linked.map((row) => row.id),
+          previewSuppressionIds,
+        );
+        const deletedKeys = await deleteSourceObjectCopies(
+          db,
+          input.deleteObject,
+          event.sourceItemId,
+        );
+        const objectStorageGone = await confirmObjectKeysGone(
+          deletedKeys,
+          input.objectExists,
+        );
+        if (!objectStorageGone) {
+          throw new Error('object storage copies remain after delete');
+        }
         const scrubbedSuppressionIds = await scrubSuppressionRaws(
           db,
-          linked.map((row) => row.id),
+          linkedPreviewIds,
           now,
         );
         for (const id of scrubbedSuppressionIds) {
           handledSuppressionIds.add(id);
         }
-        if (scrubbedSuppressionIds.length !== linked.length) {
-          throw new Error('linked suppression raw scrub incomplete');
+        if (scrubbedSuppressionIds.length !== linkedPreviewIds.length) {
+          throw new Error('preview-linked suppression raw scrub incomplete');
         }
         await scrubEventRaw(db, event.id, now);
         const [after] = await db
@@ -285,12 +326,17 @@ export async function purgeSmsRawForHousehold(
           .from(schema.cardSmsEvents)
           .where(eq(schema.cardSmsEvents.id, event.id))
           .limit(1);
-        const remainingLinked = await listLinkedSuppressionsWithRaw(db, event.id);
+        const remainingPreviewLinked = selectPreviewLinkedSuppressionIds(
+          (await listLinkedSuppressionsWithRaw(db, event.id)).map(
+            (row) => row.id,
+          ),
+          previewSuppressionIds,
+        );
         if (
           !canClaimRawPurged({
             dbRawGone: (after?.rawContent ?? '').length === 0,
-            objectStorageGone: true,
-            suppressionRawsGone: remainingLinked.length === 0,
+            objectStorageGone,
+            suppressionRawsGone: remainingPreviewLinked.length === 0,
           })
         ) {
           throw new Error('event raw copies remain after purge steps');
@@ -406,12 +452,15 @@ async function scrubSuppressionRaws(
   return updated.map((row) => row.id);
 }
 
-/** source item의 비-tombstone revision 객체 키를 모두 지우고 size_bytes를 0으로 맞춘다. */
+/**
+ * source item의 비-tombstone revision 객체 키를 모두 지우고 size_bytes를 0으로 맞춘다.
+ * @returns 삭제를 시도한 object key 목록(재확인용).
+ */
 async function deleteSourceObjectCopies(
   db: Db,
   deleteObject: DeleteObject,
   sourceItemId: string,
-): Promise<void> {
+): Promise<string[]> {
   const revisions = await db
     .select({
       objectKey: schema.sourceRevisions.objectKey,
@@ -439,12 +488,15 @@ async function deleteSourceObjectCopies(
     .limit(1);
   if (source && !keys.includes(source.objectKey)) {
     await deleteObject(source.objectKey);
+    keys.push(source.objectKey);
   }
 
   await db
     .update(schema.sourceItems)
     .set({ sizeBytes: 0 })
     .where(eq(schema.sourceItems.id, sourceItemId));
+
+  return keys;
 }
 
 /** DB 원문만 비운다. parseStatus·거래 연결은 그대로 둔다. */

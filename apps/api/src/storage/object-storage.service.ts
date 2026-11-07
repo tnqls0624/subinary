@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -97,8 +98,38 @@ export class ObjectStorageService implements OnModuleInit {
     );
   }
 
+  /**
+   * 지정 key가 아직 있는지 확인한다(문자 원문 purge 재확인용).
+   * 404/NotFound만 없음으로 보고, 그 외 오류는 그대로 올린다.
+   */
+  async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.s3.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      return true;
+    } catch (error: unknown) {
+      if (isS3NotFound(error)) return false;
+      throw error;
+    }
+  }
+
   /** Throws when the bucket is unreachable; used by the readiness check. */
   async headBucket(): Promise<void> {
     await this.s3.send(new HeadBucketCommand({ Bucket: this.bucketName }));
   }
+}
+
+function isS3NotFound(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as {
+    name?: string;
+    Code?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const code = candidate.name ?? candidate.Code;
+  if (code === 'NotFound' || code === 'NoSuchKey' || code === '404') {
+    return true;
+  }
+  return candidate.$metadata?.httpStatusCode === 404;
 }
