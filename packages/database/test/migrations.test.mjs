@@ -1018,11 +1018,6 @@ describe('0076 — 수자인 신축 주택 납부 조회 연결', () => {
   );
   const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
 
-  it('journal 마지막 항목이다', () => {
-    assert.equal(journal.entries.at(-1)?.tag, '0076_housing_brand_sync');
-    assert.equal(journal.entries.at(-1)?.idx, 76);
-  });
-
   it('추가형이다 — DROP TABLE/DELETE/TRUNCATE가 없다', () => {
     for (const forbidden of ['DROP TABLE', 'DELETE FROM', 'TRUNCATE']) {
       assert.ok(
@@ -1052,5 +1047,57 @@ describe('0076 — 수자인 신축 주택 납부 조회 연결', () => {
   it('finance_connections·bank_connections를 바꾸지 않는다', () => {
     assert.ok(!/ALTER TABLE finance_connections/i.test(sqlBody));
     assert.ok(!/ALTER TABLE bank_connections/i.test(sqlBody));
+  });
+});
+
+describe('0077 — 문자 원문 보존 정책', () => {
+  const schemaText = readFileSync(resolve(here, '../src/schema.ts'), 'utf8');
+  const sqlText = readFileSync(
+    resolve(drizzleDir, '0077_sms_retention_policy.sql'),
+    'utf8',
+  );
+  const sqlBody = sqlText.replace(/^[ \t]*--.*$/gm, '');
+
+  it('journal 마지막 항목이다', () => {
+    assert.equal(journal.entries.at(-1)?.tag, '0077_sms_retention_policy');
+    assert.equal(journal.entries.at(-1)?.idx, 77);
+  });
+
+  it('추가형이다 — DROP TABLE/DELETE/TRUNCATE가 없다', () => {
+    for (const forbidden of ['DROP TABLE', 'DELETE FROM', 'TRUNCATE']) {
+      assert.ok(
+        !new RegExp(`\\b${forbidden.replace(' ', '\\s+')}\\b`, 'i').test(sqlBody),
+        `파괴적 구문이 있다: ${forbidden}`,
+      );
+    }
+  });
+
+  it('기본 정책은 none이고 허용 값이 CHECK로 묶인다', () => {
+    assert.match(
+      sqlBody,
+      /ADD COLUMN "sms_retention_policy" text NOT NULL DEFAULT 'none'/,
+    );
+    assert.match(
+      sqlBody,
+      /households_sms_retention_policy_check[\s\S]*'none', 'days_30', 'after_parse', 'failures_only'/,
+    );
+    assert.ok(
+      schemaText.includes(
+        "smsRetentionPolicy: text('sms_retention_policy').notNull().default('none')",
+      ),
+    );
+  });
+
+  it('삭제 이력 테이블은 원문 본문 없이 건수만 남긴다', () => {
+    assert.match(sqlBody, /CREATE TABLE "sms_raw_purge_logs"/);
+    assert.match(sqlBody, /"purged_event_count" integer NOT NULL/);
+    assert.match(sqlBody, /"purged_suppression_count" integer NOT NULL/);
+    assert.ok(!/"raw_content"/i.test(sqlBody));
+    assert.ok(schemaText.includes('smsRawPurgeLogs'));
+  });
+
+  it('card_sms_events·card_transactions를 바꾸지 않는다', () => {
+    assert.ok(!/ALTER TABLE "card_sms_events"/i.test(sqlBody));
+    assert.ok(!/ALTER TABLE "card_transactions"/i.test(sqlBody));
   });
 });
