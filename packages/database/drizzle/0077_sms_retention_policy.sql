@@ -7,13 +7,16 @@ ALTER TABLE "households"
   ADD CONSTRAINT "households_sms_retention_policy_check"
   CHECK ("sms_retention_policy" IN ('none', 'days_30', 'after_parse', 'failures_only'));
 --> statement-breakpoint
--- 원문 본문은 절대 넣지 않는다. 언제·어떤 정책으로·몇 건을 지웠는지만 남긴다.
+-- 원문 본문은 절대 넣지 않는다. 언제·어떤 정책으로·성공/실패 건수만 남긴다.
+-- 일부만 지워진 실행은 status='failed' + failed_* 건수로 남긴다(completed 금지).
 CREATE TABLE "sms_raw_purge_logs" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "household_id" uuid NOT NULL REFERENCES "households"("id"),
   "policy" text NOT NULL,
   "purged_event_count" integer NOT NULL,
   "purged_suppression_count" integer NOT NULL,
+  "failed_event_count" integer NOT NULL DEFAULT 0,
+  "failed_suppression_count" integer NOT NULL DEFAULT 0,
   "triggered_by" text NOT NULL,
   "actor_user_id" uuid REFERENCES "users"("id"),
   "status" text NOT NULL,
@@ -26,7 +29,17 @@ CREATE TABLE "sms_raw_purge_logs" (
   CONSTRAINT "sms_raw_purge_logs_status_check"
     CHECK ("status" IN ('completed', 'failed')),
   CONSTRAINT "sms_raw_purge_logs_counts_check"
-    CHECK ("purged_event_count" >= 0 AND "purged_suppression_count" >= 0),
+    CHECK (
+      "purged_event_count" >= 0
+      AND "purged_suppression_count" >= 0
+      AND "failed_event_count" >= 0
+      AND "failed_suppression_count" >= 0
+    ),
+  CONSTRAINT "sms_raw_purge_logs_completed_no_failures_check"
+    CHECK (
+      "status" <> 'completed'
+      OR ("failed_event_count" = 0 AND "failed_suppression_count" = 0)
+    ),
   CONSTRAINT "sms_raw_purge_logs_actor_check"
     CHECK (
       ("triggered_by" = 'scheduler' AND "actor_user_id" IS NULL)

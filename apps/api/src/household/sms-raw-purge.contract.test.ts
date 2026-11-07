@@ -1,11 +1,13 @@
 /**
- * purge가 "지웠다"고 말하기 전에 지켜야 할 계약을 문서·회귀로 고정한다.
- * DB 없이 판정·실패 규칙만 본다. 합성 본문만 사용한다.
+ * purge가 "지웠다"고 말하기 전에 지켜야 할 계약을 고정한다.
+ * 합성 본문만 쓴다. 실제 수빈·운영 원문은 넣지 않는다.
  */
 import { describe, expect, it } from 'vitest';
 
 import {
+  canClaimRawPurged,
   eventRawMatchesRetention,
+  resolvePurgeLogDecision,
   suppressionRawMatchesRetention,
 } from '@family/database';
 
@@ -52,7 +54,6 @@ describe('purge 후보 계약', () => {
   });
 
   it('거래 행을 지우는 조건은 정책에 없다 — 원문 사본 여부만 본다', () => {
-    // 회귀: failures_only가 parse_failed를 고르면 실패 원문까지 날아간다.
     expect(
       eventRawMatchesRetention({
         policy: 'failures_only',
@@ -94,5 +95,127 @@ describe('purge 후보 계약', () => {
         },
       }),
     ).toBe(true);
+  });
+});
+
+describe('canClaimRawPurged — 세 사본이 없어지기 전에는 지웠다고 쓰지 않는다', () => {
+  it('DB·객체 저장소·억제 원문이 모두 없어야 한다', () => {
+    expect(
+      canClaimRawPurged({
+        dbRawGone: true,
+        objectStorageGone: true,
+        suppressionRawsGone: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('DB 원문이 남으면 지웠다고 쓰지 않는다', () => {
+    expect(
+      canClaimRawPurged({
+        dbRawGone: false,
+        objectStorageGone: true,
+        suppressionRawsGone: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('객체 저장소 사본이 남으면 지웠다고 쓰지 않는다', () => {
+    expect(
+      canClaimRawPurged({
+        dbRawGone: true,
+        objectStorageGone: false,
+        suppressionRawsGone: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('억제 행 원문이 남으면 지웠다고 쓰지 않는다', () => {
+    expect(
+      canClaimRawPurged({
+        dbRawGone: true,
+        objectStorageGone: true,
+        suppressionRawsGone: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('resolvePurgeLogDecision — 부분 성공을 completed로 남기지 않는다', () => {
+  it('전부 성공하면 completed이고 실패 건수는 0이다', () => {
+    expect(
+      resolvePurgeLogDecision({
+        purgedEventCount: 2,
+        purgedSuppressionCount: 1,
+        failedEventCount: 0,
+        failedSuppressionCount: 0,
+      }),
+    ).toEqual({
+      status: 'completed',
+      errorCode: null,
+      purgedEventCount: 2,
+      purgedSuppressionCount: 1,
+      failedEventCount: 0,
+      failedSuppressionCount: 0,
+    });
+  });
+
+  it('일부만 실패해도 completed가 아니고 실패 건수를 남긴다', () => {
+    expect(
+      resolvePurgeLogDecision({
+        purgedEventCount: 3,
+        purgedSuppressionCount: 0,
+        failedEventCount: 1,
+        failedSuppressionCount: 2,
+      }),
+    ).toEqual({
+      status: 'failed',
+      errorCode: 'partial_purge_failed',
+      purgedEventCount: 3,
+      purgedSuppressionCount: 0,
+      failedEventCount: 1,
+      failedSuppressionCount: 2,
+    });
+  });
+
+  it('전부 실패하면 failed이고 purged는 0이다', () => {
+    expect(
+      resolvePurgeLogDecision({
+        purgedEventCount: 0,
+        purgedSuppressionCount: 0,
+        failedEventCount: 2,
+        failedSuppressionCount: 0,
+      }),
+    ).toEqual({
+      status: 'failed',
+      errorCode: 'purge_failed',
+      purgedEventCount: 0,
+      purgedSuppressionCount: 0,
+      failedEventCount: 2,
+      failedSuppressionCount: 0,
+    });
+  });
+
+  it('아무 일도 없으면 이력을 남기지 않는다', () => {
+    expect(
+      resolvePurgeLogDecision({
+        purgedEventCount: 0,
+        purgedSuppressionCount: 0,
+        failedEventCount: 0,
+        failedSuppressionCount: 0,
+      }),
+    ).toBeNull();
+  });
+
+  it('이력 결정 값에 원문 텍스트 자리가 없다', () => {
+    const decision = resolvePurgeLogDecision({
+      purgedEventCount: 1,
+      purgedSuppressionCount: 0,
+      failedEventCount: 0,
+      failedSuppressionCount: 0,
+    });
+    expect(decision).not.toBeNull();
+    expect(JSON.stringify(decision)).not.toContain(RAW);
+    expect(Object.keys(decision!)).not.toContain('rawContent');
+    expect(Object.keys(decision!)).not.toContain('raw_content');
   });
 });

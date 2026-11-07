@@ -309,16 +309,14 @@ export class HouseholdPrivacyService {
         policy: schema.smsRawPurgeLogs.policy,
         purgedEventCount: schema.smsRawPurgeLogs.purgedEventCount,
         purgedSuppressionCount: schema.smsRawPurgeLogs.purgedSuppressionCount,
+        failedEventCount: schema.smsRawPurgeLogs.failedEventCount,
+        failedSuppressionCount: schema.smsRawPurgeLogs.failedSuppressionCount,
+        status: schema.smsRawPurgeLogs.status,
         triggeredBy: schema.smsRawPurgeLogs.triggeredBy,
         createdAt: schema.smsRawPurgeLogs.createdAt,
       })
       .from(schema.smsRawPurgeLogs)
-      .where(
-        and(
-          eq(schema.smsRawPurgeLogs.householdId, householdId),
-          eq(schema.smsRawPurgeLogs.status, 'completed'),
-        ),
-      )
+      .where(eq(schema.smsRawPurgeLogs.householdId, householdId))
       .orderBy(desc(schema.smsRawPurgeLogs.createdAt))
       .limit(5);
 
@@ -336,6 +334,9 @@ export class HouseholdPrivacyService {
         policy: row.policy as RetentionPolicy,
         purgedEventCount: row.purgedEventCount,
         purgedSuppressionCount: row.purgedSuppressionCount,
+        failedEventCount: row.failedEventCount,
+        failedSuppressionCount: row.failedSuppressionCount,
+        status: row.status,
         triggeredBy: row.triggeredBy,
         createdAt: row.createdAt.toISOString(),
       })),

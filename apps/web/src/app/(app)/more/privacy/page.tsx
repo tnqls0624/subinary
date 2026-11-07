@@ -204,6 +204,9 @@ export default function PrivacyPage() {
 
   const { smsEventCount, oldestReceivedAt, policy, recentPurges } =
     overview.retention;
+  const lastCompletedPurge = recentPurges.find(
+    (row) => row.status === "completed"
+  );
   const deviceCount = overview.myActiveDeviceCount;
 
   function openPolicySheet() {
@@ -261,11 +264,11 @@ export default function PrivacyPage() {
             원문 보존 정책 바꾸기
           </Button>
         </div>
-        {recentPurges.length > 0 ? (
+        {lastCompletedPurge ? (
           <p className="text-caption text-muted-foreground px-5 pb-4">
             최근 삭제{" "}
-            {recentPurges[0]!.purgedEventCount.toLocaleString("ko-KR")}건 ·{" "}
-            {retentionPolicyLabel(recentPurges[0]!.policy)}
+            {lastCompletedPurge.purgedEventCount.toLocaleString("ko-KR")}건 ·{" "}
+            {retentionPolicyLabel(lastCompletedPurge.policy)}
           </p>
         ) : null}
       </section>

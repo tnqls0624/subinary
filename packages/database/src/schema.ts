@@ -434,7 +434,8 @@ export type NewHouseholdConsent = typeof householdConsents.$inferInsert;
 
 /**
  * 문자 원문 purge 이력(SOO-34). 원문 본문은 저장하지 않는다 —
- * 언제·어떤 정책으로·몇 건을 지웠는지만 남겨 사후에 설명한다.
+ * 언제·어떤 정책으로·성공/실패 건수만 남겨 사후에 설명한다.
+ * `completed`는 실패 건수가 0일 때만 허용한다.
  */
 export const smsRawPurgeLogs = pgTable(
   'sms_raw_purge_logs',
@@ -448,6 +449,10 @@ export const smsRawPurgeLogs = pgTable(
       .$type<'none' | 'days_30' | 'after_parse' | 'failures_only'>(),
     purgedEventCount: integer('purged_event_count').notNull(),
     purgedSuppressionCount: integer('purged_suppression_count').notNull(),
+    failedEventCount: integer('failed_event_count').notNull().default(0),
+    failedSuppressionCount: integer('failed_suppression_count')
+      .notNull()
+      .default(0),
     triggeredBy: text('triggered_by')
       .notNull()
       .$type<'user' | 'scheduler'>(),
@@ -477,7 +482,11 @@ export const smsRawPurgeLogs = pgTable(
     ),
     check(
       'sms_raw_purge_logs_counts_check',
-      sql`${table.purgedEventCount} >= 0 and ${table.purgedSuppressionCount} >= 0`,
+      sql`${table.purgedEventCount} >= 0 and ${table.purgedSuppressionCount} >= 0 and ${table.failedEventCount} >= 0 and ${table.failedSuppressionCount} >= 0`,
+    ),
+    check(
+      'sms_raw_purge_logs_completed_no_failures_check',
+      sql`${table.status} <> 'completed' or (${table.failedEventCount} = 0 and ${table.failedSuppressionCount} = 0)`,
     ),
     check(
       'sms_raw_purge_logs_actor_check',

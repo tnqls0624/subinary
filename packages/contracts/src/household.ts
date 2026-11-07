@@ -345,12 +345,15 @@ export const retentionPolicySchema = z.enum([
 ]);
 export type RetentionPolicy = z.infer<typeof retentionPolicySchema>;
 
-/** 원문 purge 이력 한 줄 — 본문은 절대 포함하지 않는다. */
+/** 원문 purge 이력 한 줄 — 본문은 절대 포함하지 않는다. 실패 건수를 남긴다. */
 export const smsRawPurgeLogSchema = z.object({
   id: z.string(),
   policy: retentionPolicySchema,
   purgedEventCount: z.number().int(),
   purgedSuppressionCount: z.number().int(),
+  failedEventCount: z.number().int(),
+  failedSuppressionCount: z.number().int(),
+  status: z.enum(['completed', 'failed']),
   triggeredBy: z.enum(['user', 'scheduler']),
   createdAt: z.string(),
 });

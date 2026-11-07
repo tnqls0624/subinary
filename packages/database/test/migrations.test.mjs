@@ -1088,12 +1088,22 @@ describe('0077 — 문자 원문 보존 정책', () => {
     );
   });
 
-  it('삭제 이력 테이블은 원문 본문 없이 건수만 남긴다', () => {
+  it('삭제 이력 테이블은 원문 본문 없이 성공·실패 건수만 남긴다', () => {
     assert.match(sqlBody, /CREATE TABLE "sms_raw_purge_logs"/);
     assert.match(sqlBody, /"purged_event_count" integer NOT NULL/);
     assert.match(sqlBody, /"purged_suppression_count" integer NOT NULL/);
+    assert.match(sqlBody, /"failed_event_count" integer NOT NULL DEFAULT 0/);
+    assert.match(
+      sqlBody,
+      /"failed_suppression_count" integer NOT NULL DEFAULT 0/,
+    );
+    assert.match(
+      sqlBody,
+      /sms_raw_purge_logs_completed_no_failures_check/,
+    );
     assert.ok(!/"raw_content"/i.test(sqlBody));
     assert.ok(schemaText.includes('smsRawPurgeLogs'));
+    assert.ok(schemaText.includes('failedEventCount'));
   });
 
   it('card_sms_events·card_transactions를 바꾸지 않는다', () => {
