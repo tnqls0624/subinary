@@ -149,8 +149,14 @@ async function fillLogin(page, credentials) {
 /**
  * 공식 로그인 뒤 분양대금조회·세대 내 설치 품목을 한 번에 읽는다.
  * 2FA·캡차는 우회하지 않고 authentication_required로 돌린다.
+ * diagnostics.stage is an allowlisted token only (login / scrape_*), never URLs.
  */
-export async function readSujainPages(page, job) {
+export async function readSujainPages(page, job, diagnostics = null) {
+  const setStage = (stage) => {
+    if (diagnostics && typeof diagnostics === 'object') diagnostics.stage = stage;
+  };
+
+  setStage('login');
   try {
     await page.goto(SUJAIN_URLS.login, { waitUntil: 'domcontentloaded', timeout: 20_000 });
   } catch {
@@ -173,6 +179,7 @@ export async function readSujainPages(page, job) {
     [SUJAIN_URLS.payment, 'payment'],
     [SUJAIN_URLS.unitItems, 'unit-items'],
   ]) {
+    setStage(sourcePage === 'payment' ? 'scrape_payment' : 'scrape_unit_items');
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
     } catch {

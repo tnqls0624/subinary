@@ -10,6 +10,7 @@ import {
   SujainBrowserClient,
   classifySujainRunnerFailure,
   coerceSujainRunnerRows,
+  formatSujainRunnerWarnExtras,
   sanitizeSujainRunnerStderr,
 } from './sujain-browser';
 
@@ -78,7 +79,12 @@ describe('sujain runner diagnostics without credentials', () => {
       1,
       null,
       'Running as root without --no-sandbox is not supported.\n',
-    )).toEqual({ code: 'runtime_unavailable', reason: 'chromium_launch_failed' });
+    )).toEqual({
+      code: 'runtime_unavailable',
+      reason: 'chromium_launch_failed',
+      errorName: null,
+      stage: null,
+    });
   });
 
   it('preserves allowlisted runner reason from stdout JSON', () => {
@@ -86,7 +92,12 @@ describe('sujain runner diagnostics without credentials', () => {
       0,
       { error: 'runtime_unavailable', reason: 'chromium_launch_failed' },
       '',
-    )).toEqual({ code: 'runtime_unavailable', reason: 'chromium_launch_failed' });
+    )).toEqual({
+      code: 'runtime_unavailable',
+      reason: 'chromium_launch_failed',
+      errorName: null,
+      stage: null,
+    });
   });
 
   it('preserves response_validation_failed and response_too_large reasons', () => {
@@ -94,18 +105,30 @@ describe('sujain runner diagnostics without credentials', () => {
       0,
       { error: 'operation_unknown', reason: 'response_validation_failed' },
       '',
-    )).toEqual({ code: 'operation_unknown', reason: 'response_validation_failed' });
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'response_validation_failed',
+      errorName: null,
+      stage: null,
+    });
     expect(classifySujainRunnerFailure(
       0,
       { error: 'operation_unknown', reason: 'response_too_large' },
       '',
-    )).toEqual({ code: 'operation_unknown', reason: 'response_too_large' });
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'response_too_large',
+      errorName: null,
+      stage: null,
+    });
   });
 
   it('maps nonzero exit without JSON to runner_exit_nonzero', () => {
     expect(classifySujainRunnerFailure(1, null, '')).toEqual({
       code: 'operation_unknown',
       reason: 'runner_exit_nonzero',
+      errorName: null,
+      stage: null,
     });
   });
 
@@ -114,17 +137,62 @@ describe('sujain runner diagnostics without credentials', () => {
       0,
       { error: 'operation_unknown', reason: 'parent_deadline' },
       '',
-    )).toEqual({ code: 'operation_unknown', reason: 'parent_deadline' });
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'parent_deadline',
+      errorName: null,
+      stage: null,
+    });
     expect(classifySujainRunnerFailure(
       0,
       { error: 'operation_unknown', reason: 'playwright_timeout' },
       '',
-    )).toEqual({ code: 'operation_unknown', reason: 'playwright_timeout' });
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'playwright_timeout',
+      errorName: null,
+      stage: null,
+    });
     expect(classifySujainRunnerFailure(
       0,
       { error: 'operation_unknown', reason: 'runner_exception' },
       '',
-    )).toEqual({ code: 'operation_unknown', reason: 'runner_exception' });
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'runner_exception',
+      errorName: null,
+      stage: null,
+    });
+  });
+
+  it('preserves allowlisted errorName and stage from runner JSON', () => {
+    expect(classifySujainRunnerFailure(
+      0,
+      {
+        error: 'operation_unknown',
+        reason: 'runner_exception',
+        errorName: 'TargetClosedError',
+        stage: 'scrape_payment',
+      },
+      '',
+    )).toEqual({
+      code: 'operation_unknown',
+      reason: 'runner_exception',
+      errorName: 'TargetClosedError',
+      stage: 'scrape_payment',
+    });
+  });
+
+  it('formats warn extras from allowlisted tokens only', () => {
+    expect(formatSujainRunnerWarnExtras('Error', 'scrape_payment')).toBe(
+      'errorName=Error stage=scrape_payment',
+    );
+    expect(formatSujainRunnerWarnExtras('TargetClosedError', 'login')).toBe(
+      'errorName=TargetClosedError stage=login',
+    );
+    expect(formatSujainRunnerWarnExtras('bad name!', 'scrape_payment')).toBe('stage=scrape_payment');
+    expect(formatSujainRunnerWarnExtras('Error', 'https://evil.example')).toBe('errorName=Error');
+    expect(formatSujainRunnerWarnExtras(null, null)).toBe('');
   });
 
   it('truncates synthetic overlong cells without inventing values', () => {
@@ -308,6 +376,50 @@ describe('sujain child transport with synthetic streams', () => {
       expect.stringMatching(/sujain runner failed code=operation_unknown reason=playwright_timeout/),
     );
     warn.mockRestore();
+  });
+
+  it('warns runner_exception with allowlisted errorName and stage, never message text', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const test = child();
+    const pending = client().read(credentials(), new AbortController().signal);
+    test.process.stdout.write(JSON.stringify({
+      ok: false,
+      error: 'operation_unknown',
+      reason: 'runner_exception',
+      errorName: 'Error',
+      stage: 'scrape_payment',
+    }));
+    test.close(0);
+    await expect(pending).rejects.toMatchObject({
+      code: 'operation_unknown',
+      reason: 'runner_exception',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /sujain runner failed code=operation_unknown reason=runner_exception errorName=Error stage=scrape_payment/,
+      ),
+    );
+    const joined = warn.mock.calls.flat().join('\n');
+    expect(joined).not.toContain('Execution context');
+    expect(joined).not.toContain('Synthetic!123');
+    expect(joined).not.toContain('synthetic-id');
+    warn.mockRestore();
+  });
+
+  it('keeps typed ok:false when optional errorName is not allowlisted', async () => {
+    const test = child();
+    const pending = client().read(credentials(), new AbortController().signal);
+    test.process.stdout.write(JSON.stringify({
+      ok: false,
+      error: 'credentials_invalid',
+      errorName: 'bad name with spaces',
+      stage: 'not-a-real-stage',
+    }));
+    test.close(0);
+    await expect(pending).rejects.toMatchObject({
+      code: 'credentials_invalid',
+      reason: null,
+    });
   });
 
   it('surfaces runner_exit_nonzero when child exits hard with empty stdout', async () => {

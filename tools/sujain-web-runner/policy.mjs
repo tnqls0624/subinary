@@ -16,17 +16,46 @@ export class SujainReadError extends Error {
   }
 }
 
+/** Allowlisted runner stage tokens only — never URLs or page path text. */
+export const RUNNER_STAGES = new Set([
+  'stdin',
+  'validate',
+  'import',
+  'launch',
+  'context',
+  'login',
+  'scrape_payment',
+  'scrape_unit_items',
+]);
+
 /**
- * Allowlisted reason for non-SujainReadError throws.
- * Uses error.name only — never message, stack, URL, or page text.
+ * Letters-only, length-capped error.name token.
+ * Never message, stack, URL, or page text.
+ */
+export function sanitizeRunnerErrorName(error) {
+  const raw = error && typeof error === 'object' && typeof error.name === 'string'
+    ? error.name
+    : '';
+  const letters = raw.replace(/[^A-Za-z]/gu, '').slice(0, 40);
+  return letters.length > 0 ? letters : null;
+}
+
+/** Allowlisted stage token or null. */
+export function sanitizeRunnerStage(stage) {
+  return typeof stage === 'string' && RUNNER_STAGES.has(stage) ? stage : null;
+}
+
+/**
+ * Allowlisted reason (+ optional errorName) for non-SujainReadError throws.
+ * Uses sanitized error.name only — never message, stack, URL, or page text.
  */
 export function classifyUntypedRunnerError(error) {
   if (error instanceof SujainReadError) return null;
-  const name = error && typeof error === 'object' && typeof error.name === 'string'
-    ? error.name
-    : '';
-  if (name === 'TimeoutError') return 'playwright_timeout';
-  return 'runner_exception';
+  const errorName = sanitizeRunnerErrorName(error);
+  if (errorName === 'TimeoutError') {
+    return { reason: 'playwright_timeout', errorName };
+  }
+  return { reason: 'runner_exception', errorName };
 }
 
 /**

@@ -32,6 +32,28 @@ const failureReasonSchema = z.enum([
   'runner_exit_nonzero',
 ]);
 
+/** Letters-only capped error.name from the runner — never message/stack. */
+const runnerErrorNameSchema = z.string().regex(/^[A-Za-z]{1,40}$/u);
+
+/** Allowlisted runner stage tokens — never URLs or page path text. */
+const runnerStageSchema = z.enum([
+  'stdin',
+  'validate',
+  'import',
+  'launch',
+  'context',
+  'login',
+  'scrape_payment',
+  'scrape_unit_items',
+]);
+
+type RunnerFailurePayload = {
+  error: HousingBrandSyncError;
+  reason?: z.infer<typeof failureReasonSchema>;
+  errorName?: z.infer<typeof runnerErrorNameSchema>;
+  stage?: z.infer<typeof runnerStageSchema>;
+};
+
 /** Match tools/sujain-web-runner collect.mjs caps and responseSchema below. */
 export const SUJAIN_CELL_MAX = 200;
 export const SUJAIN_HEADER_MAX = 100;
@@ -54,6 +76,8 @@ const responseSchema = z.discriminatedUnion('ok', [
     ok: z.literal(false),
     error: housingBrandSyncErrorSchema,
     reason: failureReasonSchema.optional(),
+    errorName: runnerErrorNameSchema.optional(),
+    stage: runnerStageSchema.optional(),
   }).strict(),
 ]);
 
@@ -113,17 +137,59 @@ export function sanitizeSujainRunnerStderr(raw: string, credentials?: SujainCred
 
 export function classifySujainRunnerFailure(
   exitCode: number | null,
-  payload: { error: HousingBrandSyncError; reason?: z.infer<typeof failureReasonSchema> } | null,
+  payload: RunnerFailurePayload | null,
   stderr: string,
-): { code: HousingBrandSyncError; reason: string | null } {
+): {
+  code: HousingBrandSyncError;
+  reason: string | null;
+  errorName: string | null;
+  stage: string | null;
+} {
   if (payload) {
-    return { code: payload.error, reason: payload.reason ?? null };
+    return {
+      code: payload.error,
+      reason: payload.reason ?? null,
+      errorName: payload.errorName ?? null,
+      stage: payload.stage ?? null,
+    };
   }
   if (/Running as root without --no-sandbox|No usable sandbox|chromium.?sandbox/i.test(stderr)) {
-    return { code: 'runtime_unavailable', reason: 'chromium_launch_failed' };
+    return {
+      code: 'runtime_unavailable',
+      reason: 'chromium_launch_failed',
+      errorName: null,
+      stage: null,
+    };
   }
-  if (exitCode !== 0) return { code: 'operation_unknown', reason: 'runner_exit_nonzero' };
-  return { code: 'operation_unknown', reason: 'response_validation_failed' };
+  if (exitCode !== 0) {
+    return {
+      code: 'operation_unknown',
+      reason: 'runner_exit_nonzero',
+      errorName: null,
+      stage: null,
+    };
+  }
+  return {
+    code: 'operation_unknown',
+    reason: 'response_validation_failed',
+    errorName: null,
+    stage: null,
+  };
+}
+
+/** Build warn line fragments from allowlisted tokens only. */
+export function formatSujainRunnerWarnExtras(
+  errorName: string | null | undefined,
+  stage: string | null | undefined,
+): string {
+  const parts: string[] = [];
+  if (typeof errorName === 'string' && runnerErrorNameSchema.safeParse(errorName).success) {
+    parts.push(`errorName=${errorName}`);
+  }
+  if (typeof stage === 'string' && runnerStageSchema.safeParse(stage).success) {
+    parts.push(`stage=${stage}`);
+  }
+  return parts.join(' ');
 }
 
 /**
@@ -181,7 +247,12 @@ export class SujainBrowserClient {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.#active = true;
-      const finish = (error?: HousingBrandSyncError, payload?: { capturedAt: string; rows: SujainRawRow[] }, reason: string | null = null) => {
+      const finish = (
+        error?: HousingBrandSyncError,
+        payload?: { capturedAt: string; rows: SujainRawRow[] },
+        reason: string | null = null,
+        extras: { errorName?: string | null; stage?: string | null } = {},
+      ) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -190,10 +261,13 @@ export class SujainBrowserClient {
         output = '';
         stderr = '';
         if (error || !payload) {
+          const extrasText = formatSujainRunnerWarnExtras(extras.errorName, extras.stage);
+          const base = `sujain runner failed code=${error ?? 'operation_unknown'} reason=${reason ?? 'none'}`;
+          const withExtras = extrasText ? `${base} ${extrasText}` : base;
           if (diagnostic) {
-            this.#logger.warn(`sujain runner failed code=${error ?? 'operation_unknown'} reason=${reason ?? 'none'} detail=${diagnostic}`);
-          } else if (reason) {
-            this.#logger.warn(`sujain runner failed code=${error ?? 'operation_unknown'} reason=${reason}`);
+            this.#logger.warn(`${withExtras} detail=${diagnostic}`);
+          } else if (reason || extrasText) {
+            this.#logger.warn(withExtras);
           }
           rejectResult(new SujainBrowserError(error ?? 'operation_unknown', reason));
         } else resolveResult(payload);
@@ -227,7 +301,7 @@ export class SujainBrowserClient {
       child.on('close', (code) => {
         this.#active = false;
         if (settled) return;
-        let payload: { error: HousingBrandSyncError; reason?: z.infer<typeof failureReasonSchema> } | null = null;
+        let payload: RunnerFailurePayload | null = null;
         let success: { capturedAt: string; rows: SujainRawRow[] } | undefined;
         if (code === 0) {
           try {
@@ -235,7 +309,14 @@ export class SujainBrowserClient {
             const parsed = responseSchema.safeParse(raw);
             if (parsed.success) {
               if (parsed.data.ok) success = { capturedAt: parsed.data.capturedAt, rows: parsed.data.rows };
-              else payload = { error: parsed.data.error, reason: parsed.data.reason };
+              else {
+                payload = {
+                  error: parsed.data.error,
+                  ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+                  ...(parsed.data.errorName ? { errorName: parsed.data.errorName } : {}),
+                  ...(parsed.data.stage ? { stage: parsed.data.stage } : {}),
+                };
+              }
             } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
               const record = raw as Record<string, unknown>;
               if (record.ok === true && typeof record.capturedAt === 'string') {
@@ -256,9 +337,13 @@ export class SujainBrowserClient {
                 const errorParsed = housingBrandSyncErrorSchema.safeParse(record.error);
                 if (errorParsed.success) {
                   const reasonParsed = failureReasonSchema.safeParse(record.reason);
+                  const errorNameParsed = runnerErrorNameSchema.safeParse(record.errorName);
+                  const stageParsed = runnerStageSchema.safeParse(record.stage);
                   payload = {
                     error: errorParsed.data,
                     ...(reasonParsed.success ? { reason: reasonParsed.data } : {}),
+                    ...(errorNameParsed.success ? { errorName: errorNameParsed.data } : {}),
+                    ...(stageParsed.success ? { stage: stageParsed.data } : {}),
                   };
                 } else {
                   payload = { error: 'operation_unknown', reason: 'response_validation_failed' };
@@ -275,7 +360,10 @@ export class SujainBrowserClient {
         }
         if (success) { finish(undefined, success); return; }
         const failure = classifySujainRunnerFailure(code, payload, stderr);
-        finish(failure.code, undefined, failure.reason);
+        finish(failure.code, undefined, failure.reason, {
+          errorName: failure.errorName,
+          stage: failure.stage,
+        });
       });
       child.stdin.end(JSON.stringify({
         provider: 'sujain',

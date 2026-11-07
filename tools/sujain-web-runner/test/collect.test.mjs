@@ -293,3 +293,35 @@ test('long synthetic cell and header strings are truncated to API schema caps', 
   assert.equal(result.rows[0].cells[1], '1,000');
   assert.equal(result.rows[0].headers[1], '금액');
 });
+
+test('records scrape_payment stage before table evaluate without leaking page text', async () => {
+  const diagnostics = { stage: 'context' };
+  const f = officialLoginPage({ afterClick: 'navigate' });
+  const originalEvaluate = f.page.evaluate.bind(f.page);
+  f.page.evaluate = async (fn, sourcePage) => {
+    assert.equal(diagnostics.stage, 'scrape_payment');
+    if (sourcePage === 'payment') {
+      const err = new Error('Execution context was destroyed synthetic page text');
+      err.name = 'Error';
+      throw err;
+    }
+    return originalEvaluate(fn, sourcePage);
+  };
+  await assert.rejects(
+    () => readSujainPages(f.page, job(), diagnostics),
+    (error) => error instanceof Error
+      && error.name === 'Error'
+      && !String(error.message).includes('수자인')
+      && diagnostics.stage === 'scrape_payment',
+  );
+});
+
+test('records login stage while fillLogin runs', async () => {
+  const diagnostics = { stage: 'context' };
+  const f = officialLoginPage({ hasLoginControl: false });
+  await assert.rejects(
+    () => readSujainPages(f.page, job(), diagnostics),
+    (error) => error instanceof SujainReadError && error.code === 'unsupported_layout',
+  );
+  assert.equal(diagnostics.stage, 'login');
+});

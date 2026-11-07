@@ -6,6 +6,8 @@ import {
   chromiumSandboxEnabled,
   classifyUntypedRunnerError,
   isLoginUrl,
+  sanitizeRunnerErrorName,
+  sanitizeRunnerStage,
   validateJob,
   SujainReadError,
 } from '../policy.mjs';
@@ -60,27 +62,85 @@ test('runner turns sandbox off via policy and maps launch failure to runtime_una
   assert.doesNotMatch(runtime, /--no-sandbox/);
 });
 
+test('sanitizeRunnerErrorName keeps letters-only capped tokens and drops message text', () => {
+  const destroyed = new Error('Execution context was destroyed synthetic page text');
+  destroyed.name = 'Error';
+  assert.equal(sanitizeRunnerErrorName(destroyed), 'Error');
+
+  const closed = new Error('Target page synthetic secret closed');
+  closed.name = 'TargetClosedError';
+  assert.equal(sanitizeRunnerErrorName(closed), 'TargetClosedError');
+
+  const noisy = new Error('synthetic');
+  noisy.name = 'Error123!@#Timeout';
+  assert.equal(sanitizeRunnerErrorName(noisy), 'ErrorTimeout');
+
+  const long = new Error('synthetic');
+  long.name = `X${'a'.repeat(80)}`;
+  assert.equal(sanitizeRunnerErrorName(long)?.length, 40);
+
+  assert.equal(sanitizeRunnerErrorName(null), null);
+  assert.equal(sanitizeRunnerErrorName('string-throw'), null);
+  assert.equal(sanitizeRunnerErrorName({ name: '123!@#' }), null);
+  // Spaces and punctuation are stripped; only A–Z / a–z remain.
+  assert.equal(sanitizeRunnerErrorName({ name: 'Target Closed' }), 'TargetClosed');
+});
+
+test('sanitizeRunnerStage allowlists runner stages only', () => {
+  assert.equal(sanitizeRunnerStage('login'), 'login');
+  assert.equal(sanitizeRunnerStage('scrape_payment'), 'scrape_payment');
+  assert.equal(sanitizeRunnerStage('scrape_unit_items'), 'scrape_unit_items');
+  assert.equal(sanitizeRunnerStage('launch'), 'launch');
+  assert.equal(sanitizeRunnerStage('context'), 'context');
+  assert.equal(sanitizeRunnerStage('not-a-stage'), null);
+  assert.equal(sanitizeRunnerStage('https://www.sujain.co.kr/login'), null);
+  assert.equal(sanitizeRunnerStage(null), null);
+});
+
 test('classifyUntypedRunnerError uses error.name only — never message text', () => {
   const timeout = new Error('page.setDefaultTimeout synthetic secret Timeout 5000ms exceeded');
   timeout.name = 'TimeoutError';
-  assert.equal(classifyUntypedRunnerError(timeout), 'playwright_timeout');
+  assert.deepEqual(classifyUntypedRunnerError(timeout), {
+    reason: 'playwright_timeout',
+    errorName: 'TimeoutError',
+  });
 
   const destroyed = new Error('Execution context was destroyed synthetic page text');
   destroyed.name = 'Error';
-  assert.equal(classifyUntypedRunnerError(destroyed), 'runner_exception');
+  assert.deepEqual(classifyUntypedRunnerError(destroyed), {
+    reason: 'runner_exception',
+    errorName: 'Error',
+  });
+
+  const closed = new Error('Target closed synthetic');
+  closed.name = 'TargetClosedError';
+  assert.deepEqual(classifyUntypedRunnerError(closed), {
+    reason: 'runner_exception',
+    errorName: 'TargetClosedError',
+  });
 
   assert.equal(classifyUntypedRunnerError(new SujainReadError('credentials_invalid')), null);
-  assert.equal(classifyUntypedRunnerError(null), 'runner_exception');
-  assert.equal(classifyUntypedRunnerError('string-throw'), 'runner_exception');
+  assert.deepEqual(classifyUntypedRunnerError(null), {
+    reason: 'runner_exception',
+    errorName: null,
+  });
+  assert.deepEqual(classifyUntypedRunnerError('string-throw'), {
+    reason: 'runner_exception',
+    errorName: null,
+  });
 });
 
-test('runner catch attaches allowlisted reason for untyped failures', async () => {
+test('runner catch attaches allowlisted reason, errorName, and stage for untyped failures', async () => {
   const runtime = await readFile(new URL('../run.mjs', import.meta.url), 'utf8');
   const policy = await readFile(new URL('../policy.mjs', import.meta.url), 'utf8');
   assert.match(runtime, /classifyUntypedRunnerError/);
+  assert.match(runtime, /sanitizeRunnerErrorName|errorName/);
+  assert.match(runtime, /sanitizeRunnerStage|payload\.stage/);
   assert.match(policy, /playwright_timeout/);
   assert.match(policy, /runner_exception/);
   assert.match(policy, /error\.name/);
+  assert.match(policy, /sanitizeRunnerErrorName/);
+  assert.match(policy, /sanitizeRunnerStage/);
   assert.doesNotMatch(policy, /error\.message/);
   assert.doesNotMatch(runtime, /error\.message/);
   assert.doesNotMatch(runtime, /\.stack/);
