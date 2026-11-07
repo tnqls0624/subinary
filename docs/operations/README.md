@@ -40,7 +40,7 @@ subinary(Family Memory AI) 프로덕션은 맥 홈서버 1대 + Docker Compose +
 
 ## 배포
 - **표준 경로**: `pnpm ops:infra:bootstrap` — dirty-tree 가드(커밋 안 하면 차단, `INFRA_ALLOW_DIRTY_BUILD=true` override) + git-sha 별칭 태깅(`prod:<sha>`, 런타임은 `:local`) + 전체 서비스 `up -d` + verify. 래퍼는 `sh scripts/ops/deploy.sh`(로그·종료코드 보존; 기본은 OTA도 포함).
-- **자동 CD (Docker만)**: `main` CI 성공 후 self-hosted Mac runner 가 `DEPLOY_SKIP_OTA=true sh scripts/ops/deploy.sh` 실행. 준비·라벨·variables: [cd-production.md](./cd-production.md).
+- **자동 CD**: `main` CI 성공 후 self-hosted Mac runner 가 운영 워크트리에서 공식 `sh scripts/ops/deploy.sh` 기본값(Docker + OTA) 실행. 준비·라벨·variables: [cd-production.md](./cd-production.md).
 - **롤백**: `docker tag family-memory-ai/prod:<이전sha> family-memory-ai/prod:local && pnpm ops:infra:bootstrap -- --skip-build`.
 - **검증**: `pnpm ops:infra:verify`(13개 서비스 health, 이미지 동일성, 포트 미공개, 공개 URL health 등).
 - ⚠️ **다중 세션 동시 배포 주의**: 여러 세션이 동시에 build/up 하면 이미지 drift(worker만 뒤처짐 등) 발생 가능. 한 번에 한 세션만 배포할 것. CD concurrency 도 동일 그룹으로 직렬화한다. 상세: [prod-cutover 메모](../production-deploy.md).
@@ -61,7 +61,7 @@ subinary(Family Memory AI) 프로덕션은 맥 홈서버 1대 + Docker Compose +
 ## 문서 맵
 - [services.md](./services.md) — 서비스 카탈로그(20개 컨테이너 역할)·툴 사용법·profile/네트워크 지도
 - [production-deploy.md](../production-deploy.md) — 배포·백업·복구·하드닝 체크리스트
-- [cd-production.md](./cd-production.md) — main CI 성공 후 Docker 자동 운영 반영(self-hosted runner)
+- [cd-production.md](./cd-production.md) — main CI 성공 후 공식 deploy.sh(Docker+OTA) 자동 반영(self-hosted runner)
 - [ai-pipeline-alerting.md](./ai-pipeline-alerting.md) — 경보 3계층·ADR-0022
 - [ai-pipeline-dashboard.md](./ai-pipeline-dashboard.md) — 운영 지표 API
 - [card-sms-parser-quality.md](./card-sms-parser-quality.md) — 카드 문자 파서 품질 지표(문구 개편 조기 감지)

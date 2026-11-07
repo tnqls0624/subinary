@@ -81,11 +81,13 @@ sh scripts/ops/deploy.sh --skip-build
 
 `main` 푸시에서 CI(`gitleaks` + `build-and-test`)가 성공하면
 [`.github/workflows/cd-production.yml`](../.github/workflows/cd-production.yml) 이
-홈 Mac self-hosted runner 에서 `DEPLOY_SKIP_OTA=true sh scripts/ops/deploy.sh` 를 돌린다.
-GitHub-hosted runner 로는 홈 Docker 에 닿지 않으므로, runner·repository variables 준비가
+홈 Mac self-hosted runner 에서 **운영 워크트리**의 공식
+`sh scripts/ops/deploy.sh` 기본값(Docker + migrate + OTA)을 돌린다.
+브라우저와 폰 웹 번들이 같이 갱신된다. GitHub-hosted runner 로는 홈 Docker 에
+닿지 않고 인바운드 포트/SSH 도 열지 않으므로, runner·repository variables 준비가
 끝나기 전에는 gate 가 실패한다(가짜 SSH/no-op 성공 job 없음).
 
-설정·라벨·비범위(OTA 제외): [operations/cd-production.md](./operations/cd-production.md).
+설정·라벨·범위: [operations/cd-production.md](./operations/cd-production.md).
 
 `deploy.sh`는 아래 bootstrap을 감싼 래퍼다. bootstrap을 직접 불러도 되지만, **그 경우
 출력을 파이프로 넘기지 말 것**:
