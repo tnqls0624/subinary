@@ -62,6 +62,9 @@ subinary(Family Memory AI) 프로덕션은 맥 홈서버 1대 + Docker Compose +
 - [services.md](./services.md) — 서비스 카탈로그(20개 컨테이너 역할)·툴 사용법·profile/네트워크 지도
 - [production-deploy.md](../production-deploy.md) — 배포·백업·복구·하드닝 체크리스트
 - [cd-production.md](./cd-production.md) — main CI 성공 후 공식 deploy.sh(Docker+OTA) 자동 반영(self-hosted runner)
+- [sujain-web-connections.md](./sujain-web-connections.md) — 수자인 신축 조회 공식 runner(Playwright) 운영 활성화
+- [finance-connections.md](./finance-connections.md) — 토스증권 등 FinanceVault 연결 활성화
+- [bank-web-connections.md](./bank-web-connections.md) — 신한 bank-web 후보(수자인과 경로 분리)
 - [ai-pipeline-alerting.md](./ai-pipeline-alerting.md) — 경보 3계층·ADR-0022
 - [ai-pipeline-dashboard.md](./ai-pipeline-dashboard.md) — 운영 지표 API
 - [card-sms-parser-quality.md](./card-sms-parser-quality.md) — 카드 문자 파서 품질 지표(문구 개편 조기 감지)

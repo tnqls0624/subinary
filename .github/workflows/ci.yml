@@ -88,5 +88,7 @@ jobs:
           node --test packages/contracts/test/*.test.mjs
           node --test tools/shinhan-loan-collector/test/*.test.mjs
           node --test tools/bank-web-runner/test/*.test.mjs
+          node --test tools/sujain-web-runner/test/*.test.mjs
+          node --test scripts/lib/sujain-web-runtime.test.mjs
           pnpm test:auth-validation
           pnpm test:config-validation

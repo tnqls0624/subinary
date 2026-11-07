@@ -357,6 +357,13 @@ services:
       # worker와 **같은 anchor**에서 받는다(ADR-0027 5단계). 아래 worker와 대칭이어야 한다.
       <<: *money-contract-environment
       NODE_ENV: production
+      # 수자인 신축 조회 — 공식 tools/sujain-web-runner(Playwright 격리 Chromium).
+      # 신한 BANK_WEB_* 경로·실행 파일과 섞지 않는다. 자격증명/금고 키는 여기 두지 않는다.
+      # 이미지 빌드가 runner·playwright-core@1.62.0·전용 chromium 심볼릭 링크를 넣는다.
+      # 스위치는 비밀이 아니다. 끄려면 호스트 .env에 SUJAIN_WEB_CONNECTIONS_ENABLED=false.
+      SUJAIN_WEB_CONNECTIONS_ENABLED: ${SUJAIN_WEB_CONNECTIONS_ENABLED:-true}
+      SUJAIN_WEB_RUNNER_PATH: /app/tools/sujain-web-runner/run.mjs
+      SUJAIN_WEB_BROWSER_EXECUTABLE: /app/tools/sujain-web-runner/chromium
     # 포트 미공개: caddy가 내부망으로 프록시
     depends_on:
       postgres:

@@ -91,6 +91,24 @@ COPY --from=builder /app /app
 # 시작 시 Corepack이 pnpm을 다시 내려받지 않도록 빌드에서 검증한 캐시를 함께 보관한다.
 COPY --from=builder /root/.cache/node/corepack /root/.cache/node/corepack
 
+# 수자인 신축 조회 전용 runner 런타임(공식 tools/sujain-web-runner).
+# 모노레포 워크스페이스 밖이라 위 pnpm install에 playwright-core가 포함되지 않는다.
+# API 가용성 검사는 runner 옆 node_modules/playwright-core@1.62.0 과 절대 경로
+# Chromium 실행 파일을 요구한다(apps/api/src/housing-brand-sync/sujain-browser.ts).
+# 신한 bank-web-runner와 경로·실행 파일·공급자를 공유하지 않는다.
+# 홈서버 디스크를 위해 full Chromium 대신 headless shell만 설치하고 ffmpeg는 제거한다.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/tools/sujain-web-runner/ms-playwright
+RUN cd /app/tools/sujain-web-runner \
+  && npm install --omit=dev --no-audit --no-fund \
+  && npx playwright-core install-deps chromium \
+  && npx playwright-core install --only-shell --no-progress chromium \
+  && rm -rf "${PLAYWRIGHT_BROWSERS_PATH}"/ffmpeg-* \
+  && CHROME="$(find "${PLAYWRIGHT_BROWSERS_PATH}" -type f -name chrome-headless-shell -print -quit)" \
+  && test -n "$CHROME" && test -x "$CHROME" \
+  && ln -sfn "$CHROME" /app/tools/sujain-web-runner/chromium \
+  && node -e "const p=require('./node_modules/playwright-core/package.json'); if (p.name!=='playwright-core'||p.version!=='1.62.0') process.exit(1)" \
+  && rm -rf /root/.npm /var/lib/apt/lists/*
+
 EXPOSE 3000 3001 3002
 # 실제 실행 커맨드는 compose 서비스별 command로 지정된다.
 CMD ["node","-e","console.log('override command in docker-compose.prod.yml')"]
