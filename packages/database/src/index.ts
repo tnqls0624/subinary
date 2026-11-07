@@ -7,6 +7,8 @@ export * from './schema.js';
 export * from './query-helpers.js';
 export * from './transaction-money.js';
 export * from './card-sms-idempotency.js';
+export * from './sms-raw-retention.js';
+export * from './sms-raw-purge.js';
 export * from './client.js';
 export * from './health.js';
 export * from './errors.js';

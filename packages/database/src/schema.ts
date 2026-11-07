@@ -136,27 +136,41 @@ export const userSessions = pgTable(
 /* -------------------------------------------------------------------------- */
 
 /** 가족 그룹. `createdBy`는 생성자(초기 owner). */
-export const households = pgTable('households', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  /**
-   * 공용 카드 결제의 표시 색(팔레트 키). NULL이면 중립 회색 — 기본 동작.
-   *
-   * 구성원 색과 같은 팔레트를 쓰되 저장 위치가 다르다: 공용은 구성원이 아니라
-   * 가구에 하나뿐인 귀속 보류 묶음이다. 값 검증은 `memberColorSchema`가 한다.
-   */
-  sharedColor: text('shared_color'),
-  createdBy: uuid('created_by')
-    .notNull()
-    .references(() => users.id),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+export const households = pgTable(
+  'households',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    /**
+     * 공용 카드 결제의 표시 색(팔레트 키). NULL이면 중립 회색 — 기본 동작.
+     *
+     * 구성원 색과 같은 팔레트를 쓰되 저장 위치가 다르다: 공용은 구성원이 아니라
+     * 가구에 하나뿐인 귀속 보류 묶음이다. 값 검증은 `memberColorSchema`가 한다.
+     */
+    sharedColor: text('shared_color'),
+    /**
+     * 문자 원문 자동 삭제 정책(SOO-34). 기본 `none`(계속) — 기존 가구가 갑자기
+     * 원문을 잃지 않게 한다. 값 집합은 `sms-raw-retention.ts`와 CHECK가 같이 지킨다.
+     */
+    smsRetentionPolicy: text('sms_retention_policy').notNull().default('none'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'households_sms_retention_policy_check',
+      sql`${table.smsRetentionPolicy} in ('none', 'days_30', 'after_parse', 'failures_only')`,
+    ),
+  ],
+);
 
 /* -------------------------------------------------------------------------- */
 /* householdMembers                                                           */
@@ -417,6 +431,67 @@ export type NewHouseholdInvitation = typeof householdInvitations.$inferInsert;
 
 export type HouseholdConsent = typeof householdConsents.$inferSelect;
 export type NewHouseholdConsent = typeof householdConsents.$inferInsert;
+
+/**
+ * 문자 원문 purge 이력(SOO-34). 원문 본문은 저장하지 않는다 —
+ * 언제·어떤 정책으로·몇 건을 지웠는지만 남겨 사후에 설명한다.
+ */
+export const smsRawPurgeLogs = pgTable(
+  'sms_raw_purge_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id),
+    policy: text('policy')
+      .notNull()
+      .$type<'none' | 'days_30' | 'after_parse' | 'failures_only'>(),
+    purgedEventCount: integer('purged_event_count').notNull(),
+    purgedSuppressionCount: integer('purged_suppression_count').notNull(),
+    triggeredBy: text('triggered_by')
+      .notNull()
+      .$type<'user' | 'scheduler'>(),
+    actorUserId: uuid('actor_user_id').references(() => users.id),
+    status: text('status').notNull().$type<'completed' | 'failed'>(),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('sms_raw_purge_logs_household_created_idx').on(
+      table.householdId,
+      table.createdAt,
+    ),
+    check(
+      'sms_raw_purge_logs_policy_check',
+      sql`${table.policy} in ('none', 'days_30', 'after_parse', 'failures_only')`,
+    ),
+    check(
+      'sms_raw_purge_logs_triggered_by_check',
+      sql`${table.triggeredBy} in ('user', 'scheduler')`,
+    ),
+    check(
+      'sms_raw_purge_logs_status_check',
+      sql`${table.status} in ('completed', 'failed')`,
+    ),
+    check(
+      'sms_raw_purge_logs_counts_check',
+      sql`${table.purgedEventCount} >= 0 and ${table.purgedSuppressionCount} >= 0`,
+    ),
+    check(
+      'sms_raw_purge_logs_actor_check',
+      sql`(${table.triggeredBy} = 'scheduler' and ${table.actorUserId} is null) or (${table.triggeredBy} = 'user' and ${table.actorUserId} is not null)`,
+    ),
+    check(
+      'sms_raw_purge_logs_error_check',
+      sql`(${table.status} = 'completed' and ${table.errorCode} is null) or (${table.status} = 'failed' and ${table.errorCode} is not null)`,
+    ),
+  ],
+);
+
+export type SmsRawPurgeLog = typeof smsRawPurgeLogs.$inferSelect;
+export type NewSmsRawPurgeLog = typeof smsRawPurgeLogs.$inferInsert;
 
 /* ========================================================================== */
 /* Phase 2 — 스마트폰 장치 & HMAC 인증 (Phase 2 Build Spec §2)                 */

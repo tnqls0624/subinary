@@ -26,6 +26,12 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     data: state.overview,
     refetch: vi.fn(),
   }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useMutation: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+  }),
 }));
 
 import PrivacyPage from "./page";
@@ -46,6 +52,7 @@ const base: PrivacyOverview = {
     oldestReceivedAt: `${thisYear}-03-02T03:00:00.000Z`,
     newestReceivedAt: `${thisYear}-11-01T03:00:00.000Z`,
     objectKeyPrefix: "card-sms/00000000-0000-4000-8000-000000000001/",
+    recentPurges: [],
   },
   myMemberId: "00000000-0000-4000-8000-000000000002",
   myActiveDeviceCount: 2,
@@ -56,14 +63,15 @@ beforeEach(() => {
 });
 
 describe("개인정보 화면", () => {
-  it("기기와 보관 현황을 한 줄씩만 보여 주고 저장 경로·용량·개발 용어를 드러내지 않는다", () => {
+  it("기기·보관 현황과 보존 정책 진입점을 보여 주고 저장 경로·용량·개발 용어를 드러내지 않는다", () => {
     const html = renderToStaticMarkup(<PrivacyPage />);
     expect(html).toContain("문자 보내는 기기 2대");
     expect(html).toContain('href="/devices"');
     expect(html).toContain("카드 문자 1,280건 보관 중 · 3월부터");
     expect(html).toContain("받은 문자는 자동으로 지워지지 않아요");
     expect(html).toContain(">자세히</button>");
-    for (const jargon of ["card-sms/", "KB", "MB", "데이터베이스", "파일 저장소", "원문"]) {
+    expect(html).toContain("원문 보존 정책 바꾸기");
+    for (const jargon of ["card-sms/", "KB", "MB", "데이터베이스", "파일 저장소", "days_30", "after_parse"]) {
       expect(html).not.toContain(jargon);
     }
   });
@@ -84,6 +92,14 @@ describe("개인정보 화면", () => {
     expect(renderToStaticMarkup(<PrivacyPage />)).toContain("보관 중인 카드 문자가 없어요");
   });
 
+  it("정책이 none이 아니면 선택한 정책 이름을 보여 준다", () => {
+    state.overview = {
+      ...base,
+      retention: { ...base.retention, policy: "days_30" },
+    };
+    expect(renderToStaticMarkup(<PrivacyPage />)).toContain("보존 정책 · 30일");
+  });
+
   it("불러오지 못하면 공용 오류 상태로 원인 한 줄과 '다시 불러오기'를 보여 준다", () => {
     state.overview = undefined;
     const html = renderToStaticMarkup(<PrivacyPage />);
@@ -94,15 +110,17 @@ describe("개인정보 화면", () => {
 });
 
 describe("개인정보 › 보관 안내 시트", () => {
-  it("수집을 멈추는 길을 실제 버튼 이름과 위치로 쓰고, 문자 연동으로 가는 링크를 단다", () => {
-    const html = renderToStaticMarkup(<RetentionGuide />);
+  it("수집을 멈추는 길과 보존 정책을 구분해서 말한다", () => {
+    const html = renderToStaticMarkup(<RetentionGuide policy="none" />);
     expect(html).toContain("문자 연동 › 기기 ⋯ › 연결 해제");
     expect(html).toMatch(/<a[^>]*href="\/devices"[^>]*>문자 연동 열기/);
-    expect(html).toContain("이미 보관된 문자는 그대로 남아요.");
+    expect(html).toContain("지금 보존 정책은");
+    expect(html).toContain("계속");
+    expect(html).toContain("한꺼번에 지워지지는");
   });
 
   it("문자 연동 화면에 없는 말('폐기')과 갈 곳 없는 부탁('알려 주세요')은 쓰지 않는다", () => {
-    const html = renderToStaticMarkup(<RetentionGuide />);
+    const html = renderToStaticMarkup(<RetentionGuide policy="after_parse" />);
     expect(html).not.toContain("폐기");
     expect(html).not.toContain("알려 주세요");
   });

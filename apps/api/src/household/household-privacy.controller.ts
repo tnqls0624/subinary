@@ -1,12 +1,8 @@
 /**
- * 개인정보 Control Center HTTP 표면 (C-3 1단계).
+ * 개인정보 Control Center HTTP 표면 (C-3 + SOO-34 보존 정책).
  *
- * `HouseholdController`와 프리픽스를 공유하지만 파일을 나눈 이유: 이 세 경로는 동의와
- * 보관 현황이라는 별도 관심사이고, 권한 판정도 서비스 계층
- * ({@link HouseholdPrivacyService})에 있어 컨트롤러가 신뢰 결정을 하지 않는다.
- *
- * 경로에 `:id`(가구)를 두는 이유: 동의는 **가구별**이다. 두 가족에 속한 사용자가 한쪽
- * 동의만 철회할 수 있어야 한다.
+ * 권한 판정은 서비스의 `requireMembership`(활성 구성원)과 같다 —
+ * 동의·철회와 같은 모델을 쓰고 권한을 넓히지 않는다.
  */
 import {
   Body,
@@ -22,8 +18,12 @@ import { createZodDto } from 'nestjs-zod';
 import {
   privacyConsentGrantRequestSchema,
   privacyConsentRevokeRequestSchema,
+  privacyRetentionPreviewRequestSchema,
+  privacyRetentionUpdateRequestSchema,
   type PrivacyConsentRevokeResponse,
   type PrivacyOverview,
+  type PrivacyRetentionPreviewResponse,
+  type PrivacyRetentionUpdateResponse,
 } from '@family/contracts';
 
 import {
@@ -37,6 +37,12 @@ class PrivacyConsentGrantDto extends createZodDto(
 ) {}
 class PrivacyConsentRevokeDto extends createZodDto(
   privacyConsentRevokeRequestSchema,
+) {}
+class PrivacyRetentionPreviewDto extends createZodDto(
+  privacyRetentionPreviewRequestSchema,
+) {}
+class PrivacyRetentionUpdateDto extends createZodDto(
+  privacyRetentionUpdateRequestSchema,
 ) {}
 
 @Controller('households')
@@ -63,12 +69,7 @@ export class HouseholdPrivacyController {
     return this.privacyService.grantConsent(id, user.userId, dto);
   }
 
-  /**
-   * POST /v1/households/:id/privacy/consent/revoke — 철회.
-   *
-   * 본문의 `confirm: true`는 계약이 강제한다(z.literal(true)). 실수로 도달하는 경로가
-   * 없어야 하기 때문이고, 되돌리려면 위 consent 경로로 재동의하면 된다.
-   */
+  /** POST /v1/households/:id/privacy/consent/revoke — 철회. */
   @Post(':id/privacy/consent/revoke')
   @HttpCode(HttpStatus.OK)
   revokeConsent(
@@ -77,5 +78,30 @@ export class HouseholdPrivacyController {
     @Body() _dto: PrivacyConsentRevokeDto,
   ): Promise<PrivacyConsentRevokeResponse> {
     return this.privacyService.revokeConsent(id, user.userId);
+  }
+
+  /** POST /v1/households/:id/privacy/retention/preview — 정책 변경 영향 미리보기. */
+  @Post(':id/privacy/retention/preview')
+  @HttpCode(HttpStatus.OK)
+  previewRetention(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: PrivacyRetentionPreviewDto,
+  ): Promise<PrivacyRetentionPreviewResponse> {
+    return this.privacyService.previewRetention(id, user.userId, dto.policy);
+  }
+
+  /**
+   * POST /v1/households/:id/privacy/retention — 정책 적용 + 즉시 purge.
+   * 미리보기 건수와 어긋나면 409.
+   */
+  @Post(':id/privacy/retention')
+  @HttpCode(HttpStatus.OK)
+  updateRetention(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: PrivacyRetentionUpdateDto,
+  ): Promise<PrivacyRetentionUpdateResponse> {
+    return this.privacyService.updateRetention(id, user.userId, dto);
   }
 }

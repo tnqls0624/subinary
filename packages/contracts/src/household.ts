@@ -218,7 +218,7 @@ export type HouseholdConsentRevokeReason = z.infer<
  * 봐야 하는데 두 앱이 함께 의존하는 패키지가 여기뿐이다. 서버가 v2를 기록하는데
  * 화면은 v1 문구를 보여주는 상황을 타입으로 막는 것이 목적이다.
  */
-export const CURRENT_HOUSEHOLD_CONSENT_VERSION = 'v2';
+export const CURRENT_HOUSEHOLD_CONSENT_VERSION = 'v3';
 
 /** 동의 문구의 한 조항. */
 export const householdConsentClauseSchema = z.object({
@@ -241,9 +241,7 @@ export type HouseholdConsentDocument = z.infer<
 /**
  * 버전별 동의 문구 원문 레지스트리 — **추가만 하고 지우지 않는다.**
  *
- * ⚠️ 문구는 서비스가 실제로 하는 일만 적는다. 특히 **보관 기간·자동 삭제를 약속하지
- * 않는다** — 지금 원문 purge 잡은 존재하지 않는다(로드맵 5-1에서 의도적으로 보류).
- * "30일 뒤 삭제" 같은 문장을 여기 쓰면 그 순간 서비스가 거짓말을 시작한다.
+ * ⚠️ 문구는 서비스가 실제로 하는 일만 적는다. 지키지 못할 보관·삭제 약속을 쓰지 않는다.
  */
 export const householdConsentDocuments: Readonly<
   Record<string, HouseholdConsentDocument>
@@ -259,7 +257,10 @@ export const householdConsentDocuments: Readonly<
       },
     ],
   },
-  /** 문자 수집·원문 보관·철회를 명시한 개정판(C-3). */
+  /**
+   * 문자 수집·원문 보관·철회를 명시한 개정판(C-3 1단계).
+   * 자동 삭제가 없던 시점이라 그렇게 적혀 있다 — 지우지 않는다.
+   */
   v2: {
     version: 'v2',
     headline: '가족 데이터 공유와 카드 문자 수집에 동의해요',
@@ -279,6 +280,32 @@ export const householdConsentDocuments: Readonly<
       {
         title: '언제든 철회',
         body: '더보기 › 개인정보에서 언제든 철회할 수 있어요. 철회하면 등록된 기기가 즉시 해제되어 새 문자 수집이 멈춰요. 다만 이미 보관된 문자 원문은 이 화면에서 지워지지 않아요.',
+      },
+    ],
+  },
+  /**
+   * 보존 정책 선택·원문 자동 삭제를 명시한 개정판(SOO-34 / C-3 본체).
+   * 개정은 재동의 요청이지 동의 취소가 아니다(ADR-0028).
+   */
+  v3: {
+    version: 'v3',
+    headline: '가족 데이터 공유와 카드 문자 수집에 동의해요',
+    clauses: [
+      {
+        title: '가족끼리 열람',
+        body: '공동 지출과 예산을 가족 구성원이 서로 볼 수 있어요.',
+      },
+      {
+        title: '카드 문자 수집',
+        body: '내가 등록한 기기가 보낸 카드사 결제 문자를 받아 거래로 정리해요. 등록하지 않은 기기에서는 수집되지 않아요.',
+      },
+      {
+        title: '문자 원문 보관',
+        body: '수집한 문자의 원문이 데이터베이스와 파일 저장소에 함께 보관돼요. 더보기 › 개인정보에서 원문을 얼마나 남길지 고를 수 있고, 고른 정책에 맞는 원문은 자동으로 지워져요. 거래·금액·분류 결과는 지우지 않아요.',
+      },
+      {
+        title: '언제든 철회',
+        body: '더보기 › 개인정보에서 언제든 철회할 수 있어요. 철회하면 등록된 기기가 즉시 해제되어 새 문자 수집이 멈춰요. 이미 보관된 문자 원문은 철회로 한꺼번에 지워지지 않고, 선택한 보존 정책에 따라 지워져요.',
       },
     ],
   },
@@ -303,19 +330,36 @@ export const householdConsentRecordSchema = z.object({
 export type HouseholdConsentRecord = z.infer<typeof householdConsentRecordSchema>;
 
 /**
- * 자동 삭제 정책. **지금은 `none`뿐이다.**
+ * 문자 원문 자동 삭제 정책(SOO-34 / 로드맵 C-3).
  *
- * 값이 하나인 이유: 보존정책 선택·purge 잡은 구현되지 않았다(로드맵 5-1 보류).
- * 열거형을 하나로 묶어 두면 화면이 "N일 뒤 삭제"를 표시할 방법 자체가 없어진다 —
- * 지키지 못할 약속을 타입으로 막는 것이 여기서의 목적이다. purge가 생기면 값을 늘린다.
+ * - `none`: 계속 — 자동 삭제 없음(기존 기본값, 이름 유지로 마이그레이션 없이 호환)
+ * - `days_30`: 수신 시각 기준 30일이 지난 원문 삭제
+ * - `after_parse`: 파싱 성공(`parsed`) 원문 삭제
+ * - `failures_only`: 실패·처리 중만 남기고 성공·비거래(`parsed`/`ignored`) 원문 삭제
  */
-export const retentionPolicySchema = z.enum(['none']);
+export const retentionPolicySchema = z.enum([
+  'none',
+  'days_30',
+  'after_parse',
+  'failures_only',
+]);
 export type RetentionPolicy = z.infer<typeof retentionPolicySchema>;
 
-/** "지금 무엇이 얼마나 보관되어 있는가" — 읽기 전용 현황. */
+/** 원문 purge 이력 한 줄 — 본문은 절대 포함하지 않는다. */
+export const smsRawPurgeLogSchema = z.object({
+  id: z.string(),
+  policy: retentionPolicySchema,
+  purgedEventCount: z.number().int(),
+  purgedSuppressionCount: z.number().int(),
+  triggeredBy: z.enum(['user', 'scheduler']),
+  createdAt: z.string(),
+});
+export type SmsRawPurgeLog = z.infer<typeof smsRawPurgeLogSchema>;
+
+/** "지금 무엇이 얼마나 보관되어 있는가" + 선택한 보존 정책. */
 export const privacyRetentionSchema = z.object({
   policy: retentionPolicySchema,
-  /** 이 가구에 보관된 카드 문자 건수. */
+  /** 원문 사본이 아직 남은 카드 문자 건수. */
   smsEventCount: z.number().int(),
   /** 파일 저장소에 올라간 원문의 총 바이트(집계 기준: source_items.size_bytes). */
   storedBytes: z.number().int(),
@@ -324,8 +368,46 @@ export const privacyRetentionSchema = z.object({
   newestReceivedAt: z.string().nullable(),
   /** 파일 저장소에서 이 가구의 원문이 쌓이는 경로 접두사. */
   objectKeyPrefix: z.string(),
+  /** 최근 삭제 이력(최신순, 소수). 원문 본문 없음. */
+  recentPurges: z.array(smsRawPurgeLogSchema),
 });
 export type PrivacyRetention = z.infer<typeof privacyRetentionSchema>;
+
+/**
+ * `POST /v1/households/:id/privacy/retention/preview` — 정책 변경 전 영향 미리보기.
+ * 미리보기와 실제 삭제가 같은 판정 함수를 쓴다.
+ */
+export const privacyRetentionPreviewRequestSchema = z.object({
+  policy: retentionPolicySchema,
+});
+export type PrivacyRetentionPreviewRequest = z.infer<
+  typeof privacyRetentionPreviewRequestSchema
+>;
+
+export const privacyRetentionPreviewResponseSchema = z.object({
+  policy: retentionPolicySchema,
+  matchingEventCount: z.number().int(),
+  matchingSuppressionCount: z.number().int(),
+  /** 이 정책이 앞으로 하는 일(화면 문구). */
+  effectSummary: z.string(),
+});
+export type PrivacyRetentionPreviewResponse = z.infer<
+  typeof privacyRetentionPreviewResponseSchema
+>;
+
+/**
+ * `POST /v1/households/:id/privacy/retention` — 정책 적용.
+ * `confirm: true`와 미리보기 건수가 같아야 한다(어긋나면 409).
+ */
+export const privacyRetentionUpdateRequestSchema = z.object({
+  policy: retentionPolicySchema,
+  confirm: z.literal(true),
+  expectedEventCount: z.number().int().nonnegative(),
+  expectedSuppressionCount: z.number().int().nonnegative(),
+});
+export type PrivacyRetentionUpdateRequest = z.infer<
+  typeof privacyRetentionUpdateRequestSchema
+>;
 
 /** `GET /v1/households/:id/privacy` — Control Center가 읽는 전체 현황. */
 export const privacyOverviewSchema = z.object({
@@ -348,6 +430,17 @@ export const privacyOverviewSchema = z.object({
   myActiveDeviceCount: z.number().int(),
 });
 export type PrivacyOverview = z.infer<typeof privacyOverviewSchema>;
+
+export const privacyRetentionUpdateResponseSchema = z.object({
+  overview: privacyOverviewSchema,
+  purgedEventCount: z.number().int(),
+  purgedSuppressionCount: z.number().int(),
+  failedEventCount: z.number().int(),
+  failedSuppressionCount: z.number().int(),
+});
+export type PrivacyRetentionUpdateResponse = z.infer<
+  typeof privacyRetentionUpdateResponseSchema
+>;
 
 /**
  * `POST /v1/households/:id/privacy/consent` — 동의(최초·재동의 공통).

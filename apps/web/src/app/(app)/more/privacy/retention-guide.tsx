@@ -1,19 +1,25 @@
 /* ---------------------------------------------------------------------------
  * 개인정보 › '자세히' 시트의 보관 안내.
  *
- * 수집을 멈추는 방법은 실제 버튼 이름과 위치로 쓴다. 예전 문구 '기기를 폐기하면 돼요'는 문자 연동
- * 화면 어디에도 없는 말이었다(실제는 기기 ⋯ 메뉴의 '연결 해제', devices/page.tsx). 연락할 창구가
- * 없으므로 '알려 주세요'처럼 갈 곳 없는 부탁은 하지 않는다.
+ * 수집을 멈추는 방법은 실제 버튼 이름과 위치로 쓴다. 보존 정책은 이 화면에서
+ * 고르며, 철회(연결 해제)가 곧 전체 원문 삭제가 되지 않는다고 분명히 적는다.
  * ------------------------------------------------------------------------- */
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 
+import type { RetentionPolicy } from "@family/contracts";
+
+import { retentionPolicyLabel } from "./retention-policy-labels";
+
 export function RetentionGuide({
+  policy,
   onNavigate,
 }: Readonly<{
+  policy: RetentionPolicy;
   /** 문자 연동으로 넘어가기 전에 시트를 닫는다. */
   onNavigate?: () => void;
 }>) {
+  const policyName = retentionPolicyLabel(policy);
   return (
     <div className="text-body text-muted-foreground flex max-h-[60dvh] flex-col gap-3 overflow-y-auto pb-2">
       <p>
@@ -21,18 +27,15 @@ export function RetentionGuide({
         <strong className="text-foreground font-medium">
           문자 연동 › 기기 ⋯ › 연결 해제
         </strong>
-        를 눌러 주세요.
+        를 눌러 주세요. 연결을 해제해도 이미 보관된 원문이 한꺼번에 지워지지는
+        않아요.
       </p>
       <p>
-        다만{" "}
-        <strong className="text-foreground font-medium">
-          이미 보관된 문자는 그대로 남아요.
-        </strong>{" "}
-        자동 삭제와 보관 기간 설정은 만들지 않기로 했어요.
-      </p>
-      <p>
-        받은 문자는 금액이 틀렸을 때 다시 읽어 바로잡는 유일한 근거라서, 지우면
-        과거 지출이 맞는지 확인할 방법이 함께 사라지거든요.
+        지금 보존 정책은{" "}
+        <strong className="text-foreground font-medium">{policyName}</strong>
+        이에요. 이 화면에서 정책을 바꾸면, 미리보기로 지금 지워질 건수를 확인한
+        뒤에만 적용돼요. 거래·금액·분류 결과는 지우지 않고 문자 원문 사본만
+        지워요.
       </p>
       <Link
         href="/devices"

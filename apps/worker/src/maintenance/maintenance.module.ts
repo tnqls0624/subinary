@@ -7,9 +7,12 @@
  */
 import { Module } from '@nestjs/common';
 
+import { StorageModule } from '../storage/storage.module';
 import { DeviceNonceCleanupService } from './device-nonce-cleanup.service';
+import { SmsRawRetentionCleanupService } from './sms-raw-retention-cleanup.service';
 
 @Module({
-  providers: [DeviceNonceCleanupService],
+  imports: [StorageModule],
+  providers: [DeviceNonceCleanupService, SmsRawRetentionCleanupService],
 })
 export class MaintenanceModule {}

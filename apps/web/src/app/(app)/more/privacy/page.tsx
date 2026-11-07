@@ -2,20 +2,13 @@
 /* ---------------------------------------------------------------------------
  * Family Memory AI — web · 개인정보 (/more/privacy)
  *
- * 이 화면이 답하는 질문은 둘이다.
- *   1. 내 데이터가 어디서 들어오나 (문자 보내는 기기 수 → `/devices`)
- *   2. 지금 무엇이 얼마나 보관돼 있나 (카드 문자 건수 · 시작한 달, 읽기 전용)
+ * 1. 내 데이터가 어디서 들어오나 (문자 보내는 기기 수 → `/devices`)
+ * 2. 지금 무엇이 얼마나 보관돼 있나 (카드 문자 건수 · 시작한 달)
+ * 3. 원문을 얼마나 남길지 (보존 정책 선택 · 미리보기 · 적용) — SOO-34
  *
- * 가족 가입 동의 절차는 2026-11-05에 없앴다(소유자 결정 — 두 사람이 쓰는 가족 앱이라 필요 없다).
- * 이미 남은 동의 기록은 DB에 그대로 있고, 문자 수집을 멈추려면 문자 연동에서 기기의 ⋯ 메뉴 →
- * '연결 해제'를 누른다('자세히' 시트가 이 경로와 문자 연동 링크를 준다, retention-guide.tsx).
- *
- * ⚠️ 이 화면은 **삭제를 약속하지 않는다.** 문자 purge 잡·보존기간 선택은 **만들지
- * 않기로 했다**(2026-08-18 사용자 결정, 로드맵 5-1). 보존정책은 `none` 동결이다.
- * "N일 뒤 삭제"도 "곧 됩니다"도 쓰지 않는다 — 지키지 못할 약속과 **하지 않을 약속**은
- * 똑같이 거짓말이고, 후자가 더 오래 간다. 보관은 **지금 상태를 그대로 보여주기만** 한다.
+ * 새 최상위 화면·탭을 만들지 않는다. 가족 가입 동의 UI는 2026-11-05에 없앴다.
  * ------------------------------------------------------------------------- */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   MessageSquareText,
@@ -25,9 +18,14 @@ import {
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
-import type { PrivacyOverview } from "@family/contracts";
+import type {
+  PrivacyOverview,
+  PrivacyRetentionPreviewResponse,
+  RetentionPolicy,
+} from "@family/contracts";
 import { DEFAULT_TIMEZONE } from "@family/shared";
 
+import { Button } from "@/components/ui/button";
 import {
   BottomSheet,
   ErrorState,
@@ -36,8 +34,17 @@ import {
 } from "@/components/widgets";
 import { useAuth } from "@/lib/auth-context";
 import { useHousehold } from "@/lib/household-context";
-import { fetchPrivacyOverview, privacyQueryKey } from "./privacy-api";
+import {
+  fetchPrivacyOverview,
+  previewRetentionPolicy,
+  privacyQueryKey,
+  updateRetentionPolicy,
+} from "./privacy-api";
 import { RetentionGuide } from "./retention-guide";
+import {
+  RETENTION_POLICY_OPTIONS,
+  retentionPolicyLabel,
+} from "./retention-policy-labels";
 
 const yearMonthFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: DEFAULT_TIMEZONE,
@@ -77,7 +84,6 @@ function SettingRow({
       />
       <span className="text-body min-w-0 flex-1">{title}</span>
       {href !== undefined ? (
-        // 70% 농도: 흰 바탕에서 아이콘 대비 3:1을 넘긴다(ListRow의 ›와 같은 값).
         <ChevronRight
           className="text-muted-foreground/70 size-5 shrink-0"
           aria-hidden="true"
@@ -99,10 +105,25 @@ function SettingRow({
   );
 }
 
+function policyCaption(policy: RetentionPolicy): string {
+  if (policy === "none") {
+    return "받은 문자는 자동으로 지워지지 않아요";
+  }
+  return `보존 정책 · ${retentionPolicyLabel(policy)}`;
+}
+
 export default function PrivacyPage() {
   const { householdId } = useHousehold();
   const { authedFetch } = useAuth();
+  const queryClient = useQueryClient();
   const [retentionOpen, setRetentionOpen] = useState(false);
+  const [policySheetOpen, setPolicySheetOpen] = useState(false);
+  const [pendingPolicy, setPendingPolicy] = useState<RetentionPolicy | null>(
+    null
+  );
+  const [preview, setPreview] =
+    useState<PrivacyRetentionPreviewResponse | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const overviewQuery = useQuery<PrivacyOverview>({
     queryKey: privacyQueryKey(householdId),
@@ -113,11 +134,55 @@ export default function PrivacyPage() {
       ),
   });
 
+  const previewMutation = useMutation({
+    mutationFn: (policy: RetentionPolicy) =>
+      authedFetch((token) =>
+        previewRetentionPolicy(token, householdId as string, policy)
+      ),
+    onSuccess: (data) => {
+      setPreview(data);
+      setActionError(null);
+    },
+    onError: () => {
+      setActionError("영향 미리보기를 불러오지 못했어요");
+      setPreview(null);
+    },
+  });
+
+  const applyMutation = useMutation({
+    mutationFn: () => {
+      if (!pendingPolicy || !preview) {
+        throw new Error("preview missing");
+      }
+      return authedFetch((token) =>
+        updateRetentionPolicy(token, householdId as string, {
+          policy: pendingPolicy,
+          expectedEventCount: preview.matchingEventCount,
+          expectedSuppressionCount: preview.matchingSuppressionCount,
+        })
+      );
+    },
+    onSuccess: async () => {
+      setPolicySheetOpen(false);
+      setPendingPolicy(null);
+      setPreview(null);
+      setActionError(null);
+      await queryClient.invalidateQueries({
+        queryKey: privacyQueryKey(householdId),
+      });
+    },
+    onError: () => {
+      setActionError(
+        "정책을 바꾸지 못했어요. 보관 현황이 바뀌었을 수 있으니 다시 미리보기 해 주세요."
+      );
+    },
+  });
+
   if (overviewQuery.isLoading) {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
         <PageBackHeader title="개인정보" />
-        <ListLoading rows={2} label="개인정보 설정을 불러오는 중이에요." />
+        <ListLoading rows={3} label="개인정보 설정을 불러오는 중이에요." />
       </div>
     );
   }
@@ -137,8 +202,24 @@ export default function PrivacyPage() {
     );
   }
 
-  const { smsEventCount, oldestReceivedAt } = overview.retention;
+  const { smsEventCount, oldestReceivedAt, policy, recentPurges } =
+    overview.retention;
   const deviceCount = overview.myActiveDeviceCount;
+
+  function openPolicySheet() {
+    setPendingPolicy(policy);
+    setPreview(null);
+    setActionError(null);
+    setPolicySheetOpen(true);
+    void previewMutation.mutateAsync(policy);
+  }
+
+  function selectPolicy(next: RetentionPolicy) {
+    setPendingPolicy(next);
+    setPreview(null);
+    setActionError(null);
+    void previewMutation.mutateAsync(next);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
@@ -160,12 +241,8 @@ export default function PrivacyPage() {
               : "보관 중인 카드 문자가 없어요"
           }
         />
-        {/*
-         * 지키지 못할 약속을 하지 않기 위한 문장이다. 없다는 사실은 여기 한 줄로, 그 이유는
-         * '자세히' 시트에 둔다 — 이유 없는 부재는 게으름으로 읽히지만, 이유 있는 부재는 판단으로 읽힌다.
-         */}
-        <p className="text-caption text-muted-foreground px-5 pb-4">
-          받은 문자는 자동으로 지워지지 않아요{" "}
+        <p className="text-caption text-muted-foreground px-5 pb-2">
+          {policyCaption(policy)}{" "}
           <button
             type="button"
             onClick={() => setRetentionOpen(true)}
@@ -174,6 +251,23 @@ export default function PrivacyPage() {
             자세히
           </button>
         </p>
+        <div className="px-5 pb-4">
+          <Button
+            type="button"
+            variant="weak"
+            className="w-full"
+            onClick={openPolicySheet}
+          >
+            원문 보존 정책 바꾸기
+          </Button>
+        </div>
+        {recentPurges.length > 0 ? (
+          <p className="text-caption text-muted-foreground px-5 pb-4">
+            최근 삭제{" "}
+            {recentPurges[0]!.purgedEventCount.toLocaleString("ko-KR")}건 ·{" "}
+            {retentionPolicyLabel(recentPurges[0]!.policy)}
+          </p>
+        ) : null}
       </section>
 
       <BottomSheet
@@ -181,7 +275,90 @@ export default function PrivacyPage() {
         onOpenChange={setRetentionOpen}
         title="보관 안내"
       >
-        <RetentionGuide onNavigate={() => setRetentionOpen(false)} />
+        <RetentionGuide
+          policy={policy}
+          onNavigate={() => setRetentionOpen(false)}
+        />
+      </BottomSheet>
+
+      <BottomSheet
+        open={policySheetOpen}
+        onOpenChange={setPolicySheetOpen}
+        title="원문 보존 정책"
+      >
+        <div className="flex flex-col gap-3 pb-2">
+          <p className="text-body text-muted-foreground">
+            고른 정책에 맞는 문자 원문 사본만 지워요. 거래와 금액은 남아요.
+          </p>
+          <div role="radiogroup" aria-label="원문 보존 정책" className="flex flex-col gap-1">
+            {RETENTION_POLICY_OPTIONS.map((option) => {
+              const selected = pendingPolicy === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => selectPolicy(option.value)}
+                  className={`rounded-control flex min-h-14 flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors ${
+                    selected
+                      ? "bg-primary/10 text-foreground"
+                      : "hover:bg-muted/60 active:bg-muted text-foreground"
+                  }`}
+                >
+                  <span className="text-body font-semibold">{option.label}</span>
+                  <span className="text-caption text-muted-foreground">
+                    {option.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {previewMutation.isPending ? (
+            <p className="text-caption text-muted-foreground">
+              지금 지워질 건수를 세고 있어요…
+            </p>
+          ) : null}
+          {preview && pendingPolicy ? (
+            <p className="text-body">
+              {pendingPolicy === "none" ? (
+                <>자동 삭제를 끄면 지금 원문을 지우지 않아요.</>
+              ) : (
+                <>
+                  지금{" "}
+                  <strong className="font-semibold">
+                    문자 {preview.matchingEventCount.toLocaleString("ko-KR")}건
+                  </strong>
+                  {preview.matchingSuppressionCount > 0
+                    ? ` · 중복 보관 ${preview.matchingSuppressionCount.toLocaleString("ko-KR")}건`
+                    : null}
+                  이 지워져요. {preview.effectSummary}
+                </>
+              )}
+            </p>
+          ) : null}
+          {actionError ? (
+            <p role="alert" className="text-caption text-destructive">
+              {actionError}
+            </p>
+          ) : null}
+
+          <Button
+            type="button"
+            className="w-full"
+            disabled={
+              !pendingPolicy ||
+              !preview ||
+              previewMutation.isPending ||
+              applyMutation.isPending ||
+              pendingPolicy === policy
+            }
+            onClick={() => void applyMutation.mutateAsync()}
+          >
+            {applyMutation.isPending ? "적용하는 중…" : "이 정책으로 적용"}
+          </Button>
+        </div>
       </BottomSheet>
     </div>
   );
