@@ -136,12 +136,16 @@ export function sanitizeOutsideTableFormControls(value) {
   };
 }
 
+function sanitizeLookupFlag(value) {
+  return value === true;
+}
+
 /**
  * One scrape page: tableCount + header texts + raw/eligible row counts +
  * per-table raw/pre-skip/form-control counts + outside-table input count +
  * outside-table visibility/kind breakdown + iframe count/paths + sanitized
- * page path. Never includes cell values, form-control values, query strings,
- * or arbitrary extra keys.
+ * page path + payment-lookup counts/flags. Never includes cell values,
+ * form-control values, option labels, query strings, or arbitrary extra keys.
  */
 export function sanitizePageLayoutDiagnostic(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -173,6 +177,9 @@ export function sanitizePageLayoutDiagnostic(value) {
     iframeCount: sanitizeNonNegInt(value.iframeCount, 100),
     iframePaths: sanitizeIframePaths(value.iframePaths),
     pagePath: sanitizeLayoutPagePath(value.pagePath),
+    lookupNonPlaceholderOptionCount: sanitizeNonNegInt(value.lookupNonPlaceholderOptionCount, 20),
+    lookupClicked: sanitizeLookupFlag(value.lookupClicked),
+    lookupBodyRowsAppeared: sanitizeLookupFlag(value.lookupBodyRowsAppeared),
   };
 }
 
@@ -202,6 +209,9 @@ export function sanitizeLayoutDiagnostics(layout) {
       iframeCount: sanitized.iframeCount,
       iframePaths: sanitized.iframePaths,
       pagePath: sanitized.pagePath,
+      lookupNonPlaceholderOptionCount: sanitized.lookupNonPlaceholderOptionCount,
+      lookupClicked: sanitized.lookupClicked,
+      lookupBodyRowsAppeared: sanitized.lookupBodyRowsAppeared,
     };
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -219,7 +229,7 @@ export function formatOutsideTableFormControlsFragment(count, breakdown) {
 /**
  * Compact warn-line fragment. Header texts + counts + sanitized path only —
  * never cell values, form values, or query strings.
- * Example: layout=payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];ifr=0;path=https://www.sujain.co.kr/mypage/payment|unit-items:…
+ * Example: layout=payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];lookup=np=0;click=0;rows=0;ifr=0;path=https://www.sujain.co.kr/mypage/payment|unit-items:…
  */
 export function formatLayoutWarnFragment(layout) {
   const sanitized = sanitizeLayoutDiagnostics(layout);
@@ -239,8 +249,9 @@ export function formatLayoutWarnFragment(layout) {
       entry.outsideTableFormControlCount,
       entry.outsideTableFormControls,
     );
+    const lookupText = `lookup=np=${entry.lookupNonPlaceholderOptionCount};click=${entry.lookupClicked ? 1 : 0};rows=${entry.lookupBodyRowsAppeared ? 1 : 0}`;
     parts.push(
-      `${page}:t=${entry.tableCount};h=${headerText || '[]'};raw=${entry.rawRowCount};eligible=${entry.eligibleRowCount};tables=${tableText || '[]'};${outText};ifr=${entry.iframeCount};path=${pathText}`,
+      `${page}:t=${entry.tableCount};h=${headerText || '[]'};raw=${entry.rawRowCount};eligible=${entry.eligibleRowCount};tables=${tableText || '[]'};${outText};${lookupText};ifr=${entry.iframeCount};path=${pathText}`,
     );
   }
   if (parts.length === 0) return '';

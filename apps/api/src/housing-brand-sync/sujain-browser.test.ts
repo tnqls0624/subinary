@@ -213,6 +213,9 @@ describe('sujain runner diagnostics without credentials', () => {
         iframeCount: 0,
         iframePaths: [],
         pagePath: 'https://www.sujain.co.kr/mypage/payment',
+        lookupNonPlaceholderOptionCount: 0,
+        lookupClicked: false,
+        lookupBodyRowsAppeared: false,
       },
       'unit-items': {
         tableCount: 1,
@@ -231,6 +234,9 @@ describe('sujain runner diagnostics without credentials', () => {
         iframeCount: 0,
         iframePaths: [],
         pagePath: 'https://www.sujain.co.kr/mypage/unit-items',
+        lookupNonPlaceholderOptionCount: 0,
+        lookupClicked: false,
+        lookupBodyRowsAppeared: false,
       },
     };
     expect(classifySujainRunnerFailure(
@@ -281,6 +287,9 @@ describe('sujain runner diagnostics without credentials', () => {
         iframeCount: 1,
         iframePaths: ['https://www.sujain.co.kr/embed'],
         pagePath: 'https://www.sujain.co.kr/mypage/payment',
+        lookupNonPlaceholderOptionCount: 0,
+        lookupClicked: false,
+        lookupBodyRowsAppeared: false,
       },
       'unit-items': {
         tableCount: 0,
@@ -299,14 +308,17 @@ describe('sujain runner diagnostics without credentials', () => {
         iframeCount: 0,
         iframePaths: [],
         pagePath: 'https://www.sujain.co.kr/mypage/unit-items',
+        lookupNonPlaceholderOptionCount: 0,
+        lookupClicked: false,
+        lookupBodyRowsAppeared: false,
       },
     };
     const fragment = formatLayoutWarnFragment(layout);
     expect(fragment).toContain(
-      'layout=payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=2[vi=1,vs=1,vt=0,h=0,o=0];ifr=1;path=https://www.sujain.co.kr/mypage/payment',
+      'layout=payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=2[vi=1,vs=1,vt=0,h=0,o=0];lookup=np=0;click=0;rows=0;ifr=1;path=https://www.sujain.co.kr/mypage/payment',
     );
     expect(fragment).toContain(
-      'unit-items:t=0;h=[];raw=0;eligible=0;tables=[];out=0[vi=0,vs=0,vt=0,h=0,o=0];ifr=0;path=https://www.sujain.co.kr/mypage/unit-items',
+      'unit-items:t=0;h=[];raw=0;eligible=0;tables=[];out=0[vi=0,vs=0,vt=0,h=0,o=0];lookup=np=0;click=0;rows=0;ifr=0;path=https://www.sujain.co.kr/mypage/unit-items',
     );
     expect(fragment).not.toContain('합성 회원');
     expect(fragment).not.toContain('000-0000-0000');
@@ -326,6 +338,9 @@ describe('sujain runner diagnostics without credentials', () => {
         iframeCount: 0,
         iframePaths: [],
         pagePath: null,
+        lookupNonPlaceholderOptionCount: 0,
+        lookupClicked: false,
+        lookupBodyRowsAppeared: false,
         cells: ['합성 회원'],
       },
     })).toBeNull();
@@ -569,6 +584,9 @@ describe('sujain child transport with synthetic streams', () => {
           iframeCount: 0,
           iframePaths: [],
           pagePath: 'https://www.sujain.co.kr/mypage/payment',
+          lookupNonPlaceholderOptionCount: 0,
+          lookupClicked: false,
+          lookupBodyRowsAppeared: false,
         },
         'unit-items': {
           tableCount: 1,
@@ -587,6 +605,9 @@ describe('sujain child transport with synthetic streams', () => {
           iframeCount: 0,
           iframePaths: [],
           pagePath: 'https://www.sujain.co.kr/mypage/unit-items',
+          lookupNonPlaceholderOptionCount: 0,
+          lookupClicked: false,
+          lookupBodyRowsAppeared: false,
         },
       },
     }));
@@ -600,10 +621,10 @@ describe('sujain child transport with synthetic streams', () => {
       /sujain runner failed code=unsupported_layout reason=none stage=scrape_unit_items layout=/,
     );
     expect(joined).toContain(
-      'payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];ifr=0;path=https://www.sujain.co.kr/mypage/payment',
+      'payment:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];lookup=np=0;click=0;rows=0;ifr=0;path=https://www.sujain.co.kr/mypage/payment',
     );
     expect(joined).toContain(
-      'unit-items:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];ifr=0;path=https://www.sujain.co.kr/mypage/unit-items',
+      'unit-items:t=1;h=[항목|내용];raw=2;eligible=0;tables=[r=2,p=3,i=0];out=0[vi=0,vs=0,vt=0,h=0,o=0];lookup=np=0;click=0;rows=0;ifr=0;path=https://www.sujain.co.kr/mypage/unit-items',
     );
     expect(joined).not.toContain('합성 회원');
     expect(joined).not.toContain('000-0000-0000');

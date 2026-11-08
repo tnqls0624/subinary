@@ -202,6 +202,9 @@ test('layout diagnostics include per-table counts and never cell or input values
     iframeCount: captured.iframeCount,
     iframePaths: captured.iframePaths,
     pagePath: 'https://www.sujain.co.kr/mypage/payment?session=SECRET_TOKEN#top',
+    lookupNonPlaceholderOptionCount: 0,
+    lookupClicked: false,
+    lookupBodyRowsAppeared: false,
     cells: captured.rows.flatMap((r) => r.cells),
   });
   assert.ok(layout);
@@ -227,7 +230,7 @@ test('layout diagnostics include per-table counts and never cell or input values
   }
   assert.match(
     fragment,
-    /payment:t=2;h=\[회차\|약정일자\|약정금액\|납부일자\|납부원금\|연체료\|할인료\|실납부금\],\[이름\*\];raw=5;eligible=1;tables=\[r=1,p=2,i=8\],\[r=4,p=5,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment/,
+    /payment:t=2;h=\[회차\|약정일자\|약정금액\|납부일자\|납부원금\|연체료\|할인료\|실납부금\],\[이름\*\];raw=5;eligible=1;tables=\[r=1,p=2,i=8\],\[r=4,p=5,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];lookup=np=0;click=0;rows=0;ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment/,
   );
 });
 
@@ -405,6 +408,9 @@ test('outside-table breakdown splits visibility and kind without leaking attribu
     iframeCount: 0,
     iframePaths: [],
     pagePath: 'https://www.sujain.co.kr/mypage/payment',
+    lookupNonPlaceholderOptionCount: 0,
+    lookupClicked: false,
+    lookupBodyRowsAppeared: false,
   });
   assert.ok(layout);
   const text = JSON.stringify(layout);

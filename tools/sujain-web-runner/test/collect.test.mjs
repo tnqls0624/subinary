@@ -6,6 +6,10 @@ import {
   normalizeTableEvaluateResult,
   readSujainPages,
 } from '../collect.mjs';
+import {
+  applyOutsideTableLookup,
+  discoverOutsideTableLookup,
+} from '../payment-lookup.mjs';
 import { formatLayoutWarnFragment, SujainReadError } from '../policy.mjs';
 
 /**
@@ -646,6 +650,9 @@ test('unsupported_layout diagnostics include table counts and header texts only'
   });
   assert.equal(diagnostics.layout.payment.iframeCount, 0);
   assert.equal(diagnostics.layout.payment.pagePath, 'https://www.sujain.co.kr/mypage/payment');
+  assert.equal(diagnostics.layout.payment.lookupNonPlaceholderOptionCount, 0);
+  assert.equal(diagnostics.layout.payment.lookupClicked, false);
+  assert.equal(diagnostics.layout.payment.lookupBodyRowsAppeared, false);
   assert.equal(diagnostics.layout['unit-items'].tableCount, 1);
   assert.deepEqual(diagnostics.layout['unit-items'].tableHeaders, [['항목', '내용']]);
   assert.equal(diagnostics.layout['unit-items'].rawRowCount, 2);
@@ -675,11 +682,11 @@ test('unsupported_layout diagnostics include table counts and header texts only'
   }
   assert.match(
     warnFragment,
-    /layout=payment:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=0,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment/,
+    /layout=payment:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=0,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];lookup=np=0;click=0;rows=0;ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment/,
   );
   assert.match(
     warnFragment,
-    /unit-items:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=0,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/unit-items/,
+    /unit-items:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=0,i=0\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];lookup=np=0;click=0;rows=0;ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/unit-items/,
   );
   // Layout diagnostic object never carries a cells key.
   assert.equal(Object.hasOwn(diagnostics.layout.payment, 'cells'), false);
@@ -705,6 +712,9 @@ test('layout diagnostic builder never copies cell values from a capture payload'
     iframeCount: 0,
     iframePaths: [],
     pagePath: 'https://www.sujain.co.kr/mypage/payment?tok=SECRET',
+    lookupNonPlaceholderOptionCount: 0,
+    lookupClicked: false,
+    lookupBodyRowsAppeared: false,
     cells: ['합성 회원', '000-0000-0000', '500,000'],
     rows: [{ cells: ['합성 회원', '500,000'], headers: ['항목', '금액'] }],
   });
@@ -884,4 +894,328 @@ test('contact rows do not hide a later eligible option table during the wait', a
   assert.ok(
     result.rows.some((row) => row.sourcePage === 'unit-items' && row.cells[0] === '합성 항목 A'),
   );
+});
+
+/** Synthetic payment headers — mirrors official layout shape without real PII. */
+const SYNTHETIC_PAYMENT_HEADERS = [
+  '회차', '약정일자', '약정금액', '납부일자', '납부원금', '연체료', '할인료', '실납부금',
+];
+
+function syntheticPaymentRow(amountCell = '1000000') {
+  return {
+    cells: ['1', '2026-01-01', amountCell, '2026-01-02', amountCell, '0', '0', amountCell],
+    headers: SYNTHETIC_PAYMENT_HEADERS,
+    sourcePage: 'payment',
+  };
+}
+
+function syntheticPaymentEvaluate(rows) {
+  return {
+    tableCount: 2,
+    tableHeaders: [SYNTHETIC_PAYMENT_HEADERS, ['이름*']],
+    tables: [
+      { rawRowCount: rows.length, preSkipRowCount: rows.length + 1, formControlCount: 0 },
+      { rawRowCount: 1, preSkipRowCount: 2, formControlCount: 0 },
+    ],
+    outsideTableFormControlCount: 2,
+    outsideTableFormControls: {
+      visibleInput: 0,
+      visibleSelect: 1,
+      visibleTextarea: 0,
+      hidden: 0,
+      other: 1,
+    },
+    iframeCount: 0,
+    iframePaths: [],
+    rows: [
+      ...rows,
+      { cells: ['합성 회원'], headers: ['이름*'], sourcePage: 'payment' },
+    ],
+  };
+}
+
+/**
+ * Login fixture with an outside-table select + adjacent 조회. Payment table
+ * body rows appear only after a non-placeholder option is selected and 조회
+ * is clicked. Option labels/values are synthetic secrets used only to assert
+ * they never leak into diagnostics.
+ */
+function paymentLookupLoginPage({
+  options = [
+    { value: '', label: 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK' },
+    { value: 'synth-unit-a', label: 'SYNTHETIC_OPTION_LABEL_ALPHA' },
+  ],
+  /** Map option value → payment body rows after that option + 조회. */
+  rowsByValue = {
+    'synth-unit-a': [syntheticPaymentRow('1000000')],
+  },
+  /** When true, goto(unit-items) lands on /mypage/payment. */
+  unitItemsRedirectsToPayment = false,
+  unitItemsRows = [{ cells: ['synthetic-option', '100'], headers: ['품목', '금액'], sourcePage: 'unit-items' }],
+} = {}) {
+  const base = officialLoginPage({
+    afterClick: 'navigate',
+    paymentRows: syntheticPaymentEvaluate([]),
+    unitItemsRows,
+  });
+
+  let selectedIndex = 0;
+  let lookupClicked = false;
+  let lastAppliedValue = null;
+
+  const optionNodes = options.map((opt) => ({
+    value: opt.value,
+    textContent: opt.label,
+    label: opt.label,
+    getAttribute(key) {
+      return key === 'value' ? opt.value : null;
+    },
+  }));
+
+  const inquire = {
+    tagName: 'BUTTON',
+    textContent: '조회',
+    type: 'button',
+    parentElement: null,
+    nextElementSibling: null,
+    clickCalls: 0,
+    click() {
+      this.clickCalls += 1;
+      lookupClicked = true;
+      // Read the select's current index — apply sets it before click.
+      lastAppliedValue = optionNodes[select.selectedIndex]?.value ?? null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+
+  const select = {
+    tagName: 'SELECT',
+    options: optionNodes,
+    selectedIndex: 0,
+    value: optionNodes[0]?.value ?? '',
+    hidden: false,
+    style: {},
+    parentElement: null,
+    nextElementSibling: inquire,
+    parentNode: null,
+    getAttribute(key) {
+      return key === 'hidden' ? null : null;
+    },
+    closest() {
+      return null;
+    },
+    querySelectorAll(sel) {
+      return sel === 'option' ? optionNodes : [];
+    },
+    dispatchEvent() {
+      return true;
+    },
+  };
+
+  const row = {
+    tagName: 'DIV',
+    querySelectorAll(sel) {
+      if (!/a|button|input/i.test(sel)) return [];
+      return [inquire];
+    },
+  };
+  select.parentElement = row;
+  inquire.parentElement = row;
+
+  const lookupDoc = {
+    querySelectorAll(sel) {
+      if (sel === 'select') return [select];
+      if (sel === 'a, button, input') return [inquire];
+      if (sel === 'table') return [];
+      return [];
+    },
+  };
+
+  const originalGoto = base.page.goto.bind(base.page);
+  base.page.goto = async (target) => {
+    await originalGoto(target);
+    if (unitItemsRedirectsToPayment && String(target).includes('unit-items')) {
+      // Simulate official redirect of unit-items → payment.
+      base.page.url = () => 'https://www.sujain.co.kr/mypage/payment';
+      base.actions.push(['redirect', 'https://www.sujain.co.kr/mypage/payment']);
+    }
+  };
+
+  base.page.evaluate = async (fn, arg) => {
+    base.actions.push(['evaluate', typeof arg === 'string' ? arg : (arg && typeof arg === 'object' ? 'object' : arg)]);
+    if (fn === discoverOutsideTableLookup) {
+      // Playwright: page.evaluate(fn) → fn() with page document. Pass lookupDoc
+      // as the optional Node-test second/first doc the same way production uses
+      // document when no arg is provided — invoke with no plan arg.
+      const previous = globalThis.document;
+      globalThis.document = lookupDoc;
+      try {
+        return discoverOutsideTableLookup();
+      } finally {
+        if (previous === undefined) delete globalThis.document;
+        else globalThis.document = previous;
+      }
+    }
+    if (fn === applyOutsideTableLookup) {
+      // Playwright: page.evaluate(fn, plan) → fn(plan). Optional doc is 2nd arg
+      // for Node only (same pattern as captureSujainTables).
+      const result = applyOutsideTableLookup(arg, lookupDoc);
+      selectedIndex = select.selectedIndex;
+      return result;
+    }
+    // capture / table evaluate
+    const sourcePage = arg;
+    if (sourcePage === 'payment' || (sourcePage === 'unit-items' && unitItemsRedirectsToPayment)) {
+      if (lookupClicked && lastAppliedValue && rowsByValue[lastAppliedValue]) {
+        return syntheticPaymentEvaluate(rowsByValue[lastAppliedValue]);
+      }
+      return syntheticPaymentEvaluate([]);
+    }
+    if (sourcePage === 'unit-items') return unitItemsRows;
+    return [];
+  };
+
+  return {
+    ...base,
+    secrets: options.flatMap((opt) => [opt.value, opt.label]).filter(Boolean),
+    getLookupState: () => ({ selectedIndex, lookupClicked, lastAppliedValue, inquireClicks: inquire.clickCalls }),
+  };
+}
+
+test('non-first non-empty select option + 조회 fills payment table for existing capture', async () => {
+  const f = paymentLookupLoginPage();
+  const diagnostics = { stage: 'context', layout: {} };
+  const previous = process.env.SUJAIN_TABLE_WAIT_MS;
+  process.env.SUJAIN_TABLE_WAIT_MS = '200';
+  let result;
+  try {
+    result = await readSujainPages(f.page, job(), diagnostics);
+  } finally {
+    if (previous === undefined) delete process.env.SUJAIN_TABLE_WAIT_MS;
+    else process.env.SUJAIN_TABLE_WAIT_MS = previous;
+  }
+
+  assert.ok(result.rows.some((row) => row.sourcePage === 'payment' && row.cells[2] === '1000000'));
+  assert.equal(result.rows.some((row) => row.cells[0] === '합성 회원'), false);
+  assert.equal(diagnostics.layout.payment.lookupNonPlaceholderOptionCount, 1);
+  assert.equal(diagnostics.layout.payment.lookupClicked, true);
+  assert.equal(diagnostics.layout.payment.lookupBodyRowsAppeared, true);
+  assert.equal(f.getLookupState().inquireClicks >= 1, true);
+});
+
+test('조회 without changing a placeholder-only select does not invent payment rows', async () => {
+  const f = paymentLookupLoginPage({
+    options: [
+      { value: '', label: 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK' },
+      { value: '   ', label: 'SYNTHETIC_WHITESPACE_PLACEHOLDER' },
+    ],
+    rowsByValue: {},
+    unitItemsRows: [],
+  });
+  const diagnostics = { stage: 'context', layout: {} };
+  const previous = process.env.SUJAIN_TABLE_WAIT_MS;
+  process.env.SUJAIN_TABLE_WAIT_MS = '50';
+  try {
+    await assert.rejects(
+      () => readSujainPages(f.page, job(), diagnostics),
+      (error) => error instanceof SujainReadError && error.code === 'unsupported_layout',
+    );
+  } finally {
+    if (previous === undefined) delete process.env.SUJAIN_TABLE_WAIT_MS;
+    else process.env.SUJAIN_TABLE_WAIT_MS = previous;
+  }
+  assert.equal(f.getLookupState().inquireClicks, 0);
+  assert.equal(diagnostics.layout.payment.lookupNonPlaceholderOptionCount, 0);
+  assert.equal(diagnostics.layout.payment.lookupClicked, false);
+  assert.equal(diagnostics.layout.payment.lookupBodyRowsAppeared, false);
+});
+
+test('option labels and values never appear in lookup diagnostics or warn fragment', async () => {
+  const f = paymentLookupLoginPage({
+    options: [
+      { value: '', label: 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK' },
+      { value: 'synth-secret-value', label: 'SYNTHETIC_OPTION_LABEL_SECRET' },
+    ],
+    rowsByValue: {
+      'synth-secret-value': [syntheticPaymentRow('2000000')],
+    },
+  });
+  const diagnostics = { stage: 'context', layout: {} };
+  const previous = process.env.SUJAIN_TABLE_WAIT_MS;
+  process.env.SUJAIN_TABLE_WAIT_MS = '200';
+  try {
+    await readSujainPages(f.page, job(), diagnostics);
+  } finally {
+    if (previous === undefined) delete process.env.SUJAIN_TABLE_WAIT_MS;
+    else process.env.SUJAIN_TABLE_WAIT_MS = previous;
+  }
+
+  const serialized = JSON.stringify(diagnostics.layout);
+  const warnFragment = formatLayoutWarnFragment(diagnostics.layout);
+  const actionText = JSON.stringify(f.actions);
+  for (const leak of f.secrets) {
+    assert.equal(serialized.includes(leak), false, `layout leaked ${leak}`);
+    assert.equal(warnFragment.includes(leak), false, `warn leaked ${leak}`);
+    assert.equal(actionText.includes(leak), false, `actions leaked ${leak}`);
+  }
+  assert.match(warnFragment, /lookup=np=1;click=1;rows=1/);
+});
+
+test('multiple non-placeholder options are looked up and combined without double personal rows', async () => {
+  const f = paymentLookupLoginPage({
+    options: [
+      { value: '', label: 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK' },
+      { value: 'synth-a', label: 'SYNTHETIC_OPTION_LABEL_ALPHA' },
+      { value: 'synth-b', label: 'SYNTHETIC_OPTION_LABEL_BETA' },
+    ],
+    rowsByValue: {
+      'synth-a': [syntheticPaymentRow('1111111')],
+      'synth-b': [syntheticPaymentRow('2222222')],
+    },
+  });
+  const diagnostics = { stage: 'context', layout: {} };
+  const previous = process.env.SUJAIN_TABLE_WAIT_MS;
+  process.env.SUJAIN_TABLE_WAIT_MS = '200';
+  let result;
+  try {
+    result = await readSujainPages(f.page, job(), diagnostics);
+  } finally {
+    if (previous === undefined) delete process.env.SUJAIN_TABLE_WAIT_MS;
+    else process.env.SUJAIN_TABLE_WAIT_MS = previous;
+  }
+
+  const paymentAmounts = result.rows
+    .filter((row) => row.sourcePage === 'payment')
+    .map((row) => row.cells[2]);
+  assert.deepEqual(paymentAmounts.sort(), ['1111111', '2222222']);
+  assert.equal(diagnostics.layout.payment.lookupNonPlaceholderOptionCount, 2);
+  assert.equal(diagnostics.layout.payment.lookupClicked, true);
+  assert.equal(f.getLookupState().inquireClicks, 2);
+});
+
+test('unit-items redirecting to payment does not double-count after payment lookup', async () => {
+  const f = paymentLookupLoginPage({
+    unitItemsRedirectsToPayment: true,
+    unitItemsRows: syntheticPaymentEvaluate([syntheticPaymentRow('1000000')]),
+  });
+  const diagnostics = { stage: 'context', layout: {} };
+  const previous = process.env.SUJAIN_TABLE_WAIT_MS;
+  process.env.SUJAIN_TABLE_WAIT_MS = '200';
+  let result;
+  try {
+    result = await readSujainPages(f.page, job(), diagnostics);
+  } finally {
+    if (previous === undefined) delete process.env.SUJAIN_TABLE_WAIT_MS;
+    else process.env.SUJAIN_TABLE_WAIT_MS = previous;
+  }
+
+  const paymentRows = result.rows.filter((row) => row.sourcePage === 'payment');
+  assert.equal(paymentRows.length, 1);
+  assert.equal(result.rows.filter((row) => row.sourcePage === 'unit-items').length, 0);
+  assert.equal(diagnostics.layout.payment.lookupClicked, true);
+  assert.ok(diagnostics.layout['unit-items']);
+  assert.equal(diagnostics.layout['unit-items'].pagePath, 'https://www.sujain.co.kr/mypage/payment');
+  assert.equal(diagnostics.layout['unit-items'].lookupClicked, false);
 });

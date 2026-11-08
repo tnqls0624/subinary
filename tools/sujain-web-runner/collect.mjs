@@ -4,8 +4,13 @@ import {
   sanitizeLayoutPagePath,
   sanitizePageLayoutDiagnostic,
 } from './policy.mjs';
+import {
+  applyOutsideTableLookup,
+  discoverOutsideTableLookup,
+  emptyLookupDiagnostic,
+} from './payment-lookup.mjs';
 import { captureSujainTables } from './table-capture.mjs';
-import { SUJAIN_URLS } from './urls.mjs';
+import { SUJAIN_ORIGINS, SUJAIN_PATHS, SUJAIN_URLS } from './urls.mjs';
 
 /** Must match apps/api sujain-browser responseSchema string caps. */
 export const SUJAIN_CELL_MAX = 200;
@@ -64,6 +69,9 @@ export function buildPageLayoutDiagnostic({
   iframeCount,
   iframePaths,
   pagePath,
+  lookupNonPlaceholderOptionCount,
+  lookupClicked,
+  lookupBodyRowsAppeared,
 }) {
   return sanitizePageLayoutDiagnostic({
     sourcePage: sourcePage === 'unit-items' ? 'unit-items' : 'payment',
@@ -77,7 +85,36 @@ export function buildPageLayoutDiagnostic({
     iframeCount,
     iframePaths,
     pagePath,
+    lookupNonPlaceholderOptionCount,
+    lookupClicked,
+    lookupBodyRowsAppeared,
   });
+}
+
+function attachLookupDiagnostic(layout, lookup) {
+  const base = lookup && typeof lookup === 'object' ? lookup : emptyLookupDiagnostic();
+  return sanitizePageLayoutDiagnostic({
+    ...(layout && typeof layout === 'object' ? layout : {}),
+    sourcePage: layout?.sourcePage === 'unit-items' ? 'unit-items' : 'payment',
+    lookupNonPlaceholderOptionCount: base.lookupNonPlaceholderOptionCount,
+    lookupClicked: base.lookupClicked,
+    lookupBodyRowsAppeared: base.lookupBodyRowsAppeared,
+  });
+}
+
+function isPaymentLandedUrl(value) {
+  try {
+    const url = new URL(value);
+    return SUJAIN_ORIGINS.has(url.origin) && url.pathname === SUJAIN_PATHS.payment;
+  } catch {
+    return false;
+  }
+}
+
+function rowIdentityKey(row) {
+  const headers = Array.isArray(row?.headers) ? row.headers : [];
+  const cells = Array.isArray(row?.cells) ? row.cells : [];
+  return `${row?.sourcePage ?? ''}\u0001${headers.join('\u0001')}\u0002${cells.join('\u0001')}`;
 }
 
 function normalizeNonNegInt(value, max) {
@@ -253,10 +290,22 @@ function isExecutionContextDestroyedError(error) {
   return /Execution context was destroyed/u.test(message);
 }
 
-async function evaluateTableRows(page, sourcePage) {
+async function evaluateTableRows(page, sourcePage, { allowDestroyedRetry = true } = {}) {
   // captureSujainTables is self-contained (no closures) so Playwright can
   // serialize it into the page. It reads form-control values when td text is empty.
-  const raw = await page.evaluate(captureSujainTables, sourcePage);
+  let raw;
+  try {
+    raw = await page.evaluate(captureSujainTables, sourcePage);
+  } catch (error) {
+    if (!allowDestroyedRetry || !isExecutionContextDestroyedError(error)) throw error;
+    try {
+      await page.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+    } catch {
+      throw error;
+    }
+    if (isLoginUrl(page.url())) throw new SujainReadError('authentication_required');
+    raw = await page.evaluate(captureSujainTables, sourcePage);
+  }
 
   const normalized = normalizeTableEvaluateResult(raw);
   const eligible = normalized.rows.filter(isEligibleSujainCapturedRow);
@@ -319,13 +368,13 @@ async function tableRows(page, sourcePage) {
   }
 
   const deadline = Date.now() + tableWaitMs();
-  let destroyedRetried = false;
   let pageHref = '';
   try {
     pageHref = typeof page.url === 'function' ? page.url() : '';
   } catch {
     pageHref = '';
   }
+  const emptyLookup = emptyLookupDiagnostic();
   let last = {
     rows: [],
     layout: buildPageLayoutDiagnostic({
@@ -340,23 +389,13 @@ async function tableRows(page, sourcePage) {
       iframeCount: 0,
       iframePaths: [],
       pagePath: pageHref,
+      ...emptyLookup,
     }),
   };
 
   while (true) {
-    try {
-      last = await evaluateTableRows(page, sourcePage);
-    } catch (error) {
-      if (!isExecutionContextDestroyedError(error) || destroyedRetried) throw error;
-      destroyedRetried = true;
-      try {
-        await page.waitForLoadState('domcontentloaded', { timeout: 10_000 });
-      } catch {
-        throw error;
-      }
-      if (isLoginUrl(page.url())) throw new SujainReadError('authentication_required');
-      continue;
-    }
+    // Destroyed-context retry (once per evaluate) lives in evaluateTableRows.
+    last = await evaluateTableRows(page, sourcePage);
 
     if (last.rows.some(rowHasDataCell)) return last;
 
@@ -427,6 +466,115 @@ async function fillLogin(page, credentials) {
 }
 
 /**
+ * After goto: if an outside-table select has non-placeholder options and an
+ * adjacent 조회 control, select each option, click 조회, wait for rows, and
+ * combine. Otherwise keep the existing wait-for-tables path. Lookup diagnostics
+ * are counts/flags only — never option labels or values.
+ */
+async function scrapePageWithOptionalLookup(page, sourcePage) {
+  const lookup = emptyLookupDiagnostic();
+
+  try {
+    await page.waitForLoadState('load', { timeout: 10_000 });
+  } catch {
+    // load may already have fired
+  }
+
+  let discovery = {
+    selectOrdinal: -1,
+    nonPlaceholderOptionIndices: [],
+    inquireFound: false,
+  };
+  try {
+    discovery = await page.evaluate(discoverOutsideTableLookup);
+  } catch (error) {
+    if (!isExecutionContextDestroyedError(error)) throw error;
+    try {
+      await page.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+    } catch {
+      throw error;
+    }
+    if (isLoginUrl(page.url())) throw new SujainReadError('authentication_required');
+    discovery = await page.evaluate(discoverOutsideTableLookup);
+  }
+
+  const indices = Array.isArray(discovery?.nonPlaceholderOptionIndices)
+    ? discovery.nonPlaceholderOptionIndices
+      .map((n) => Number(n))
+      .filter((n) => Number.isInteger(n) && n >= 0)
+      .slice(0, 20)
+    : [];
+  lookup.lookupNonPlaceholderOptionCount = indices.length;
+
+  // If the table already has eligible data, do not click lookup controls.
+  const initial = await evaluateTableRows(page, sourcePage);
+  if (initial.rows.some(rowHasDataCell)) {
+    return {
+      rows: initial.rows,
+      layout: attachLookupDiagnostic(initial.layout, lookup),
+    };
+  }
+
+  const canLookup = discovery?.inquireFound === true
+    && Number.isInteger(discovery?.selectOrdinal)
+    && discovery.selectOrdinal >= 0
+    && indices.length > 0;
+
+  if (!canLookup) {
+    const captured = await tableRows(page, sourcePage);
+    return {
+      rows: captured.rows,
+      layout: attachLookupDiagnostic(captured.layout, lookup),
+    };
+  }
+
+  const merged = [];
+  const seen = new Set();
+  let lastLayout = initial.layout;
+
+  for (const optionIndex of indices) {
+    let applied = { selected: false, clicked: false };
+    try {
+      applied = await page.evaluate(applyOutsideTableLookup, {
+        selectOrdinal: discovery.selectOrdinal,
+        optionIndex,
+      });
+    } catch (error) {
+      if (!isExecutionContextDestroyedError(error)) throw error;
+      try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      } catch {
+        throw error;
+      }
+      if (isLoginUrl(page.url())) throw new SujainReadError('authentication_required');
+      applied = await page.evaluate(applyOutsideTableLookup, {
+        selectOrdinal: discovery.selectOrdinal,
+        optionIndex,
+      });
+    }
+
+    if (applied?.clicked) lookup.lookupClicked = true;
+
+    const captured = await tableRows(page, sourcePage);
+    lastLayout = captured.layout;
+    if (captured.rows.some(rowHasDataCell)) {
+      lookup.lookupBodyRowsAppeared = true;
+    }
+    for (const row of captured.rows) {
+      const key = rowIdentityKey(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+    }
+  }
+
+  return {
+    rows: merged,
+    layout: attachLookupDiagnostic(lastLayout, lookup),
+  };
+}
+
+/**
  * 공식 로그인 뒤 분양대금조회·세대 내 설치 품목을 한 번에 읽는다.
  * 2FA·캡차는 우회하지 않고 authentication_required로 돌린다.
  * diagnostics.stage is an allowlisted token only (login / scrape_*), never URLs.
@@ -461,6 +609,8 @@ export async function readSujainPages(page, job, diagnostics = null) {
       : {};
   }
 
+  let paymentLandedScraped = false;
+
   for (const [url, sourcePage] of [
     [SUJAIN_URLS.payment, 'payment'],
     [SUJAIN_URLS.unitItems, 'unit-items'],
@@ -472,7 +622,23 @@ export async function readSujainPages(page, job, diagnostics = null) {
       throw new SujainReadError('network_error');
     }
     if (isLoginUrl(page.url())) throw new SujainReadError('authentication_required');
-    const captured = await tableRows(page, sourcePage);
+
+    const landedOnPayment = isPaymentLandedUrl(page.url());
+
+    // unit-items → /mypage/payment: do not double-count; lookup already ran on payment.
+    if (sourcePage === 'unit-items' && landedOnPayment && paymentLandedScraped) {
+      const snap = await evaluateTableRows(page, sourcePage);
+      if (diagnostics && typeof diagnostics === 'object' && diagnostics.layout && snap.layout) {
+        diagnostics.layout[sourcePage] = attachLookupDiagnostic(
+          snap.layout,
+          emptyLookupDiagnostic(),
+        );
+      }
+      continue;
+    }
+
+    const captured = await scrapePageWithOptionalLookup(page, sourcePage);
+    if (landedOnPayment) paymentLandedScraped = true;
     if (diagnostics && typeof diagnostics === 'object' && diagnostics.layout
       && captured.layout) {
       diagnostics.layout[sourcePage] = captured.layout;
