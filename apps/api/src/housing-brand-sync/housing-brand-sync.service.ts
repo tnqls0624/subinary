@@ -6,18 +6,21 @@ import {
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  DEFAULT_HOUSING_BRAND, HOUSING_BRAND_FETCH_SOURCE, HOUSING_BRAND_INFO,
   housingBrandApplyRequestSchema, housingBrandConnectRequestSchema, housingBrandStoredPreviewSchema,
-  housingBrandSyncRequestSchema,
-  type HousingBrandApplyRequest, type HousingBrandConnectRequest, type HousingBrandConnectResponse,
+  housingBrandSyncErrorSchema, housingBrandSyncRequestSchema,
+  type HousingBrand, type HousingBrandApplyRequest, type HousingBrandConnectRequest, type HousingBrandConnectResponse,
   type HousingBrandConnection, type HousingBrandFetchedItem, type HousingBrandStoredPreview,
-  type HousingBrandSyncPreview, type HousingBrandSyncRequest, type ManualHousingPayment,
+  type HousingBrandSyncError, type HousingBrandSyncPreview, type HousingBrandSyncRequest, type ManualHousingPayment,
   type ManualHousingPlanResponse,
 } from '@family/contracts';
 import { schema, type Db } from '@family/database';
 import { DB } from '../database/database.constants';
 import { FinanceVault, type VaultContext } from '../finance-connections/finance-vault';
-import { SujainBrowserClient, SujainBrowserError } from './sujain-browser';
-import { isSujainUnsupportedLayout, matchFetchedItems } from './sujain-parse';
+import { HousingBrandReadError, type HousingBrandReadResult } from './brand-adapter';
+import { HousingBrandRegistry } from './brand-registry';
+import { matchFetchedItems } from './housing-brand-match';
+import { sujainPublicErrorOverride } from './sujain-adapter';
 
 type Executor = Pick<Db, 'select' | 'insert' | 'update' | 'delete'>;
 type ConnectionRow = typeof schema.housingBrandConnections.$inferSelect;
@@ -44,12 +47,14 @@ function actorId(value: string): string {
   return value.toLowerCase();
 }
 
-function loginFingerprint(loginId: string): string {
-  return createHash('sha256').update(`sujain:${loginId.toLowerCase()}`).digest('hex');
+/** sha256(`${brand}:${소문자 아이디}`). 수자인은 기존 행의 'sujain:' 지문과 같다 — 접두사를 바꾸지 않는다. */
+function loginFingerprint(brand: HousingBrand, loginId: string): string {
+  return createHash('sha256').update(`${brand}:${loginId.toLowerCase()}`).digest('hex');
 }
 
-function vaultContext(ownerUserId: string, connectionId: string): VaultContext {
-  return { ownerUserId, provider: 'sujain', connectionId, purpose: 'credentials' };
+/** 금고 AAD 의 provider 는 브랜드 id 그대로다. 'housing:sujain' 같은 일반형으로 바꾸면 기존 봉투가 열리지 않는다. */
+function vaultContext(ownerUserId: string, connectionId: string, brand: HousingBrand): VaultContext {
+  return { ownerUserId, provider: brand, connectionId, purpose: 'credentials' };
 }
 
 /** Asia/Seoul YYYY-MM-DD HH:mm */
@@ -114,29 +119,48 @@ function toConnection(row: ConnectionRow, viewerUserId: string): HousingBrandCon
   };
 }
 
+/**
+ * 브랜드 고유 용어 문구(어댑터 publicErrorOverride 와 같은 순수 함수). publicErrorMessage 는 공개 함수라
+ * 등록표 인스턴스 없이도 같은 글자를 내야 해서 정적 표로 묶는다. 브랜드를 빠뜨리면 컴파일이 막힌다.
+ */
+const PUBLIC_ERROR_OVERRIDES: Record<HousingBrand, (code: HousingBrandSyncError, reason: string | null) => string | null> = {
+  sujain: sujainPublicErrorOverride,
+};
+
+function isSyncErrorCode(code: string): code is HousingBrandSyncError {
+  return (housingBrandSyncErrorSchema.options as readonly string[]).includes(code);
+}
+
 /** Public copy for brand-sync failure codes. Exported for unit tests. */
-export function publicErrorMessage(code: string, reason: string | null = null): string {
+export function publicErrorMessage(
+  code: string,
+  reason: string | null = null,
+  brand: HousingBrand = DEFAULT_HOUSING_BRAND,
+): string {
+  const override = isSyncErrorCode(code) ? PUBLIC_ERROR_OVERRIDES[brand](code, reason) : null;
+  if (override !== null) return override;
+  const { label } = HOUSING_BRAND_INFO[brand];
   switch (code) {
     case 'credentials_invalid':
-      return '수자인 로그인에 실패했어요. 아이디와 비밀번호를 다시 확인해 주세요.';
+      return `${label} 로그인에 실패했어요. 아이디와 비밀번호를 다시 확인해 주세요.`;
     case 'authentication_required':
-      return '추가 인증이 필요해요. 공식 수자인 페이지에서 이어서 확인해 주세요.';
+      return `추가 인증이 필요해요. 공식 ${label} 페이지에서 이어서 확인해 주세요.`;
     case 'network_error':
-      return '수자인 페이지에 연결하지 못했어요. 잠시 후 다시 눌러 주세요.';
+      return `${label} 페이지에 연결하지 못했어요. 잠시 후 다시 눌러 주세요.`;
     case 'unsupported_layout':
       // Login chrome failures and post-login pages with no readable table after waiting.
-      return '수자인 화면 구성을 읽지 못했어요. 공식 페이지 레이아웃이 바뀌었을 수 있어요.';
+      return `${label} 화면 구성을 읽지 못했어요. 공식 페이지 레이아웃이 바뀌었을 수 있어요.`;
     case 'unit_not_registered':
-      // 분양대금조회의 단지 select 에 고를 세대가 없다 — 사이트에서 사용자가 먼저 등록해야 풀린다.
-      return '수자인 사이트의 My 분양단지에 등록된 세대가 없어요. 사이트에서 먼저 등록해 주세요.';
+      // 고를 세대가 없다 — 사이트에서 사용자가 먼저 등록해야 풀린다. 사이트 메뉴 이름은 어댑터 덮어쓰기가 낸다.
+      return `${label} 사이트에 등록된 세대가 없어요. 사이트에서 먼저 등록해 주세요.`;
     case 'runtime_unavailable':
       return reason === 'chromium_launch_failed'
         ? '신축 조회 브라우저를 시작하지 못했어요.'
         : '신축 조회 실행 환경이 준비되지 않았어요.';
     case 'not_connected':
-      return '이 주택에 연결된 수자인 계정이 없어요.';
+      return `이 주택에 연결된 ${label} 계정이 없어요.`;
     default:
-      return '수자인 조회를 끝내지 못했어요. 잠시 후 다시 눌러 주세요.';
+      return `${label} 조회를 끝내지 못했어요. 잠시 후 다시 눌러 주세요.`;
   }
 }
 
@@ -145,7 +169,8 @@ export class HousingBrandSyncService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly vault: FinanceVault,
-    private readonly browser: SujainBrowserClient,
+    // 브랜드별 사이트 읽기는 등록표가 고른 어댑터가 한다(서비스는 브랜드를 모른다).
+    @Inject(HousingBrandRegistry) private readonly brands: HousingBrandRegistry,
   ) {}
 
   private async transaction<T>(run: (tx: Executor) => Promise<T>): Promise<T> {
@@ -230,7 +255,9 @@ export class HousingBrandSyncService {
       throw new BadRequestException('신축 조회 금고가 준비되지 않았어요.');
     }
 
-    const fingerprint = loginFingerprint(input.loginId);
+    // 연결은 사이트를 읽지 않는다. 브랜드는 지문·금고 context·평문·행 값에만 쓴다.
+    const brand = input.brand;
+    const fingerprint = loginFingerprint(brand, input.loginId);
     let loginId = input.loginId;
     let password = input.password;
     try {
@@ -249,8 +276,8 @@ export class HousingBrandSyncService {
         if (existing && existing.ownerUserId !== userId) throw new ForbiddenException('연결한 본인만 볼 수 있어요.');
 
         const envelope = this.vault.encrypt(
-          { loginId, password, brand: 'sujain' as const },
-          vaultContext(userId, connectionId),
+          { loginId, password, brand },
+          vaultContext(userId, connectionId, brand),
         );
         // Clear locals before returning; envelope holds ciphertext only.
         loginId = '';
@@ -259,7 +286,7 @@ export class HousingBrandSyncService {
         if (existing) {
           const version = existing.version + 1;
           const [row] = await tx.update(schema.housingBrandConnections).set({
-            brand: 'sujain',
+            brand,
             loginFingerprint: fingerprint,
             credentials: envelope,
             status: 'connected',
@@ -280,7 +307,7 @@ export class HousingBrandSyncService {
           planId,
           householdId,
           ownerUserId: userId,
-          brand: 'sujain',
+          brand,
           loginFingerprint: fingerprint,
           credentials: envelope,
           status: 'connected',
@@ -320,16 +347,16 @@ export class HousingBrandSyncService {
         throw new BadRequestException(publicErrorMessage('not_connected'));
       }
       if (connection.version !== input.expectedConnectionVersion) throw stale();
-      if (!this.vault.enabled) throw new BadRequestException(publicErrorMessage('runtime_unavailable'));
+      if (!this.vault.enabled) throw new BadRequestException(publicErrorMessage('runtime_unavailable', null, connection.brand));
 
       let decoded: { loginId: string; password: string } | undefined;
       try {
         decoded = this.vault.decrypt<{ loginId: string; password: string }>(
           connection.credentials,
-          vaultContext(userId, connection.id),
+          vaultContext(userId, connection.id, connection.brand),
         );
       } catch {
-        throw new BadRequestException(publicErrorMessage('operation_unknown'));
+        throw new BadRequestException(publicErrorMessage('operation_unknown', null, connection.brand));
       }
       const payments = await tx.select().from(schema.manualHousingPayments)
         .where(eq(schema.manualHousingPayments.planId, planId))
@@ -338,18 +365,21 @@ export class HousingBrandSyncService {
     });
 
     const credentials = prepared.decoded;
+    const brand = prepared.connection.brand;
     const controller = new AbortController();
     try {
-      let capture: { capturedAt: string; rows: Parameters<SujainBrowserClient['parseRows']>[0] };
+      let read: HousingBrandReadResult;
       try {
-        capture = await this.browser.read(credentials, controller.signal);
+        // 읽을 줄이 0건이면 어댑터가 unsupported_layout 으로 던진다(빈 성공 금지). 실패 경로는 하나다.
+        read = await this.brands.run(brand, (adapter) => adapter.read(credentials, controller.signal));
       } catch (error) {
-        const code = error instanceof SujainBrowserError ? error.code : 'operation_unknown';
-        const reason = error instanceof SujainBrowserError ? error.reason : null;
-        const message = publicErrorMessage(code, reason);
+        const code = error instanceof HousingBrandReadError ? error.code : 'operation_unknown';
+        const reason = error instanceof HousingBrandReadError ? error.reason : null;
+        const message = publicErrorMessage(code, reason, brand);
         const failed = await this.markFailure(
           prepared.connection.id,
           prepared.connection.version,
+          brand,
           code,
           reason,
         );
@@ -362,26 +392,7 @@ export class HousingBrandSyncService {
         credentials.password = '';
       }
 
-      const parsed = this.browser.parseRows(capture.rows);
-      // Contact/profile tables are skipped in parse. If nothing readable remains,
-      // fail with unsupported_layout — do not store a contact list as options or
-      // return a silent empty «connected» success.
-      if (isSujainUnsupportedLayout(parsed)) {
-        const code = 'unsupported_layout';
-        const message = publicErrorMessage(code);
-        const failed = await this.markFailure(
-          prepared.connection.id,
-          prepared.connection.version,
-          code,
-          null,
-        );
-        throw new BadRequestException({
-          message,
-          ...(failed ? { connection: toConnection(failed, userId) } : {}),
-        });
-      }
-
-      const matched = matchFetchedItems(parsed.items, prepared.payments.map((payment) => ({
+      const matched = matchFetchedItems(read.items, prepared.payments.map((payment) => ({
         id: payment.id,
         kind: payment.kind,
         installment: payment.installment,
@@ -392,7 +403,7 @@ export class HousingBrandSyncService {
         paidDate: payment.paidDate,
       })));
 
-      const fetchedAt = new Date(capture.capturedAt);
+      const fetchedAt = new Date(read.capturedAt);
       const storedPreview: HousingBrandStoredPreview = {
         fetchedAt: fetchedAt.toISOString(),
         items: matched,
@@ -420,10 +431,10 @@ export class HousingBrandSyncService {
       return {
         fetchedAt: storedPreview.fetchedAt,
         fetchedAtSeoul: formatSeoulMinute(fetchedAt),
-        source: 'sujain_fetch',
+        source: HOUSING_BRAND_FETCH_SOURCE,
         items: matched,
-        unreadCount: parsed.unreadCount,
-        unreadReasons: parsed.unreadReasons,
+        unreadCount: read.unreadCount,
+        unreadReasons: read.unreadReasons,
         connection,
       };
     } finally {
@@ -435,12 +446,13 @@ export class HousingBrandSyncService {
   private async markFailure(
     connectionId: string,
     version: number,
+    brand: HousingBrand,
     code: string,
-    reason: string | null = null,
+    reason: string | null,
   ): Promise<ConnectionRow | null> {
     const [row] = await this.db.update(schema.housingBrandConnections).set({
       status: code === 'authentication_required' ? 'needs_confirmation' : 'failed',
-      statusMessage: publicErrorMessage(code, reason),
+      statusMessage: publicErrorMessage(code, reason, brand),
       lastFetchAt: new Date(),
       updatedAt: new Date(),
       version: version + 1,

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * `/plan` 주택 납부 일정 안의 수자인 연결·확인. 새 화면이 아니다.
+ * `/plan` 주택 납부 일정 안의 주택 브랜드(지금은 수자인) 연결·확인. 새 화면이 아니다.
+ * 브랜드 이름·값은 HOUSING_BRAND_INFO 에서 가져온다. 브랜드 고르기 UI 는 브랜드가 2개 이상일 때 만든다.
  * 연결에 쓰는 아이디·비밀번호 칸으로만 조회한다(별도 조회 로그인 폼 없음).
  * 확인/새로고침을 눌렀을 때만 분양대금·옵션을 함께 읽어 확인 목록을 연다.
  * PlanEditor의 <form> 안에 들어가므로 여기에는 <form>·type=submit을 두지 않는다
@@ -10,6 +11,8 @@
 
 import { useId, useRef, useState } from "react";
 import {
+  DEFAULT_HOUSING_BRAND,
+  HOUSING_BRAND_INFO,
   HOUSING_BRAND_STATUS_LABEL,
   type HousingBrandConnection,
   type HousingBrandFetchedItem,
@@ -41,6 +44,13 @@ type Props = {
   onApplied: (plan: ManualHousingPlanResponse) => void;
 };
 
+/** 브랜드 이름 뒤 목적격 조사. 마지막 글자에 받침이 있으면 '을'(수자인을), 없으면 '를'. */
+function withObjectParticle(label: string): string {
+  const code = label.charCodeAt(label.length - 1) - 0xac00;
+  const batchim = code >= 0 && code <= 11171 && code % 28 !== 0;
+  return `${label}${batchim ? "을" : "를"}`;
+}
+
 function itemTitle(item: HousingBrandFetchedItem): string {
   const base = PAYMENT_LABELS[item.kind];
   if (item.kind === "interim" && item.installment) return `${base} ${item.installment}회차`;
@@ -70,6 +80,9 @@ export function HousingBrandPanel({
   const statusLabel = connection
     ? HOUSING_BRAND_STATUS_LABEL[connection.status]
     : "연결 전";
+  // 연결이 있으면 그 브랜드, 없으면 기본 브랜드. 다시 저장해도 브랜드가 바뀌지 않는다.
+  const brand = connection?.brand ?? DEFAULT_HOUSING_BRAND;
+  const brandLabel = HOUSING_BRAND_INFO[brand].label;
 
   async function connect() {
     if (!planId || planVersion == null || !canEdit || busy) return;
@@ -81,7 +94,7 @@ export function HousingBrandPanel({
       const result = await authedFetch((token) =>
         housingBrandApi.connect(token, planId, {
           householdId,
-          brand: "sujain",
+          brand,
           loginId,
           password,
           expectedPlanVersion: planVersion,
@@ -91,7 +104,7 @@ export function HousingBrandPanel({
       if (loginRef.current) loginRef.current.value = "";
       onConnectionChange(result.connection);
     } catch {
-      setError("수자인 연결을 저장하지 못했어요. 입력값을 확인해 주세요.");
+      setError(`${brandLabel} 연결을 저장하지 못했어요. 입력값을 확인해 주세요.`);
     } finally {
       setBusy(null);
     }
@@ -123,7 +136,7 @@ export function HousingBrandPanel({
       for (const item of result.items) initial[item.key] = false;
       setSelected(initial);
     } catch (error) {
-      const message = housingBrandSyncErrorMessage(error);
+      const message = housingBrandSyncErrorMessage(error, brand);
       setError(message);
       const refreshed = connectionFromSyncError(error);
       if (refreshed) onConnectionChange(refreshed);
@@ -174,12 +187,11 @@ export function HousingBrandPanel({
   const localErrorNotice = housingBrandLocalErrorNotice(error, connection?.statusMessage);
 
   return (
-    <section className="grid min-w-0 gap-3" aria-label="수자인 신축 조회">
+    <section className="grid min-w-0 gap-3" aria-label={`${brandLabel} 신축 조회`}>
       <div>
-        <h3 className="text-body font-semibold">수자인 신축 조회</h3>
+        <h3 className="text-body font-semibold">{`${brandLabel} 신축 조회`}</h3>
         <p className="text-caption text-muted-foreground mt-1">
-          공식 수자인 아이디·비밀번호로 이 주택만 연결해요. 확인·새로고침을 눌렀을 때만
-          분양대금과 옵션을 함께 읽어요.
+          {`공식 ${brandLabel} 아이디·비밀번호로 이 주택만 연결해요. 확인·새로고침을 눌렀을 때만 분양대금과 옵션을 함께 읽어요.`}
         </p>
       </div>
       <p className="text-body" role="status">
@@ -192,7 +204,7 @@ export function HousingBrandPanel({
       ) : null}
       {requiresSavedPlan ? (
         <p className="text-caption text-muted-foreground">
-          주택을 먼저 저장한 뒤 수자인을 연결할 수 있어요.
+          {`주택을 먼저 저장한 뒤 ${withObjectParticle(brandLabel)} 연결할 수 있어요.`}
         </p>
       ) : null}
       {canEdit && !requiresSavedPlan ? (
@@ -206,11 +218,11 @@ export function HousingBrandPanel({
               className="text-body"
               aria-labelledby={`${formId}-brand-label`}
             >
-              수자인
+              {brandLabel}
             </p>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor={`${formId}-login`}>수자인 아이디</Label>
+            <Label htmlFor={`${formId}-login`}>{`${brandLabel} 아이디`}</Label>
             <Input
               id={`${formId}-login`}
               ref={loginRef}
@@ -223,7 +235,7 @@ export function HousingBrandPanel({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor={`${formId}-password`}>수자인 비밀번호</Label>
+            <Label htmlFor={`${formId}-password`}>{`${brandLabel} 비밀번호`}</Label>
             <Input
               id={`${formId}-password`}
               ref={passwordRef}
@@ -246,7 +258,7 @@ export function HousingBrandPanel({
             disabled={busy !== null || !planId}
             onClick={() => void connect()}
           >
-            {busy === "connect" ? "연결 저장 중…" : connection ? "연결 정보 다시 저장" : "수자인 연결 저장"}
+            {busy === "connect" ? "연결 저장 중…" : connection ? "연결 정보 다시 저장" : `${brandLabel} 연결 저장`}
           </Button>
         </div>
       ) : null}

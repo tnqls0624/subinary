@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { housingBrandSchema } from './housing-brands.js';
 
 /** 수동 기록 전용 계약. 카드 거래·자동 수집·법적 소유권을 나타내지 않는다. */
 export const manualFinanceScopeSchema = z.enum(['household', 'private']);
@@ -182,11 +183,11 @@ export const manualHousingPlanUpdateRequestSchema = z.object({ expectedVersion: 
 export type ManualHousingPlanUpdateRequest = z.infer<typeof manualHousingPlanUpdateRequestSchema>;
 export const manualHousingPlanSchema = z.object({ ...recordFields, ...housingFields }).strict();
 export type ManualHousingPlan = z.infer<typeof manualHousingPlanSchema>;
-/** housing-brand-sync와 순환 import를 피하려고 최소 형태만 둔다. */
+/** housing-brand-sync와 순환 import를 피하려고 최소 형태만 둔다. 브랜드 값은 leaf(housing-brands.ts)에서 가져온다. */
 const housingBrandConnectionSummarySchema = z.object({
   id: z.string().uuid(),
   planId: z.string().uuid(),
-  brand: z.literal('sujain'),
+  brand: housingBrandSchema,
   status: z.enum(['connected', 'needs_confirmation', 'failed']),
   statusMessage: z.string().trim().min(1).max(200).nullable(),
   credentialsStored: z.boolean(),

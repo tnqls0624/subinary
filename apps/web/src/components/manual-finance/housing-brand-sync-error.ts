@@ -1,16 +1,24 @@
 import {
+  DEFAULT_HOUSING_BRAND,
+  HOUSING_BRAND_INFO,
   housingBrandConnectionSchema,
+  type HousingBrand,
   type HousingBrandConnection,
 } from "@family/contracts";
 import { ApiError } from "@/lib/api-client";
 
-const FALLBACK =
-  "수자인 조회를 끝내지 못했어요. 잠시 후 다시 눌러 주세요.";
+/** 서버 문구가 없을 때. 브랜드 이름만 바꿔 끼운다(수자인은 예전 글자 그대로). */
+function fallbackMessage(brand: HousingBrand): string {
+  return `${HOUSING_BRAND_INFO[brand].label} 조회를 끝내지 못했어요. 잠시 후 다시 눌러 주세요.`;
+}
 
 /** Prefer the API public message over a hardcoded extra-auth hint. */
-export function housingBrandSyncErrorMessage(error: unknown): string {
+export function housingBrandSyncErrorMessage(
+  error: unknown,
+  brand: HousingBrand = DEFAULT_HOUSING_BRAND
+): string {
   if (error instanceof ApiError && error.message.trim()) return error.message;
-  return FALLBACK;
+  return fallbackMessage(brand);
 }
 
 /**

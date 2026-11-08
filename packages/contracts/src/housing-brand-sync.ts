@@ -1,9 +1,9 @@
 import { z } from 'zod';
+import { HOUSING_BRAND_FETCH_SOURCE, housingBrandSchema } from './housing-brands.js';
 import { manualFinanceDateSchema, manualHousingPaymentKindSchema, manualKrwAmountSchema } from './manual-finance.js';
 
-/** 수자인만. 공개 분양 소개 조회 UI·호반 수납조회와 섞지 않는다. */
-export const housingBrandSchema = z.literal('sujain');
-export type HousingBrand = z.infer<typeof housingBrandSchema>;
+/** 브랜드 목록·이름·사이트는 leaf(housing-brands.ts)에 두고 여기서 다시 내보낸다. 공개 분양 소개 조회 UI·호반 수납조회와 섞지 않는다. */
+export * from './housing-brands.js';
 
 export const housingBrandConnectionStatusSchema = z.enum(['connected', 'needs_confirmation', 'failed']);
 export type HousingBrandConnectionStatus = z.infer<typeof housingBrandConnectionStatusSchema>;
@@ -87,7 +87,7 @@ export const housingBrandSyncPreviewSchema = z.object({
   fetchedAt: z.string().datetime({ offset: true }),
   /** Asia/Seoul 표시용 YYYY-MM-DD HH:mm */
   fetchedAtSeoul: z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/),
-  source: z.literal('sujain_fetch'),
+  source: z.literal(HOUSING_BRAND_FETCH_SOURCE),
   items: z.array(housingBrandFetchedItemSchema).max(100),
   unreadCount: z.number().int().nonnegative(),
   unreadReasons: z.array(z.string().trim().min(1).max(200)).max(50),
@@ -133,6 +133,7 @@ export const HOUSING_VALUE_SOURCE_LABEL = {
   confirmed: '연결 후 사람 확인',
 } as const;
 
+/** @deprecated HOUSING_BRAND_INFO.sujain 을 쓴다. 쓰는 곳은 없고 공개 export 라 값 그대로 남긴다. */
 export const SUJAIN_OFFICIAL = {
   site: 'https://www.sujain.co.kr/',
   login: 'https://www.sujain.co.kr/login',

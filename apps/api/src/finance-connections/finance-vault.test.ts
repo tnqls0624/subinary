@@ -1,3 +1,4 @@
+import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { FinanceVault, type VaultContext, type VaultEnvelope } from './finance-vault';
@@ -39,6 +40,39 @@ describe('dedicated finance vault', () => {
     failed(() => instance.decrypt(envelope, bank));
     failed(() => instance.encrypt(value, { ...sujain, purpose: 'token' }));
   });
+
+  it('sujain credentials keep the exact legacy AAD, so old envelopes open without re-encryption', () => {
+    // 기존 봉투의 AAD: ['family.finance-vault', 1, owner, 'sujain', connectionId, 'credentials', keyVersion].
+    // 주택 브랜드를 일반화해도 provider 를 'housing:sujain' 같은 형태로 바꾸면 이 테스트가 깨져야 한다.
+    const legacyAad = Buffer.from(JSON.stringify(['family.finance-vault', 1, '11111111-1111-4111-8111-111111111111',
+      'sujain', '22222222-2222-4222-8222-222222222222', 'credentials', 1]), 'utf8');
+    const legacyContext: VaultContext = { ownerUserId: '11111111-1111-4111-8111-111111111111', provider: 'sujain',
+      connectionId: '22222222-2222-4222-8222-222222222222', purpose: 'credentials' };
+    const value = { loginId: 'synthetic-sujain-id', password: 'x'.repeat(16), brand: 'sujain' };
+    const key = Buffer.from(KEY_ONE, 'hex');
+
+    // 옛 봉투(고정 AAD 로 직접 봉함) → 지금 금고가 같은 값의 context 로 연다.
+    const iv = Buffer.alloc(12, 7);
+    const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+    cipher.setAAD(legacyAad);
+    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
+    const legacy: VaultEnvelope = { version: 1, iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'),
+      ciphertext: ciphertext.toString('base64') };
+    expect(vault().decrypt(legacy, { ...legacyContext })).toEqual(value);
+    // 대문자 uuid 로 만든 context 도 같은 AAD(소문자)다.
+    expect(vault().decrypt(legacy, { ...legacyContext, ownerUserId: legacyContext.ownerUserId.toUpperCase(),
+      connectionId: legacyContext.connectionId.toUpperCase() })).toEqual(value);
+    failed(() => vault().decrypt(legacy, { ...legacyContext, provider: 'shinhan_bank' }));
+
+    // 지금 금고가 봉한 봉투 → 고정 AAD 로 직접 연다.
+    const sealed = vault().encrypt(value, legacyContext);
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(sealed.iv, 'base64'), { authTagLength: 16 });
+    decipher.setAAD(legacyAad);
+    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64'));
+    const opened = Buffer.concat([decipher.update(Buffer.from(sealed.ciphertext, 'base64')), decipher.final()]);
+    expect(JSON.parse(opened.toString('utf8'))).toEqual(value);
+  });
+
   it('is disabled without finance configuration, even if an unrelated device key exists', () => {
     const seen: string[] = [];
     const instance = new FinanceVault({ get: (name: string) => {

@@ -40,6 +40,12 @@ describe("housingBrandSyncErrorMessage", () => {
     );
     expect(housingBrandSyncErrorMessage(new Error("boom"))).not.toContain("추가 인증");
   });
+
+  it("builds the fallback from the brand label without changing the sujain sentence", () => {
+    expect(housingBrandSyncErrorMessage(new Error("boom"), "sujain")).toBe(
+      "수자인 조회를 끝내지 못했어요. 잠시 후 다시 눌러 주세요."
+    );
+  });
 });
 
 describe("connectionFromSyncError", () => {

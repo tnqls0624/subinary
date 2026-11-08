@@ -117,6 +117,47 @@ describe("HousingBrandPanel", () => {
     expect(html).not.toContain("공식 페이지에서 추가 인증");
   });
 
+  it("keeps every brand-dependent string and the saved-credential field names exactly as before", () => {
+    // 글자는 HOUSING_BRAND_INFO 에서 오지만 수자인은 예전 글자와 한 글자도 다르지 않아야 한다(한 텍스트 노드).
+    const edit = renderToStaticMarkup(
+      <HousingBrandPanel
+        householdId="33333333-3333-4333-8333-333333333333"
+        planId="22222222-2222-4222-8222-222222222222"
+        planVersion={1}
+        connection={null}
+        canEdit
+        onConnectionChange={() => undefined}
+        onApplied={() => undefined}
+      />
+    );
+    expect(edit).toContain('aria-label="수자인 신축 조회"');
+    expect(edit).toContain(">수자인 신축 조회</h3>");
+    expect(edit).toContain(
+      ">공식 수자인 아이디·비밀번호로 이 주택만 연결해요. 확인·새로고침을 눌렀을 때만 분양대금과 옵션을 함께 읽어요.</p>"
+    );
+    expect(edit).toContain(">수자인</p>");
+    expect(edit).toContain(">수자인 아이디</label>");
+    expect(edit).toContain(">수자인 비밀번호</label>");
+    expect(edit).toContain(">수자인 연결 저장</button>");
+    // 브라우저에 저장된 자격 증명 연결을 지키려고 칸 이름은 그대로 둔다.
+    expect(edit).toContain('name="sujain-login"');
+    expect(edit).toContain('name="sujain-password"');
+
+    const saveFirst = renderToStaticMarkup(
+      <HousingBrandPanel
+        householdId="33333333-3333-4333-8333-333333333333"
+        planId={null}
+        planVersion={null}
+        connection={null}
+        canEdit
+        requiresSavedPlan
+        onConnectionChange={() => undefined}
+        onApplied={() => undefined}
+      />
+    );
+    expect(saveFirst).toContain(">주택을 먼저 저장한 뒤 수자인을 연결할 수 있어요.</p>");
+  });
+
   it("does not render the same status sentence twice when only connection.statusMessage is set", () => {
     const html = renderToStaticMarkup(
       <HousingBrandPanel
