@@ -94,6 +94,12 @@ const pageLayoutSchema = z.object({
   iframePaths: z.array(layoutPagePathSchema).max(20),
   /** Final scrape URL as origin+pathname (or null when unavailable). */
   pagePath: layoutPagePathSchema.nullable(),
+  /** Outside-table payment lookup: non-placeholder option count (never labels/values). */
+  lookupNonPlaceholderOptionCount: z.number().int().min(0).max(20),
+  /** True when adjacent 조회 was clicked at least once. */
+  lookupClicked: z.boolean(),
+  /** True when eligible body rows appeared after a lookup click. */
+  lookupBodyRowsAppeared: z.boolean(),
 }).strict();
 
 const layoutDiagnosticsSchema = z.object({
@@ -271,8 +277,9 @@ export function formatLayoutWarnFragment(
       entry.outsideTableFormControlCount,
       entry.outsideTableFormControls,
     );
+    const lookupText = `lookup=np=${entry.lookupNonPlaceholderOptionCount};click=${entry.lookupClicked ? 1 : 0};rows=${entry.lookupBodyRowsAppeared ? 1 : 0}`;
     parts.push(
-      `${page}:t=${entry.tableCount};h=${headerText || '[]'};raw=${entry.rawRowCount};eligible=${entry.eligibleRowCount};tables=${tableText || '[]'};${outText};ifr=${entry.iframeCount};path=${pathText}`,
+      `${page}:t=${entry.tableCount};h=${headerText || '[]'};raw=${entry.rawRowCount};eligible=${entry.eligibleRowCount};tables=${tableText || '[]'};${outText};${lookupText};ifr=${entry.iframeCount};path=${pathText}`,
     );
   }
   if (parts.length === 0) return '';

@@ -186,6 +186,9 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
       iframeCount: 1,
       iframePaths: ['https://www.sujain.co.kr/embed?token=SECRET_IFRAME#x'],
       pagePath: 'https://www.sujain.co.kr/mypage/payment?session=SECRET_TOKEN#top',
+      lookupNonPlaceholderOptionCount: 0,
+      lookupClicked: false,
+      lookupBodyRowsAppeared: false,
       cells: ['합성 회원', '000-0000-0000'],
       rows: [{ cells: ['이름', '합성 회원'] }],
     },
@@ -199,6 +202,9 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
       iframeCount: 0,
       iframePaths: [],
       pagePath: 'https://www.sujain.co.kr/mypage/unit-items',
+      lookupNonPlaceholderOptionCount: 0,
+      lookupClicked: false,
+      lookupBodyRowsAppeared: false,
     },
     secretPage: { tableCount: 9, tableHeaders: [['nope']], rawRowCount: 9, eligibleRowCount: 9 },
   };
@@ -221,6 +227,9 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
       iframeCount: 1,
       iframePaths: ['https://www.sujain.co.kr/embed'],
       pagePath: 'https://www.sujain.co.kr/mypage/payment',
+      lookupNonPlaceholderOptionCount: 0,
+      lookupClicked: false,
+      lookupBodyRowsAppeared: false,
     },
     'unit-items': {
       tableCount: 1,
@@ -239,6 +248,9 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
       iframeCount: 0,
       iframePaths: [],
       pagePath: 'https://www.sujain.co.kr/mypage/unit-items',
+      lookupNonPlaceholderOptionCount: 0,
+      lookupClicked: false,
+      lookupBodyRowsAppeared: false,
     },
   });
   const text = JSON.stringify(sanitized);
@@ -262,6 +274,9 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
     iframeCount: 0,
     iframePaths: [],
     pagePath: null,
+    lookupNonPlaceholderOptionCount: 0,
+    lookupClicked: false,
+    lookupBodyRowsAppeared: false,
     cells: ['합성 항목 A', '500,000'],
   });
   assert.equal(Object.hasOwn(page, 'cells'), false);
@@ -277,11 +292,11 @@ test('layout sanitizer keeps header texts and counts, drops cell values and URL-
   const fragment = formatLayoutWarnFragment(sanitized);
   assert.match(
     fragment,
-    /^layout=payment:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=3,i=0\];out=2\[vi=1,vs=1,vt=0,h=0,o=0\];ifr=1;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment\|/,
+    /^layout=payment:t=1;h=\[항목\|내용\];raw=2;eligible=0;tables=\[r=2,p=3,i=0\];out=2\[vi=1,vs=1,vt=0,h=0,o=0\];lookup=np=0;click=0;rows=0;ifr=1;path=https:\/\/www\.sujain\.co\.kr\/mypage\/payment\|/,
   );
   assert.match(
     fragment,
-    /unit-items:t=1;h=\[품목\|금액\],\[\];raw=1;eligible=1;tables=\[r=1,p=2,i=3\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/unit-items/,
+    /unit-items:t=1;h=\[품목\|금액\],\[\];raw=1;eligible=1;tables=\[r=1,p=2,i=3\];out=0\[vi=0,vs=0,vt=0,h=0,o=0\];lookup=np=0;click=0;rows=0;ifr=0;path=https:\/\/www\.sujain\.co\.kr\/mypage\/unit-items/,
   );
   assert.equal(fragment.includes('합성 회원'), false);
   assert.equal(fragment.includes('SECRET_TOKEN'), false);
