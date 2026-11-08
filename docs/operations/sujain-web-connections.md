@@ -84,7 +84,8 @@ Chromium 기동 실패는 `runtime_unavailable` + 고정 사유 `chromium_launch
 - 계약: `packages/contracts/src/housing-brands.ts` 가 브랜드 목록(`HOUSING_BRANDS`)·화면 이름·공식 사이트·허용 호스트(`HOUSING_BRAND_INFO`)의 단일 근거다.
 - API: `apps/api/src/housing-brand-sync/` 의 `brand-adapter.ts`(경계)·`brand-registry.ts`(등록표, 부팅 시 `HOUSING_BRANDS` 와 1:1 검사, 주택 브랜드 브라우저 작업은 프로세스 전체에서 1개)·`sujain-adapter.ts`·`housing-brand-match.ts`(브랜드 무관 맞추기).
 - 웹: 패널 글자와 brand 값을 `HOUSING_BRAND_INFO` 에서 가져온다. 브랜드 고르기 UI 는 없다.
-- 러너 키트(`tools/sujain-web-runner/kit/`)와 API `runner-process.ts` 는 아직 없다. 두 번째 브랜드를 붙일 때 러너·클라이언트보다 먼저 뽑는다.
+- 러너: `tools/sujain-web-runner/kit/{stdin,launch,allowlist,result}.mjs` 가 브랜드 무관 뼈대(stdin 작업 JSON, Chromium 기동·context·닫기·신호, origin 허용 목록, 결과 JSON)다. `run.mjs` 는 키트와 수자인 `policy.mjs`·`collect.mjs` 를 조합만 한다. `import('playwright-core')` 는 `run.mjs` 에서만 한다.
+- API `runner-process.ts` 는 아직 없다. 두 번째 브랜드 클라이언트보다 먼저 뽑는다.
 
 1. **사전 확인**: 정상 브라우저로 이용 조건, 로그인 방식, 조회 경로, 허용 호스트, 표 머리, 세대 선택 방식을 본다. 보안 키패드·캡차·2FA 는 우회하지 않고 `authentication_required` 로 둔다. 구조만 적고 값은 남기지 않는다.
 2. **id 정하기**: 소문자 영숫자로 하고 기존 금고 공급자(`toss_securities`·`shinhan_bank`·`sujain`)와 겹치지 않게 한다. 금고 AAD·login_fingerprint·DB brand 값으로 영구 고정된다.
@@ -92,7 +93,7 @@ Chromium 기동 실패는 `runtime_unavailable` + 고정 사유 `chromium_launch
 4. **웹**: 브랜드가 2개 이상일 때만 패널에 고르기 UI 를 둔다. 계약+웹 OTA 를 먼저 배포한다(옛 번들의 strict parse 보호). 공용 컴포넌트를 바꿔야 하면 영향 화면을 보여 주고 먼저 묻는다.
 5. **DB**: brand CHECK 를 IN 목록으로 바꾸는 마이그레이션, `schema.ts` 의 check·`$type`, `migrations.test.mjs`, `HOUSING_BRANDS`↔CHECK 일관성 테스트를 같이 넣는다. 배포 전에 백업한다.
 6. **금고**: `finance-vault.ts` 의 provider 유니온·`PROVIDERS`·`CREDENTIALS_ONLY` 에 id 를 넣고 왕복 테스트를 추가한다. provider·지문 접두사는 브랜드 id 그대로 둔다(일반형으로 바꾸지 않는다).
-7. **러너**: 같은 러너 디렉터리에 `brands/<id>/{urls,policy,collect}.mjs` 를 둔다. 허용 origin 은 `allowedHosts` 와 맞추고 ERRORS·STAGES·토큰 허용 목록, `validateJob(provider===id)`, 진단 sanitize 를 둔다. 브라우저 쪽 수집 함수는 자기완결로 짠다. Chromium 은 한 벌을 같이 쓴다.
+7. **러너**: 같은 러너 디렉터리에 `brands/<id>/{urls,policy,collect}.mjs` 를 둔다. 허용 origin 은 `allowedHosts` 와 맞추고 ERRORS·STAGES·토큰 허용 목록, `validateJob(provider===id)`, 진단 sanitize 를 둔다. 프로세스 뼈대는 `kit/` 를 쓴다. 브라우저 쪽 수집 함수는 자기완결로 짠다. Chromium 은 한 벌을 같이 쓴다.
 8. **러너 테스트**: 가짜 page·DOM 으로 로그인 실패·추가 인증·표 없음·세대 미등록·정상 표·허용 밖 요청 abort·진단에 셀 값 없음을 확인한다. 기존 CI 글롭(`tools/*/test/*.test.mjs`)이 잡는 위치에 둔다.
 9. **API 클라이언트**: `<id>-browser.ts` 를 만들고 spawn 공용부는 `runner-process.ts` 로 쓴다. 응답 zod·stdout 상한·stderr 거르기를 둔다. 자격 증명은 stdin `{provider:id, credentials}` 로만 넘긴다.
 10. **API 파서**: `<id>-parse.ts` 가 `HousingBrandFetchedItem[]` 와 unread 를 만든다. 모르는 칸은 null 과 사유로 남기고, 합계 줄은 건너뛰고, 옵션 label 은 결정적으로 만들어 골든 테스트로 고정한다.

@@ -140,7 +140,11 @@ test('runner catch attaches allowlisted reason, errorName, and stage for untyped
   const runtime = await readFile(new URL('../run.mjs', import.meta.url), 'utf8');
   const policy = await readFile(new URL('../policy.mjs', import.meta.url), 'utf8');
   assert.match(runtime, /classifyUntypedRunnerError/);
-  assert.match(runtime, /sanitizeRunnerErrorName|errorName/);
+  // errorName 을 싣는 일은 키트(kit/result.mjs)로 옮겼다 — run.mjs 는 그 함수로 실패 JSON 을 만든다.
+  // (run.mjs 의 주석 글자로 통과하지 않게 실제 코드 위치를 본다. 동작은 output-shape.test.mjs 가 바이트로 고정한다.)
+  assert.match(runtime, /buildFailurePayload\(/);
+  const kitResult = await readFile(new URL('../kit/result.mjs', import.meta.url), 'utf8');
+  assert.match(kitResult, /payload\.errorName\s*=/);
   assert.match(runtime, /sanitizeRunnerStage|payload\.stage/);
   assert.match(runtime, /sanitizeLayoutDiagnostics/);
   assert.match(runtime, /payload\.layout/);

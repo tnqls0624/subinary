@@ -1,7 +1,7 @@
 # 주택 브랜드 연동 일반화 설계 (수자인 → N개 브랜드)
 
 - 기준 커밋: `5f88738`(수자인 분양대금조회 수정)
-- 상태: 0·1·2·3·5단계를 구현했다(2026-11-08). 수자인 수정(`5f88738`)은 같은 날 운영 실조회가 성공했다(두 가구, 분양대금 9줄 + 별도 계약 품목 옵션 6줄 반영). 4단계(러너 키트)는 아직 하지 않았다(6장 4단계·6c).
+- 상태: 0·1·2·3·5단계를 구현했다(2026-11-08). 수자인 수정(`5f88738`)은 같은 날 운영 실조회가 성공했다(두 가구, 분양대금 9줄 + 별도 계약 품목 옵션 6줄 반영). 4단계(러너 키트)는 같은 날 코드와 테스트를 넣었다. 완료 기준의 이미지 재빌드·실조회 확인은 배포 때 한다(6장 4단계).
 
 ## 1. 배경·목표
 
@@ -50,8 +50,8 @@
 | `apps/api/src/housing-brand-sync/housing-brand-match.ts` | `matchFetchedItems` 를 옮긴다. `sujain-parse.ts` 에는 재수출 한 줄만 남긴다 | 2단계 |
 | `apps/api/src/housing-brand-sync/housing-brand-sync.service.ts` | `SujainBrowserClient` 대신 `HousingBrandRegistry` 를 받는다(`@Inject(HousingBrandRegistry)`). 0단계 특성 테스트가 `SujainBrowserClient` 를 직접 넣는 경우만 수자인 어댑터 하나로 등록표를 만든다. connect 는 `input.brand` 로 지문·금고 context·평문·행 brand 를 만들고(사이트를 읽지 않으므로 어댑터는 부르지 않는다), sync 는 `connection.brand` 로 어댑터를 고른다. `publicErrorMessage`·`loginFingerprint`·`vaultContext` 는 brand 를 인자로 받는다 | 2단계 |
 | `apps/web/.../housing-brand-panel.tsx`, `housing-brand-sync-error.ts` | 글자와 brand 를 `HOUSING_BRAND_INFO` 에서 가져온다. 이 패널만 고치고 공용 컴포넌트는 건드리지 않는다. `name="sujain-login"` 은 유지한다 | 3단계 |
-| `tools/sujain-web-runner/kit/{stdin,launch,allowlist,result}.mjs` | 브랜드 무관 러너 뼈대. `playwright-core` 는 import 하지 않고 `chromium` 을 인자로 받는다 | 4단계(보류, 6c 전) |
-| `tools/sujain-web-runner/test/kit-*.test.mjs` | 키트 단위 테스트. 기존 CI 줄(ci.yml 91행)이 잡도록 이 폴더에 둔다 | 4단계(보류, 6c 전) |
+| `tools/sujain-web-runner/kit/{stdin,launch,allowlist,result}.mjs` | 브랜드 무관 러너 뼈대. `playwright-core` 는 import 하지 않고 `chromium` 을 인자로 받는다 | 4단계 |
+| `tools/sujain-web-runner/test/kit-*.test.mjs` | 키트 단위 테스트와 키트 규칙 소스 검사(`kit-rules`). 기존 CI 줄(ci.yml 91행)이 잡도록 이 폴더에 둔다 | 4단계 |
 | `apps/api/src/housing-brand-sync/runner-process.ts` | spawn·stdin·stdout/stderr 상한·시간 초과·SIGTERM→SIGKILL 을 공용으로 뽑는다. 응답 zod 와 stderr 거르기는 브랜드 클라이언트에 남긴다 | 두 번째 브랜드 때 |
 | `tools/<러너>/brands/<id>/` | 같은 러너 디렉터리, 같은 `playwright-core`, 같은 headless shell 을 쓰는 새 브랜드 수집 코드 | 두 번째 브랜드 때 |
 | `packages/database/drizzle/00NN_housing_brand_<id>.sql` | brand CHECK 를 IN 목록으로 바꾼다 | 두 번째 브랜드 때 |
@@ -126,21 +126,33 @@ function vaultContext(ownerUserId: string, connectionId: string, brand: HousingB
 ```
 
 ```js
-// tools/sujain-web-runner/kit/*.mjs — 순수 ESM, playwright-core 를 import 하지 않는다
+// tools/sujain-web-runner/kit/*.mjs — 순수 ESM, playwright-core 를 import 하지 않는다 (2026-11-08 구현 기준)
 // stdin.mjs
-export async function readJobJson(stream, { maxBytes = 8192, onError }); // 넘치거나 깨지면 onError('operation_unknown') 를 던진다
+export async function readJobJson(stream, { maxBytes = 8192, onError, onReadComplete, validate }); // 넘치거나 깨지거나 validate 가 던지면 onError('operation_unknown') 를 던진다. onReadComplete 는 해석 직전에 부른다
 // launch.mjs
 export function chromiumSandboxEnabled(getuid = process.getuid);         // root 일 때만 false
-export async function launchHeadless({ chromium, executablePath, getuid, timeoutMs = 20_000 }); // 절대 경로, acceptDownloads:false, serviceWorkers:'block', env 는 PATH·TZ 만
-export function installSignalCleanup(close, proc = process);             // SIGTERM·SIGINT
+export function isAbsoluteExecutable(value);
+export async function launchHeadless({ chromium, executablePath, chromiumSandbox, timeoutMs = 20_000, timezone = 'Asia/Seoul', sourceEnv = process.env }); // 절대 경로, chromiumSandbox 는 boolean 필수, env 는 PATH·TZ 만
+export async function openIsolatedContext(browser);                      // acceptDownloads:false, serviceWorkers:'block'
+export function createCloser(getters);                                   // 받은 순서(context → browser)대로 한 번만 닫고 오류는 삼킨다
+export function installSignalCleanup(close, proc = process);             // SIGTERM·SIGINT → close 뒤 exit(0). 떼는 함수를 돌려준다
 // allowlist.mjs
-export function makeOriginAllowlist(origins);                            // username·password 가 붙은 URL 은 거절
+export function makeOriginAllowlist(origins);                            // username·password 가 붙은 URL 은 거절. 항목이 bare origin 이 아니면 throw
 export async function routeAllowlist(context, allowed);
 // result.mjs
 export function sanitizeErrorName(error);                                // 영문자만, 40자
-export function buildFailurePayload({ error, code, allowedCodes, failureReason, stage, layout, classify }); // 허용 목록 밖 code 는 operation_unknown
+export function buildFailurePayload({ error, code, allowedCodes, failureReason, stage, classify }); // 허용 목록 밖 code 는 operation_unknown. layout 은 받지 않는다
 export function writeResult(payload, out = process.stdout);
 ```
+
+처음 스케치와 달라진 점은 다음과 같다. 모두 0단계 출력 고정(`test/output-shape.test.mjs`)과 기존 `test/policy.test.mjs` 를 고치지 않고 통과시키려고 정한 것이다.
+
+- `launchHeadless` 는 `getuid` 대신 `chromiumSandbox`(boolean, 기본값 없음)를 받는다. 빠뜨리면 Playwright 기본값(꺼짐)으로 조용히 떨어지기 때문이다. `run.mjs` 가 `chromiumSandboxEnabled()` 로 정해 넘긴다.
+- 기동과 context 를 나눴다(`openIsolatedContext`). 실패 JSON 의 stage 가 `launch`(사유 `chromium_launch_failed`)와 `context` 로 갈린다. 실행 파일 절대 경로 검사(`isAbsoluteExecutable`)도 `run.mjs` 가 `import` 단계에서 먼저 부른다.
+- `readJobJson` 에 `onReadComplete`·`validate` 를 더했다. 넘침은 stage `stdin`, 깨진 JSON 은 stage `validate` 로 남는다.
+- `buildFailurePayload` 는 `layout` 을 받지 않는다. 레이아웃 진단은 규칙 3대로 `policy.mjs` 가 거르고, `run.mjs` 가 맨 뒤 키로 붙인다.
+- 닫기(`createCloser`)도 키트로 옮겼다. 닫을 대상은 닫는 그때 읽는다.
+- `policy.mjs` 는 `chromiumSandboxEnabled`·`sanitizeRunnerErrorName`(= `sanitizeErrorName`)·`allowedRequest`(= `makeOriginAllowlist(SUJAIN_ORIGINS)`)를 같은 이름으로 다시 내보낸다.
 
 키트 규칙은 세 가지다.
 
@@ -222,9 +234,9 @@ export function runRunnerJob(opts: {
 - **테스트**: `housing-brand-panel.test.tsx` 가 같은 화면 글자를 단언한다.
 - **완료 기준**: 화면이 픽셀 단위로 같고, OTA 배포 뒤 실기기에서 확인한다.
 
-### 4단계: 러너 키트 (tools/sujain-web-runner 안, 보류)
+### 4단계: 러너 키트 (tools/sujain-web-runner 안)
 
-2026-11-08 작업에서는 하지 않았다. 두 번째 브랜드 러너(6c)를 만들기 전에 아래 내용대로 한다.
+2026-11-08 에 코드와 테스트를 넣었다(인터페이스는 4장). 아래 완료 기준의 이미지 재빌드·실조회 확인은 배포 때 한다.
 
 - `kit/{stdin,launch,allowlist,result}.mjs` 를 뽑고, `run.mjs` 는 키트와 수자인 상수만 조합하게 줄인다. `ERRORS`·`RUNNER_STAGES`·`validateJob`·`SUJAIN_ORIGINS`·레이아웃 진단은 `policy.mjs` 에 남긴다.
 - **테스트**(`test/kit-*.test.mjs`, node:test, 가짜 chromium·page):
@@ -232,6 +244,7 @@ export function runRunnerJob(opts: {
   - `getuid=0` → 샌드박스 꺼짐
   - username 이 붙은 URL 거절
   - 허용 목록 밖 code → `operation_unknown`
+  - 키트 규칙 소스 검사(`kit-rules`): `playwright-core` import 는 `run.mjs` 만, 키트는 `node:`·형제 키트만 import, 키트에 브랜드 글자 없음, `page.evaluate` 로 넘기는 함수(`captureSujainTables`·`countUnitOptions`)가 키트를 부르지 않음
   - 기존 `test/*.test.mjs` 와 0단계 출력 고정 테스트가 그대로 통과
 - `scripts/lib/sujain-web-runtime.test.mjs` 에 '.dockerignore 가 kit/ 을 빼지 않는다'를 추가한다. 은행 러너는 건드리지 않는다.
 - **완료 기준**: 이미지를 재빌드하고(Dockerfile 변경 없음, `/app` 전체 복사), 실조회 1회와 실패 경로 진단 줄(`layout=...`)의 모양을 확인한다.
@@ -244,7 +257,7 @@ export function runRunnerJob(opts: {
 
 - **6a 계약+웹**: `HOUSING_BRANDS`·`HOUSING_BRAND_INFO` 에 추가한다. 패널에는 브랜드가 2개 이상일 때만 고르기 UI 를 둔다. OTA 를 먼저 배포한다. 새 brand 행이 생기기 전에 새 번들이 깔려 있어야 옛 번들의 strict parse 가 깨지지 않는다.
 - **6b DB·금고**: brand CHECK 마이그레이션을 넣고, `finance-vault.ts` 의 provider 유니온·`PROVIDERS`·`CREDENTIALS_ONLY` 에 id 를 추가한다. 배포 전에 백업한다.
-- **6c 러너**: 보류한 4단계(키트)를 먼저 한다. 그다음 같은 디렉터리에 `brands/<id>/` 를 추가하고 `validateJob` 이 provider 로 분기하게 한다. 디렉터리 이름을 `tools/housing-brand-runner` 로 바꿀지 이때 정한다. 바꾼다면 Dockerfile.prod·config 기본 runnerPath·`SUJAIN_WEB_*`(대체값 유지)·compose·runtime 테스트·문서를 한 PR 에서 같이 바꾼다. Chromium 은 계속 한 벌이다.
+- **6c 러너**: 4단계 키트는 이미 있다(2026-11-08). 같은 디렉터리에 `brands/<id>/` 를 추가하고 `validateJob` 이 provider 로 분기하게 한다. 디렉터리 이름을 `tools/housing-brand-runner` 로 바꿀지 이때 정한다. 바꾼다면 Dockerfile.prod·config 기본 runnerPath·`SUJAIN_WEB_*`(대체값 유지)·compose·runtime 테스트·문서를 한 PR 에서 같이 바꾼다. Chromium 은 계속 한 벌이다.
 - **6d API**: `runner-process.ts` 를 뽑아 `SujainBrowserClient` 와 새 클라이언트가 같이 쓴다. 새 어댑터를 registry 에 등록하고 브랜드별 enabled 설정을 둔다(기본 false). 연결 시 brand 가 바뀌면 `lastPreview` 를 비운다.
 - **6e 공용 표 해석(선택)**: 두 파서에서 실제로 같은 규칙(합계 줄·N차 회차·칸 이름 동의어)이 보일 때만 순수 함수를 `housing-table-parse.ts` 로 뽑는다. 수자인 골든이 한 글자도 바뀌지 않아야 한다.
 - **6f 활성화**: enabled=false 로 배포한다. 본인 계정 실조회 1회와 api 로그에 개인 값이 없음을 확인한 뒤 enabled=true 로 바꾼다.

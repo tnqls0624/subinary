@@ -1,16 +1,26 @@
 import {
+  ERRORS,
   SujainReadError,
   allowedRequest,
-  chromiumSandboxEnabled,
   classifyUntypedRunnerError,
   sanitizeLayoutDiagnostics,
   sanitizeRunnerStage,
   validateJob,
 } from './policy.mjs';
 import { readSujainPages } from './collect.mjs';
+import { routeAllowlist } from './kit/allowlist.mjs';
+import {
+  chromiumSandboxEnabled,
+  createCloser,
+  installSignalCleanup,
+  isAbsoluteExecutable,
+  launchHeadless,
+  openIsolatedContext,
+} from './kit/launch.mjs';
+import { buildFailurePayload, writeResult } from './kit/result.mjs';
+import { readJobJson } from './kit/stdin.mjs';
 
 let browser, context, job;
-let closing = false;
 /** Fixed reason codes only — never Chromium stderr, URLs with secrets, or credentials. */
 let failureReason;
 /**
@@ -18,67 +28,48 @@ let failureReason;
  * Never URLs, credentials, or data-cell values.
  */
 const diagnostics = { stage: 'stdin', layout: {} };
-async function close() {
-  if (closing) return;
-  closing = true;
-  try { await context?.close(); } catch { /* No diagnostic body. */ }
-  try { await browser?.close(); } catch { /* No diagnostic body. */ }
-}
-process.on('SIGTERM', () => { void close().finally(() => process.exit(0)); });
-process.on('SIGINT', () => { void close().finally(() => process.exit(0)); });
+const close = createCloser([() => context, () => browser]);
+installSignalCleanup(close);
 try {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk.toString('utf8');
-    if (Buffer.byteLength(input, 'utf8') > 8192) throw new SujainReadError('operation_unknown');
-  }
-  diagnostics.stage = 'validate';
-  try { job = validateJob(JSON.parse(input)); } catch { throw new SujainReadError('operation_unknown'); }
-  input = '';
+  job = await readJobJson(process.stdin, {
+    maxBytes: 8192,
+    onError: (code) => new SujainReadError(code),
+    onReadComplete: () => { diagnostics.stage = 'validate'; },
+    validate: validateJob,
+  });
   let chromium;
   diagnostics.stage = 'import';
   try { ({ chromium } = await import('playwright-core')); } catch { throw new SujainReadError('runtime_unavailable'); }
   const executablePath = process.env.SUJAIN_WEB_BROWSER_EXECUTABLE;
-  if (!executablePath?.startsWith('/')) throw new SujainReadError('runtime_unavailable');
+  if (!isAbsoluteExecutable(executablePath)) throw new SujainReadError('runtime_unavailable');
   diagnostics.stage = 'launch';
   try {
-    browser = await chromium.launch({
-      executablePath,
-      headless: true,
-      chromiumSandbox: chromiumSandboxEnabled(),
-      timeout: 20_000,
-      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', TZ: 'Asia/Seoul' },
-    });
+    browser = await launchHeadless({ chromium, executablePath, chromiumSandbox: chromiumSandboxEnabled() });
   } catch {
     failureReason = 'chromium_launch_failed';
     throw new SujainReadError('runtime_unavailable');
   }
   diagnostics.stage = 'context';
-  context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block' });
-  await context.route('**/*', (route) => (allowedRequest(route.request().url()) ? route.continue() : route.abort()));
+  context = await openIsolatedContext(browser);
+  await routeAllowlist(context, allowedRequest);
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   const capture = await readSujainPages(page, job, diagnostics);
-  process.stdout.write(JSON.stringify({ ok: true, ...capture }));
+  writeResult({ ok: true, ...capture });
 } catch (error) {
-  const payload = {
-    ok: false,
-    error: error instanceof SujainReadError ? error.code : 'operation_unknown',
-  };
-  if (failureReason && payload.error === 'runtime_unavailable') {
-    payload.reason = failureReason;
-  } else {
-    const untyped = classifyUntypedRunnerError(error);
-    if (untyped) {
-      payload.reason = untyped.reason;
-      if (untyped.errorName) payload.errorName = untyped.errorName;
-    }
-  }
-  const stage = sanitizeRunnerStage(diagnostics.stage);
-  if (stage) payload.stage = stage;
+  // 실패 JSON 키 순서는 ok·error·reason·errorName·stage·layout 이다(API responseSchema·경고 로그가 읽는다).
+  // layout 은 수자인 허용 토큰으로 거른 진단이라 키트 밖에서 맨 뒤 키로 붙인다.
+  const payload = buildFailurePayload({
+    error,
+    code: error instanceof SujainReadError ? error.code : 'operation_unknown',
+    allowedCodes: ERRORS,
+    failureReason,
+    stage: sanitizeRunnerStage(diagnostics.stage),
+    classify: classifyUntypedRunnerError,
+  });
   const layout = sanitizeLayoutDiagnostics(diagnostics.layout);
   if (layout) payload.layout = layout;
-  process.stdout.write(JSON.stringify(payload));
+  writeResult(payload);
 } finally {
   if (job?.credentials) {
     job.credentials.password = '';

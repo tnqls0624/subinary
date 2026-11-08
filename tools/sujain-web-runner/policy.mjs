@@ -1,4 +1,10 @@
+import { makeOriginAllowlist } from './kit/allowlist.mjs';
+import { sanitizeErrorName as sanitizeRunnerErrorName } from './kit/result.mjs';
 import { SUJAIN_ORIGINS, SUJAIN_PATHS } from './urls.mjs';
+
+// 브랜드 무관 뼈대는 kit/ 로 옮겼다. 기존 import 경로(테스트 포함)를 지키려고 이름 그대로 다시 내보낸다.
+export { chromiumSandboxEnabled } from './kit/launch.mjs';
+export { sanitizeRunnerErrorName };
 
 export const ERRORS = new Set([
   'credentials_invalid',
@@ -30,18 +36,6 @@ export const RUNNER_STAGES = new Set([
   // scrape_unit_items 를 더 내보내지 않는다(API 허용 목록에는 옛 러너 호환으로 남아 있다).
   'scrape_payment',
 ]);
-
-/**
- * Letters-only, length-capped error.name token.
- * Never message, stack, URL, or page text.
- */
-export function sanitizeRunnerErrorName(error) {
-  const raw = error && typeof error === 'object' && typeof error.name === 'string'
-    ? error.name
-    : '';
-  const letters = raw.replace(/[^A-Za-z]/gu, '').slice(0, 40);
-  return letters.length > 0 ? letters : null;
-}
 
 /** Allowlisted stage token or null. */
 export function sanitizeRunnerStage(stage) {
@@ -271,15 +265,6 @@ export function classifyUntypedRunnerError(error) {
   return { reason: 'runner_exception', errorName };
 }
 
-/**
- * Chromium refuses `--no-sandbox` only when it is missing as root.
- * Production API containers run as uid 0 with no USER directive, so keep the
- * Playwright sandbox on for non-root and turn it off only for root/Docker.
- */
-export function chromiumSandboxEnabled(getuid = process.getuid) {
-  return typeof getuid !== 'function' || getuid() !== 0;
-}
-
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const full = (pattern, value) => typeof value === 'string' && pattern.exec(value)?.[0] === value;
@@ -295,15 +280,7 @@ export function validateJob(value) {
 }
 
 /** www.sujain.co.kr · m.sujain.co.kr 만 허용. 호반·공개 분양 소개 호스트는 막는다. */
-export function allowedRequest(value) {
-  try {
-    const url = new URL(value);
-    if (url.username || url.password) return false;
-    return SUJAIN_ORIGINS.has(url.origin);
-  } catch {
-    return false;
-  }
-}
+export const allowedRequest = makeOriginAllowlist(SUJAIN_ORIGINS);
 
 export function isLoginUrl(value) {
   try {
