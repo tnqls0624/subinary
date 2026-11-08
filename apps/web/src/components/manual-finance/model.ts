@@ -1,5 +1,4 @@
 import {
-  HOUSING_VALUE_SOURCE_LABEL,
   manualAssetCreateRequestSchema,
   manualHousingPlanCreateRequestSchema,
   type ManualAsset,
@@ -33,14 +32,17 @@ export const PAYMENT_LABELS: Record<ManualHousingPaymentKind, string> = {
   balance: "잔금",
   option: "옵션",
 };
+/**
+ * 납부 일정 상태(서버 status와 같은 뜻). 2026-11-08 상세 시트 재설계로 사람 말로 바꿨다 —
+ * 아직 낼 날이 안 온 일정을 '미납'이라 부르면 밀린 돈처럼 읽혔다. 기본 상태(예정)는 칩으로 그리지 않는다.
+ * 출처 이름표(paymentSourceLabel — '신축 조회' 등)는 같은 날 지웠다: 일정 줄마다 붙던 출처 대신 수자인 줄 하나가 말한다.
+ */
 export const PAYMENT_STATUS_LABEL = {
-  unpaid: "미납",
+  unpaid: "예정",
   partial: "일부 납부",
-  paid: "완납",
-  unknown: "상태 미확인",
+  paid: "납부 완료",
+  unknown: "확인 필요",
 } as const;
-export const paymentSourceLabel = (source: ManualHousingValueSource | null | undefined) =>
-  source ? HOUSING_VALUE_SOURCE_LABEL[source] : HOUSING_VALUE_SOURCE_LABEL.manual;
 export const scopeLabel = (scope: ManualFinanceScope) =>
   scope === "household" ? "가족 공유" : "나만 보기";
 export const visibilityLabel = (visibility: ManualFinanceVisibility) =>

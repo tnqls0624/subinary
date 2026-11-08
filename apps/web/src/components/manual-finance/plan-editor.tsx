@@ -2,8 +2,6 @@
 
 import { useId, useState } from "react";
 import type {
-  HousingBrandConnection,
-  ManualHousingPayment,
   ManualHousingPaymentKind,
   ManualHousingPlanResponse,
 } from "@family/contracts";
@@ -12,213 +10,105 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FieldList, FieldRow } from "@/components/widgets/field-row";
 import { InlineNotice } from "@/components/widgets/inline-notice";
 import { useAuth } from "@/lib/auth-context";
-import { formatMonthDay } from "@/lib/format";
 import {
   manualFinanceApi,
   useManualFinanceRefresh,
 } from "@/lib/manual-finance-client";
-import { useHouseholdMembers } from "@/lib/queries";
 import {
   PAYMENT_LABELS,
-  PAYMENT_STATUS_LABEL,
-  displayManualKrw,
   paymentDraft,
-  paymentSourceLabel,
   planDraft,
   planRequest,
 } from "./model";
 import { planFieldError, type PlanPaymentField } from "./field-errors";
 import { KrwAmountField } from "./krw-amount-field";
+import { PlanDetailSheet } from "./plan-detail-sheet";
+import { draftPaymentSummary, mergePlanRead } from "./plan-summary";
 import {
   ConfirmAction,
   FieldError,
   NATIVE_SELECT,
   RecordDialog,
-  RecordSheet,
 } from "./shared";
 import { useRecordEditor } from "./use-record-editor";
-import { HousingBrandPanel } from "./housing-brand-panel";
 
 type PlanEditorProps = {
   householdId: string;
   initial?: ManualHousingPlanResponse;
   observedVersion?: number;
-  onChanged: () => void;
   onClose: () => void;
 };
 
 /**
- * 주택 계획 입력 창(2026-11-05 HIG 검수 4단계로 다시 짬).
- * 고칠 수 없는 계획(가족이 등록했거나 지금 권한이 보기뿐)은 칸이 꺼진 폼 대신 읽기 전용 시트로 연다 — 자산 입력 창과 같다.
+ * 주택 창(2026-11-08 PO 재설계 '보기 먼저'). 저장된 주택은 편집 권한이 있어도 상세 시트가 먼저 열리고,
+ * '수정하기'를 누르면 시트를 닫고 입력 폼을 연다(창을 겹치지 않는다). 폼을 저장하거나 그냥 닫으면 상세 시트로
+ * 돌아온다 — 수정은 상세의 한 단계라서다. 새 주택은 지금처럼 폼이 바로 열리고, 저장하면 그 주택의 상세 시트가
+ * 열려 수자인 연결을 이어서 할 수 있다. 삭제했거나 권한이 바뀌면 둘 다 닫는다.
  */
-export function PlanEditor(props: PlanEditorProps) {
-  if (props.initial && !props.initial.item.canEdit)
-    return <PlanDetailSheet read={props.initial} onClose={props.onClose} />;
-  return <PlanForm {...props} />;
-}
-
-const paymentTitle = (payment: {
-  kind: ManualHousingPaymentKind;
-  installment: number | null;
-}) =>
-  `${PAYMENT_LABELS[payment.kind]}${payment.installment ? ` ${payment.installment}회차` : ""}`;
-
-/** 읽기 전용 줄의 보조 설명: '예정일 11월 20일 · 3,000,000원 냄(11월 3일)'. 모르는 값은 0으로 바꾸지 않는다. */
-function paymentCaption(payment: ManualHousingPayment): string {
-  const due = payment.dueDate
-    ? `예정일 ${formatMonthDay(payment.dueDate)}`
-    : "예정일 미입력";
-  const paid =
-    payment.paidAmount === null
-      ? "낸 금액 미확인"
-      : payment.paidAmount === "0"
-        ? "아직 안 냄"
-        : `${displayManualKrw(payment.paidAmount)} 냄${payment.paidDate ? `(${formatMonthDay(payment.paidDate)})` : ""}`;
-  return `${due} · ${paid}`;
-}
-
-function paymentMetaCaption(payment: {
-  amount: string;
-  paidAmount: string;
-  amountSource: ManualHousingPayment["amountSource"] | null;
-  amountAsOfSeoul: string | null;
-  paidAmountSource: ManualHousingPayment["paidAmountSource"] | null;
-  paidAmountAsOfSeoul: string | null;
-  remainingAmount: string | null;
-  status: ManualHousingPayment["status"];
-}): string {
-  const amount = payment.amount.trim() === "" ? null : payment.amount.replaceAll(",", "");
-  const paid = payment.paidAmount.trim() === "" ? null : payment.paidAmount.replaceAll(",", "");
-  let remaining = payment.remainingAmount;
-  let status = payment.status ?? "unknown";
-  if (amount !== null && paid !== null && /^(0|[1-9]\d*)$/.test(amount) && /^(0|[1-9]\d*)$/.test(paid)) {
-    const left = BigInt(amount) - BigInt(paid);
-    remaining = left < 0n ? "0" : left.toString();
-    status = left <= 0n ? "paid" : BigInt(paid) > 0n ? "partial" : "unpaid";
-  } else if (amount === null || paid === null) {
-    remaining = null;
-    status = "unknown";
-  }
-  const paidMeta = paid !== null
-    ? [
-        `낸 금액 출처 ${paymentSourceLabel(payment.paidAmountSource)}`,
-        payment.paidAmountAsOfSeoul || null,
-      ].filter(Boolean).join(" · ")
-    : null;
-  return [
-    `출처 ${paymentSourceLabel(payment.amountSource)}`,
-    payment.amountAsOfSeoul || null,
-    paidMeta,
-    `남은 금액 ${remaining != null ? displayManualKrw(remaining) : "미확인"}`,
-    PAYMENT_STATUS_LABEL[status ?? "unknown"],
-  ].filter(Boolean).join(" · ");
-}
-
-function PlanDetailSheet({
-  read,
-  onClose,
-}: {
-  read: ManualHousingPlanResponse;
-  onClose: () => void;
-}) {
-  const { user } = useAuth();
-  const members = useHouseholdMembers();
-  const { item, payments } = read;
-  const owner =
-    members.data?.find((member) => member.userId === item.ownerUserId)?.name ??
-    "가족 구성원";
-  return (
-    <RecordSheet title={item.label} onClose={onClose}>
-      <FieldList>
-        <FieldRow
-          label="입주연도"
-          value={item.occupancyYear ? `${item.occupancyYear}년` : "미입력"}
-          muted={!item.occupancyYear}
-        />
-        <FieldRow
-          label="계약 단계"
-          value={item.contractStage ?? "미입력"}
-          muted={!item.contractStage}
-        />
-        <FieldRow label="등록한 사람" value={owner} />
-      </FieldList>
-      <section aria-label="납부 일정" className="grid gap-1">
-        <h3 className="text-caption text-muted-foreground">납부 일정</h3>
-        {payments.length ? (
-          <FieldList>
-            {payments.map((payment) => (
-              <FieldRow
-                key={payment.id}
-                label={paymentTitle(payment)}
-                value={
-                  payment.amount === null ? (
-                    "금액 미입력"
-                  ) : (
-                    <span className="tabular-nums">
-                      {displayManualKrw(payment.amount)}
-                    </span>
-                  )
-                }
-                muted={payment.amount === null}
-              >
-                {paymentCaption(payment)}
-                <span className="text-caption text-muted-foreground mt-1 block">
-                  출처 {paymentSourceLabel(payment.amountSource)}
-                  {payment.amountAsOfSeoul ? ` · ${payment.amountAsOfSeoul}` : ""}
-                  {payment.paidAmount != null ? (
-                    <>
-                      {" · "}
-                      낸 금액 출처 {paymentSourceLabel(payment.paidAmountSource)}
-                      {payment.paidAmountAsOfSeoul ? ` · ${payment.paidAmountAsOfSeoul}` : ""}
-                    </>
-                  ) : null}
-                  {" · "}
-                  남은 금액 {payment.remainingAmount != null ? displayManualKrw(payment.remainingAmount) : "미확인"}
-                  {" · "}
-                  {PAYMENT_STATUS_LABEL[payment.status ?? "unknown"]}
-                </span>
-              </FieldRow>
-            ))}
-          </FieldList>
-        ) : (
-          <p className="text-body text-muted-foreground">
-            적어 둔 납부 일정이 없어요.
-          </p>
-        )}
-      </section>
-      {item.fundingNote ? (
-        <section aria-label="자금 마련 메모" className="grid gap-1">
-          <h3 className="text-caption text-muted-foreground">자금 마련 메모</h3>
-          <p className="text-body break-words whitespace-pre-wrap">
-            {item.fundingNote}
-          </p>
-        </section>
-      ) : null}
-      <p className="text-caption text-muted-foreground">
-        {item.ownerUserId === user?.id
-          ? "지금 가족 권한으로는 고칠 수 없어요."
-          : "등록한 사람만 고칠 수 있어요."}
-      </p>
-    </RecordSheet>
-  );
-}
-
-function PlanForm({
+export function PlanEditor({
   householdId,
   initial,
   observedVersion,
-  onChanged,
   onClose,
 }: PlanEditorProps) {
+  const [plan, setPlan] = useState(initial);
+  const [editing, setEditing] = useState(!initial);
+  if (plan && !(editing && plan.item.canEdit))
+    return (
+      <PlanDetailSheet
+        householdId={householdId}
+        plan={plan}
+        observedVersion={observedVersion}
+        onPlanChange={(update) =>
+          setPlan((old) =>
+            old ? (typeof update === "function" ? update(old) : update) : old
+          )
+        }
+        onEdit={() => setEditing(true)}
+        onClose={onClose}
+      />
+    );
+  return (
+    <PlanForm
+      householdId={householdId}
+      initial={plan}
+      observedVersion={observedVersion}
+      onSaved={(read) => {
+        setPlan((old) => mergePlanRead(old, read));
+        setEditing(false);
+      }}
+      onDismiss={plan ? () => setEditing(false) : onClose}
+      onClose={onClose}
+    />
+  );
+}
+
+type PlanFormProps = {
+  householdId: string;
+  initial?: ManualHousingPlanResponse;
+  observedVersion?: number;
+  /** 저장(또는 저장된 것을 확인)한 뒤 — 상세 시트로 간다. */
+  onSaved: (read: ManualHousingPlanResponse) => void;
+  /** 저장하지 않고 닫기(X·뒤로·버리기). */
+  onDismiss: () => void;
+  /** 삭제했거나 권한·상태가 바뀌어 더 볼 수 없을 때 — 상세 시트까지 닫는다. */
+  onClose: () => void;
+};
+
+/** 주택 입력 폼. 화면은 PlanEditor 를 거쳐 열고, 여기서 바로 내보내는 것은 서버 렌더 테스트용이다. */
+export function PlanForm({
+  householdId,
+  initial,
+  observedVersion,
+  onSaved,
+  onDismiss,
+  onClose,
+}: PlanFormProps) {
   const { authedFetch } = useAuth();
   const refresh = useManualFinanceRefresh();
   const formId = useId();
-  const [brandConnection, setBrandConnection] = useState<HousingBrandConnection | null>(
-    initial?.brandConnection ?? null
-  );
   const editor = useRecordEditor({
     initial: initial ?? null,
     observedVersion,
@@ -248,7 +138,7 @@ function PlanForm({
           current.item.version
         )
       ),
-    onChanged,
+    onChanged: onSaved,
     onClose,
     changed: (clear) => {
       void refresh(clear);
@@ -307,7 +197,7 @@ function PlanForm({
       pending={editor.pending}
       readRequired={editor.readRequired}
       invalidate={editor.invalidate}
-      onClose={onClose}
+      onClose={onDismiss}
       footer={
         <>
           {formError ? (
@@ -419,20 +309,6 @@ function PlanForm({
             />
           </div>
         </div>
-        <HousingBrandPanel
-          householdId={householdId}
-          planId={editor.current?.item.id ?? null}
-          planVersion={editor.current?.item.version ?? null}
-          connection={brandConnection}
-          canEdit={editor.canEdit && !disabled}
-          requiresSavedPlan={!editor.current}
-          onConnectionChange={setBrandConnection}
-          onApplied={(plan) => {
-            setBrandConnection(plan.brandConnection ?? null);
-            void refresh(false);
-            onChanged();
-          }}
-        />
         <section className="grid min-w-0 gap-3" aria-label="주택 납부 일정">
           <div>
             <h3 className="text-body font-semibold">계약금·중도금·잔금·옵션</h3>
@@ -459,12 +335,9 @@ function PlanForm({
               className="group rounded-card min-w-0 border"
             >
               <summary className="focus-visible:outline-ring rounded-card flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 p-3 focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
-                <span className="min-w-0">
-                  <span className="text-body block font-semibold">납부 일정 {index + 1} · {PAYMENT_LABELS[payment.kind]}{payment.installment ? ` ${payment.installment}회차` : ""}</span>
-                  <span className="text-caption text-muted-foreground mt-1 block">{payment.dueDate ? `예정일 ${formatMonthDay(payment.dueDate)}` : "예정일 미입력"}</span>
-                  <span className="text-caption text-muted-foreground mt-1 block">
-                    {paymentMetaCaption(payment)}
-                  </span>
+                {/* 한 줄 요약 — 출처·기준 시각·남은 금액 줄은 지웠다(상세 시트가 말한다). */}
+                <span className="text-body min-w-0 font-medium break-words">
+                  {draftPaymentSummary(payment)}
                 </span>
                 <ChevronDown className="text-muted-foreground size-5 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
               </summary>

@@ -6,6 +6,7 @@
  * 여는 중·실패 문구는 화면 맨 아래가 아니라 누른 줄 바로 아래에 붙인다 — 맨 아래에서는 누른 자리에서 보이지 않았다.
  * 여는 중에도 누른 버튼은 그대로 둔다(끄거나 div로 바꾸면 포커스가 body로 떨어지고, 창을 닫을 때 돌아갈 곳이 없다).
  * 겹친 요청은 open()의 pending 검사가 막는다.
+ * 2026-11-08: 주택을 누르면 편집 권한이 있어도 상세 시트가 먼저 열린다(PlanEditor — '보기 먼저').
  */
 
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -35,7 +36,6 @@ import {
   manualFinanceCanCreate,
   manualFinanceEditorContext,
   manualEditorUnavailable,
-  PAYMENT_LABELS,
 } from "@/components/manual-finance/model";
 import {
   FinanceLoading,
@@ -43,6 +43,7 @@ import {
 } from "@/components/manual-finance/shared";
 import { PlanEditor } from "@/components/manual-finance/plan-editor";
 import { planRowSubtitle } from "@/components/manual-finance/plan-rows";
+import { housingPaymentName } from "@/components/manual-finance/plan-summary";
 
 /** 어디서 눌렀나 — 같은 계획이 '다음 납부' 카드와 목록에 함께 있어서, 알림을 누른 쪽에 붙인다. */
 type Spot = "next" | "list";
@@ -205,8 +206,12 @@ function ScopedPlans({
                 {displayManualKrw(next.remainingAmountKrw)}
               </p>
               <p className="text-body mt-2 break-words">
-                {next.label} · {PAYMENT_LABELS[next.kind]}
-                {next.installment ? ` ${next.installment}회차` : ""}
+                {/* 일정 이름은 상세 시트와 같은 함수 — 금액·날짜는 서버 요약(같은 summarizeManualHousingPlans)이다. */}
+                {next.label} ·{" "}
+                {housingPaymentName({
+                  kind: next.kind,
+                  installment: next.installment,
+                })}
               </p>
               <p className="text-caption text-muted-foreground mt-1">
                 {formatMonthDay(next.dueDate)} 납부 · 이미 낸 금액은 뺐어요
@@ -298,7 +303,6 @@ function ScopedPlans({
               : undefined
           }
           onClose={() => setEditor(null)}
-          onChanged={() => setEditor(null)}
         />
       ) : null}
     </div>
