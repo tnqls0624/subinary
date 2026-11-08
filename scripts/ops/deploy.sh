@@ -157,8 +157,9 @@ if [ "$status" -ne 0 ]; then
   if grep -q 'required for image build' "$log_file"; then
     echo ""
     echo "[deploy] 디스크 부족입니다. docs/production-deploy.md §5.1 절차:"
-    echo "  docker builder prune --all --force --reserved-space 10GB"
-    echo "  docker image prune --force"
+    echo "  INFRA_PRUNE_DRY_RUN=true pnpm ops:images:prune   # 지울 커밋 태그 이미지 확인"
+    echo "  pnpm ops:images:prune                            # 오래된 태그 정리 → 빌드 캐시 정리"
+    echo "  태그 정리 없이 'docker builder prune' 만 하면 0B 일 수 있습니다(캐시가 태그된 이미지와 레이어를 공유)."
     echo "  ⛔ docker system prune -a 와 volume prune 은 쓰지 마십시오"
     echo "     (운영 데이터·롤백 이미지를 지웁니다)"
   fi

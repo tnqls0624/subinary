@@ -98,3 +98,16 @@ echo "[infra] starting production AI pipeline infrastructure"
 compose up -d
 
 sh scripts/ops/verify-ai-pipeline-infrastructure.sh
+
+# 검증이 끝난 빌드 배포에서만 오래된 커밋 태그 이미지를 정리한다(최신 5개·쓰는 이미지·:local 은 남김).
+# --skip-build 롤백 때는 건드리지 않는다. 정리가 실패해도 이미 성공한 배포를 실패로 만들지 않는다 —
+# 남은 이미지는 다음 배포의 디스크 기준(40GB)이 다시 잡는다. 2026-11-09 태그 19개가 쌓여 배포가 막혔다.
+# CD 에서는 경고 한 줄이 초록 로그에 묻히므로 GitHub 실행 요약에도 경고를 단다.
+if [ "$skip_build" = false ]; then
+  if ! sh scripts/ops/prune-app-images.sh "$git_sha"; then
+    echo "[infra] WARNING: 오래된 앱 이미지 정리 실패 — 배포는 성공했다. docs/production-deploy.md §5.1 로 손으로 정리" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning title=앱 이미지 정리 실패::배포는 성공했지만 오래된 이미지·빌드 캐시를 정리하지 못했다. 다음 배포가 디스크 기준(40GB)에 막힐 수 있다 — docs/production-deploy.md §5.1"
+    fi
+  fi
+fi

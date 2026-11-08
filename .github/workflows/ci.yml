@@ -83,6 +83,7 @@ jobs:
         run: |
           node --test infrastructure/ops-sentinel/ops-sentinel.verify.mjs
           node --test scripts/ops/auto-investigate.verify.mjs
+          node --test scripts/ops/prune-app-images.verify.mjs
           node --test scripts/lib/verification-database-guard.test.mjs
           node --test scripts/lib/dockerfile-workspaces.test.mjs
           node --test packages/contracts/test/*.test.mjs

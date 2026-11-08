@@ -152,12 +152,26 @@ sh scripts/ops/verify-ai-pipeline-infrastructure.sh
 # 현재 사용량 확인
 docker system df
 
-# 최근 빌드 캐시 10GB는 보존하고 나머지 미사용 캐시 정리
+# 오래된 커밋 태그 이미지 정리 → 빌드 캐시 정리(배포 때 자동으로 도는 것과 같다). 먼저 dry run 으로 대상 확인
+INFRA_PRUNE_DRY_RUN=true pnpm ops:images:prune
+pnpm ops:images:prune
+
+# 태그 정리 없이 캐시만 정리할 때(빌드 캐시를 10GB 남기고 나머지 미사용 캐시 정리)
 docker builder prune --all --force --reserved-space 10GB
 
 # 컨테이너가 사용하지 않는 태그 없는 중간 이미지만 정리(-a 사용 금지)
 docker image prune --force
 ```
+
+배포는 앱 이미지에 커밋 태그(`family-memory-ai/prod:<sha>`, 고유 약 1.7GB)를 하나씩 붙인다. 검증이 끝난
+빌드 배포마다 `scripts/ops/prune-app-images.sh`가 최신 5개(`INFRA_KEEP_APP_IMAGES`)와 컨테이너가 쓰는
+이미지·`:local`·이번 배포 태그만 남기고(수는 태그가 아니라 서로 다른 이미지로 센다) 나머지 태그를 `rmi`(`-f` 없이)로
+지운 뒤 위 캐시 정리를 한다. 정리가 실패해도 배포는 성공으로 두고 CD 실행 요약에 경고를 단다.
+`--skip-build` 롤백 때는 지우지 않는다. 손으로 확인할 때는 `INFRA_PRUNE_DRY_RUN=true pnpm ops:images:prune`.
+
+> 2026-11-09: 보존 규칙이 없어 태그 19개(약 33GB)가 쌓여 디스크 기준(40GB)에 CD가 막혔다. 캐시 정리만으로는
+> 0B가 비었다 — 빌드 캐시가 태그된 이미지와 같은 레이어를 잡고 있어서다. 오래된 태그 15개를 지운 뒤 캐시를
+> 정리하자 호스트 여유가 35GB에서 47GB로 돌아왔다. **태그 정리 → 캐시 정리** 순서가 중요하다.
 
 운영 Mac에서는 최소 40GB, 권장 80GB 이상의 호스트 여유 공간을 유지한다. `docker system prune -a`와
 `docker volume prune`은 운영 데이터나 롤백 이미지를 제거할 수 있으므로 이 절차에서 사용하지 않는다.
