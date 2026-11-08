@@ -90,6 +90,15 @@ export NEXT_PUBLIC_API_URL
 # 번들 버전을 앱에 넣는다 — 화면 캐시(query-persistence)는 번들이 바뀌면 옛 데이터 모양을 믿지 않는다.
 NEXT_PUBLIC_BUNDLE_VERSION="$version"
 export NEXT_PUBLIC_BUNDLE_VERSION
+# 웹은 공용 패키지(@family/contracts 등)의 dist 를 읽는다. 서버 이미지는 Docker 안에서 패키지를 새로 빌드하지만
+# 이 번들은 호스트에서 빌드하므로, 먼저 빌드하지 않으면 운영 작업 트리의 낡은 dist 를 읽는다 — 계약에 새 export 가
+# 생기고 웹이 쓰자마자 번들 빌드가 깨졌다(2026-11-08 e8527af, HOUSING_BRAND_INFO). turbo 캐시라 바뀐 게 없으면 빠르다.
+echo "[ota] 공용 패키지 빌드"
+pnpm build:packages >"$work_dir/build-packages.log" 2>&1 || {
+  echo "[ota] ✗ 공용 패키지 빌드 실패 — 마지막 20줄:" >&2
+  tail -20 "$work_dir/build-packages.log" >&2
+  exit 1
+}
 echo "[ota] 정적 export (API=$NEXT_PUBLIC_API_URL)"
 pnpm --filter @family/web build:mobile >"$work_dir/build.log" 2>&1 || {
   echo "[ota] ✗ 빌드 실패 — 마지막 20줄:" >&2
