@@ -1046,10 +1046,22 @@ function paymentLookupLoginPage({
   base.page.evaluate = async (fn, arg) => {
     base.actions.push(['evaluate', typeof arg === 'string' ? arg : (arg && typeof arg === 'object' ? 'object' : arg)]);
     if (fn === discoverOutsideTableLookup) {
-      return discoverOutsideTableLookup(lookupDoc);
+      // Playwright: page.evaluate(fn) → fn() with page document. Pass lookupDoc
+      // as the optional Node-test second/first doc the same way production uses
+      // document when no arg is provided — invoke with no plan arg.
+      const previous = globalThis.document;
+      globalThis.document = lookupDoc;
+      try {
+        return discoverOutsideTableLookup();
+      } finally {
+        if (previous === undefined) delete globalThis.document;
+        else globalThis.document = previous;
+      }
     }
     if (fn === applyOutsideTableLookup) {
-      const result = applyOutsideTableLookup(lookupDoc, arg);
+      // Playwright: page.evaluate(fn, plan) → fn(plan). Optional doc is 2nd arg
+      // for Node only (same pattern as captureSujainTables).
+      const result = applyOutsideTableLookup(arg, lookupDoc);
       selectedIndex = select.selectedIndex;
       return result;
     }

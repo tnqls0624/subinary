@@ -170,10 +170,11 @@ test('apply selects a non-placeholder index and clicks adjacent 조회 without r
   });
   const inquire = inquireButton('조회');
   wrapLookupRow(select, inquire);
-  const result = applyOutsideTableLookup(docFrom({ selects: [select] }), {
+  // Optional second arg is Node-test doc only (like captureSujainTables).
+  const result = applyOutsideTableLookup({
     selectOrdinal: 0,
     optionIndex: 1,
-  });
+  }, docFrom({ selects: [select] }));
   assert.deepEqual(result, { selected: true, clicked: true });
   assert.equal(select.selectedIndex, 1);
   assert.equal(inquire.clickCalls, 1);
@@ -190,12 +191,144 @@ test('apply refuses placeholder option index and does not click 조회', () => {
   });
   const inquire = inquireButton('조회');
   wrapLookupRow(select, inquire);
-  const result = applyOutsideTableLookup(docFrom({ selects: [select] }), {
+  const result = applyOutsideTableLookup({
     selectOrdinal: 0,
     optionIndex: 0,
-  });
+  }, docFrom({ selects: [select] }));
   assert.deepEqual(result, { selected: false, clicked: false });
   assert.equal(inquire.clickCalls, 0);
+});
+
+/**
+ * Playwright page.evaluate(fn, arg) invokes fn(arg) in the page — first
+ * argument is the plan, document is the page global. This must click 조회.
+ */
+test('apply under Playwright arity (plan as first arg, document global) clicks 조회', () => {
+  const select = selectEl({
+    options: [
+      option('', 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK'),
+      option('synth-a', 'SYNTHETIC_OPTION_LABEL_ALPHA'),
+    ],
+  });
+  const inquire = inquireButton('조회');
+  wrapLookupRow(select, inquire);
+  const lookupDoc = docFrom({ selects: [select] });
+
+  const previous = globalThis.document;
+  globalThis.document = lookupDoc;
+  let result;
+  try {
+    // Same call shape as collect.mjs: page.evaluate(applyOutsideTableLookup, plan)
+    result = applyOutsideTableLookup({ selectOrdinal: 0, optionIndex: 1 });
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+  assert.deepEqual(result, { selected: true, clicked: true });
+  assert.equal(inquire.clickCalls, 1);
+  assert.equal(select.selectedIndex, 1);
+});
+
+test('discover under Playwright arity (no arg, document global) finds non-placeholder indices', () => {
+  const select = selectEl({
+    options: [
+      option('', 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK'),
+      option('synth-a', 'SYNTHETIC_OPTION_LABEL_ALPHA'),
+    ],
+  });
+  const inquire = inquireButton('조회');
+  wrapLookupRow(select, inquire);
+  const lookupDoc = docFrom({ selects: [select] });
+  const previous = globalThis.document;
+  globalThis.document = lookupDoc;
+  let discovery;
+  try {
+    // Same call shape as collect.mjs: page.evaluate(discoverOutsideTableLookup)
+    discovery = discoverOutsideTableLookup();
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+  assert.equal(discovery.inquireFound, true);
+  assert.equal(discovery.selectOrdinal, 0);
+  assert.deepEqual(discovery.nonPlaceholderOptionIndices, [1]);
+});
+
+/**
+ * Playwright serializes only the function body. Outer module bindings are
+ * ReferenceErrors in the browser. Strip comments, then fail if the evaluate
+ * entrypoints still call/reference those helpers in executable code.
+ */
+test('discover/apply evaluate bodies do not reference outer module helpers', () => {
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .replace(/(^|[^:])\/\/.*$/gum, '$1');
+  const discoverSrc = stripComments(Function.prototype.toString.call(discoverOutsideTableLookup));
+  const applySrc = stripComments(Function.prototype.toString.call(applyOutsideTableLookup));
+  for (const [name, src] of [
+    ['discoverOutsideTableLookup', discoverSrc],
+    ['applyOutsideTableLookup', applySrc],
+  ]) {
+    assert.equal(
+      /\bisPlaceholderOptionValue\b/u.test(src),
+      false,
+      `${name} executable body references isPlaceholderOptionValue (not available inside page.evaluate)`,
+    );
+    assert.equal(
+      /\bemptyLookupDiagnostic\b/u.test(src),
+      false,
+      `${name} executable body references emptyLookupDiagnostic`,
+    );
+  }
+});
+
+/**
+ * discover uses getComputedStyle for hidden; apply must use the same rule so
+ * selectOrdinal stays aligned when hidden selects precede the visible lookup.
+ */
+test('discover and apply agree on selectOrdinal when a computed-style-hidden select comes first', () => {
+  const hiddenSelect = selectEl({
+    options: [option('hidden-val', 'SYNTHETIC_HIDDEN_OPTION')],
+  });
+  // Not el.hidden / attribute — only computed CSS, as in production chrome.
+  hiddenSelect.style = {};
+  const visibleSelect = selectEl({
+    options: [
+      option('', 'SYNTHETIC_PLACEHOLDER_LABEL_DO_NOT_LEAK'),
+      option('synth-a', 'SYNTHETIC_OPTION_LABEL_ALPHA'),
+    ],
+  });
+  const inquire = inquireButton('조회');
+  wrapLookupRow(visibleSelect, inquire);
+
+  const lookupDoc = docFrom({ selects: [hiddenSelect, visibleSelect] });
+  const previousStyle = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = (el) => {
+    if (el === hiddenSelect) return { display: 'none', visibility: 'visible' };
+    return { display: 'block', visibility: 'visible' };
+  };
+
+  let discovery;
+  let result;
+  try {
+    discovery = discoverOutsideTableLookup(lookupDoc);
+    assert.equal(discovery.inquireFound, true);
+    assert.equal(discovery.selectOrdinal, 0);
+    assert.deepEqual(discovery.nonPlaceholderOptionIndices, [1]);
+
+    result = applyOutsideTableLookup({
+      selectOrdinal: discovery.selectOrdinal,
+      optionIndex: 1,
+    }, lookupDoc);
+  } finally {
+    if (previousStyle === undefined) delete globalThis.getComputedStyle;
+    else globalThis.getComputedStyle = previousStyle;
+  }
+
+  assert.deepEqual(result, { selected: true, clicked: true });
+  assert.equal(visibleSelect.selectedIndex, 1);
+  assert.equal(inquire.clickCalls, 1);
+  assert.equal(hiddenSelect.selectedIndex, 0);
 });
 
 test('emptyLookupDiagnostic is counts-only with safe defaults', () => {

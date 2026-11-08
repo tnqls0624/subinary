@@ -7,7 +7,12 @@
  * whether lookup was clicked, whether body rows appeared).
  *
  * Self-contained for Playwright page.evaluate serialization (no outer closures).
- * Optional `doc` arg is for Node unit tests only.
+ * Nested helpers must be declared inside each evaluate entrypoint — Playwright
+ * serializes only the function you pass. Do not call module-level helpers from
+ * discoverOutsideTableLookup / applyOutsideTableLookup.
+ *
+ * Optional trailing `doc` arg is for Node unit tests only (same pattern as
+ * captureSujainTables). Production evaluate uses the page `document`.
  */
 
 /** Empty / whitespace-only option values are placeholders — never label words. */
@@ -33,6 +38,13 @@ export function discoverOutsideTableLookup(doc) {
   const root = doc ?? (typeof document !== 'undefined' ? document : null);
   if (!root || typeof root.querySelectorAll !== 'function') return empty;
 
+  // Inlined: must not call module-level isPlaceholderOptionValue (page.evaluate).
+  const isPlaceholderValue = (value) => {
+    if (value === null || value === undefined) return true;
+    if (typeof value !== 'string' && typeof value !== 'number') return true;
+    return String(value).trim() === '';
+  };
+
   const isInsideTable = (el) => {
     if (!el || typeof el !== 'object') return false;
     if (typeof el.closest === 'function') {
@@ -50,6 +62,10 @@ export function discoverOutsideTableLookup(doc) {
     return false;
   };
 
+  /**
+   * Same visibility rule as applyOutsideTableLookup — attribute/property hidden
+   * plus getComputedStyle display/visibility when available, else inline style.
+   */
   const isHiddenControl = (el) => {
     if (!el || typeof el !== 'object') return true;
     if (el.hidden === true) return true;
@@ -154,7 +170,7 @@ export function discoverOutsideTableLookup(doc) {
     for (let i = 0; i < list.length; i += 1) {
       const opt = list[i];
       const value = opt?.value ?? (typeof opt?.getAttribute === 'function' ? opt.getAttribute('value') : '');
-      if (!isPlaceholderOptionValue(value)) indices.push(i);
+      if (!isPlaceholderValue(value)) indices.push(i);
     }
 
     return {
@@ -171,18 +187,31 @@ export function discoverOutsideTableLookup(doc) {
  * Select one option by index on the discovered outside-table select and click
  * the adjacent 조회 control. Never returns labels or values.
  *
+ * Playwright calling convention (production):
+ *   page.evaluate(applyOutsideTableLookup, { selectOrdinal, optionIndex })
+ *   → applyOutsideTableLookup(plan) with page `document`.
+ *
+ * Node tests may pass an optional second `doc` (like captureSujainTables).
+ *
  * @returns {{ selected: boolean, clicked: boolean }}
  */
-export function applyOutsideTableLookup(doc, plan) {
+export function applyOutsideTableLookup(plan, doc) {
   const empty = { selected: false, clicked: false };
   const root = doc ?? (typeof document !== 'undefined' ? document : null);
   if (!root || typeof root.querySelectorAll !== 'function') return empty;
-  if (!plan || typeof plan !== 'object') return empty;
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return empty;
 
   const selectOrdinal = Number(plan.selectOrdinal);
   const optionIndex = Number(plan.optionIndex);
   if (!Number.isInteger(selectOrdinal) || selectOrdinal < 0) return empty;
   if (!Number.isInteger(optionIndex) || optionIndex < 0) return empty;
+
+  // Inlined: must not call module-level isPlaceholderOptionValue (page.evaluate).
+  const isPlaceholderValue = (value) => {
+    if (value === null || value === undefined) return true;
+    if (typeof value !== 'string' && typeof value !== 'number') return true;
+    return String(value).trim() === '';
+  };
 
   const isInsideTable = (el) => {
     if (!el || typeof el !== 'object') return false;
@@ -201,6 +230,10 @@ export function applyOutsideTableLookup(doc, plan) {
     return false;
   };
 
+  /**
+   * Must match discoverOutsideTableLookup exactly — including getComputedStyle —
+   * so selectOrdinal stays aligned when hidden selects precede the visible one.
+   */
   const isHiddenControl = (el) => {
     if (!el || typeof el !== 'object') return true;
     if (el.hidden === true) return true;
@@ -212,7 +245,12 @@ export function applyOutsideTableLookup(doc, plan) {
       }
     }
     try {
-      if (el.style && typeof el.style === 'object') {
+      if (typeof getComputedStyle === 'function') {
+        const style = getComputedStyle(el);
+        const display = String(style?.display ?? '').toLowerCase();
+        const visibility = String(style?.visibility ?? '').toLowerCase();
+        if (display === 'none' || visibility === 'hidden') return true;
+      } else if (el.style && typeof el.style === 'object') {
         const display = String(el.style.display ?? '').toLowerCase();
         const visibility = String(el.style.visibility ?? '').toLowerCase();
         if (display === 'none' || visibility === 'hidden') return true;
@@ -292,7 +330,7 @@ export function applyOutsideTableLookup(doc, plan) {
   if (optionIndex >= list.length) return empty;
   const opt = list[optionIndex];
   const value = opt?.value ?? '';
-  if (isPlaceholderOptionValue(value)) return empty;
+  if (isPlaceholderValue(value)) return empty;
 
   target.selectedIndex = optionIndex;
   if (typeof target.value !== 'undefined') {
