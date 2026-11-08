@@ -6,6 +6,12 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+import {
+  menuCollisionPadding,
+  SELECT_EDGE_GAP_PX,
+  useSafeAreaInsets,
+} from "./menu-edges";
+
 function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />;
 }
@@ -56,8 +62,15 @@ function SelectContent({
   className,
   children,
   position = "popper",
+  collisionPadding,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  // 상태 표시줄·제스처 바 밑으로 펼치지 않는다(menu-edges.ts). item-aligned 모드는 이 값을 쓰지 않는다.
+  const insets = useSafeAreaInsets();
+  const padding = React.useMemo(
+    () => collisionPadding ?? menuCollisionPadding(insets, SELECT_EDGE_GAP_PX),
+    [collisionPadding, insets],
+  );
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -69,6 +82,7 @@ function SelectContent({
           className,
         )}
         position={position}
+        collisionPadding={padding}
         {...props}
       >
         <SelectScrollUpButton />

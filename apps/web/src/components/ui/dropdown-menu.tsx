@@ -6,6 +6,8 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+import { menuCollisionPadding, useSafeAreaInsets } from "./menu-edges";
+
 /*
  * 터치·펜은 손을 뗄 때 연다(2026-11-06 사용자 지적: 값 고르기 줄에 스크롤하려고 손가락을 대면 메뉴가 바로 열린다 —
  * "거래 상세만이 아니고 전체적으로 다 그래"). Radix DropdownMenu Trigger는 터치에서도 pointerdown에 연다.
@@ -210,13 +212,21 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  collisionPadding,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  // 상태 표시줄·제스처 바 밑으로 펼치지 않는다(menu-edges.ts — 맨 위 항목이 눌리지 않던 문제).
+  const insets = useSafeAreaInsets();
+  const padding = React.useMemo(
+    () => collisionPadding ?? menuCollisionPadding(insets),
+    [collisionPadding, insets],
+  );
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
+        collisionPadding={padding}
         className={cn(
           "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-control border p-1 shadow-md",
           className,

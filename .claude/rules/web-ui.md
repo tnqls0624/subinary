@@ -13,4 +13,5 @@ paths:
 - 금액 칸은 `AmountInput`, 여러 줄 칸은 `Textarea`, 화면 날짜는 `formatMonthDay`·`formatMonthDayTime`, 가계부 달은 `MonthNav`, 설정 줄은 `FieldRow`, 조건 칩은 `FilterChip`을 쓴다. 토큰 밖 글자 크기·모서리는 래칫 상한 0이라 새로 쓰면 테스트가 실패한다(2026-11-06 HIG 4단계).
 - 값 고르기 메뉴를 잠글 때는 `PickerMenu`/`FieldRow`의 `disabled`로 Radix 트리거까지 잠근다. 버튼 disabled만으로는 Android 웹뷰에서 메뉴가 열려 저장 중에 고른 값이 무시됐다(2026-11-06 최종 검토).
 - 드롭다운(값 고르기·⋯ 메뉴·가족 전환)은 터치에서 손을 뗄 때 연다 — `components/ui/dropdown-menu.tsx` 기본 동작. Radix DropdownMenu 는 원래 손가락이 닿는 순간 열려서, 스크롤하려고 줄에 손을 대면 메뉴가 열렸다(사용자 지적 2026-11-06). 손가락이 조금 움직이면 열지 않는다. Radix 를 화면에서 직접 쓰지 말고 이 부품을 쓴다.
+- 떠 있는 메뉴(DropdownMenu·Select)는 상태 표시줄·제스처 바 밑으로 펼치지 않는다 — 공용 부품이 막대 높이를 px로 재서 Radix `collisionPadding`에 더한다(`components/ui/menu-edges.ts`). 화면에서 `collisionPadding`·`max-h`를 덮어쓰지 말고, 막대 높이를 CSS로 최대 높이에서만 빼지 않는다(flip이 몰라 탭바 위 짧은 메뉴가 짜부라진다). 앱이 viewport-fit=cover라 긴 카테고리 메뉴 맨 위 '영양제'가 상태 표시줄에 깔려 눌리지 않았다(사용자 지적 2026-11-09).
 - 가계부 조건 칩 줄(`transaction-filters.tsx`)은 `touch-pan-x`로 가로 팬을 받는다 — 칩이 전부 버튼·드롭다운이라 세로 페이지 스크롤이 가로 제스처를 가로챌 수 있다(SOO-46).
