@@ -2038,6 +2038,10 @@ function TransactionDetailDialog({
     <span>카드에 연결하면 공개 범위가 카드 설정을 따라가요.</span>
   ) : null;
 
+  const overflowMenu = !editing ? (
+    <OverflowMenu label="거래 메뉴" actions={overflowActions} />
+  ) : null;
+
   return (
     <Dialog open onOpenChange={(v) => !v && requestClose()}>
       {/* 상세 보기라 바텀 시트다(사용자 결정 2026-11-05). 다른 창은 기본 모양 — sheet-layout.ts 표. */}
@@ -2046,29 +2050,39 @@ function TransactionDetailDialog({
         className="grid-cols-[minmax(0,1fr)] gap-5 [&>*]:min-w-0"
       >
         <DialogHeader className="gap-1 text-left">
-          {/* 최근 결제·겹친 결제에서 넘어왔으면 한 단계 돌아가는 길을 왼쪽 위에 둔다(오른쪽 위 X와 같은 높이). */}
+          {/*
+            ⋯는 늘 오른쪽 위 X 바로 왼쪽, 같은 높이에 둔다. 둘 사이는 띄운다(pr-12) — 붙어 있으면 메뉴를 누르려다
+            시트가 닫혔다. 최근 결제·겹친 결제에서 넘어왔으면 맨 위 줄이 '‹ 이전 거래 …… ⋯ X'가 되고 제목은 그
+            아래에서 전체 폭을 쓴다. 예전에는 ⋯가 제목 줄에 남아 X 없는 자리를 비워 둔 채 어중간하게 떠 있었다
+            (사용자 지적 2026-11-09 '... 위치가 이상함').
+          */}
           {onBack ? (
-            <button
-              type="button"
-              onClick={onBack}
-              disabled={busy}
-              className="text-primary text-body focus-visible:outline-ring -mt-3 -ml-2 inline-flex min-h-11 items-center gap-0.5 self-start rounded-control pr-2 font-medium focus-visible:outline-2 active:opacity-60 disabled:opacity-50"
-            >
-              <ChevronLeft aria-hidden="true" className="size-5" />
-              이전 거래
-            </button>
+            <div className="-mt-3 flex min-w-0 items-center justify-between gap-1 pr-12">
+              <button
+                type="button"
+                onClick={onBack}
+                disabled={busy}
+                className="text-primary text-body focus-visible:outline-ring -ml-2 inline-flex min-h-11 items-center gap-0.5 rounded-control pr-2 font-medium focus-visible:outline-2 active:opacity-60 disabled:opacity-50"
+              >
+                <ChevronLeft aria-hidden="true" className="size-5" />
+                이전 거래
+              </button>
+              {overflowMenu ? (
+                <div className="shrink-0">{overflowMenu}</div>
+              ) : null}
+            </div>
           ) : null}
-          {/* ⋯와 오른쪽 위 X 사이를 띄운다(pr-12) — 붙어 있으면 메뉴를 누르려다 시트가 닫혔다. */}
-          <div className="flex min-w-0 items-start gap-1 pr-12">
+          <div
+            className={cn(
+              "flex min-w-0 items-start gap-1",
+              onBack ? null : "pr-12",
+            )}
+          >
             <DialogTitle className="text-heading min-w-0 flex-1 break-words">
               {merchant}
             </DialogTitle>
-            {!editing ? (
-              <OverflowMenu
-                label="거래 메뉴"
-                actions={overflowActions}
-                className="-my-2 shrink-0"
-              />
+            {!onBack && overflowMenu ? (
+              <div className="-my-2 shrink-0">{overflowMenu}</div>
             ) : null}
           </div>
           <DialogDescription className="text-caption break-words">
