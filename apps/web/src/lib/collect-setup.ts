@@ -156,7 +156,7 @@ export function buildCollectSetup(input: CollectSetupInput): CollectSetupPlan {
   const authorization: SetupEntry = {
     label: AUTHORIZATION_HEADER,
     value: `Bearer ${collectToken}`,
-    note: "이 값이 곧 열쇠예요. 주소창이나 메모 공유에는 넣지 말아 주세요.",
+    note: "이 값에 토큰이 들어 있어요. 주소창이나 메모 공유에는 넣지 말아 주세요.",
   };
 
   if (platform === "android") {
@@ -274,7 +274,7 @@ export function buildCollectSetup(input: CollectSetupInput): CollectSetupPlan {
     bodyFields: [],
     eventIdHint: EVENT_ID_HINT.other,
     cautions: [
-      "연결 열쇠는 Authorization 헤더로만 보내 주세요. 주소(URL)에 넣으면 기록에 남아요.",
+      "토큰은 Authorization 헤더로만 보내 주세요. 주소(URL)에 넣으면 기록에 남아요.",
       "같은 문자를 다시 보낼 때 eventId가 같으면 중복으로 저장되지 않아요.",
     ],
   };
@@ -406,7 +406,7 @@ export function buildSetupCopySections(
             name: `${header.label} 헤더 값`,
             value: header.value,
             note: placeholder
-              ? "'Bearer ' 뒤에 적어 둔 연결 열쇠를 넣어요. 이미 넣었다면 그대로 두세요."
+              ? "'Bearer ' 뒤에 적어 둔 토큰을 넣어요. 이미 넣었다면 그대로 두세요."
               : header.note,
             copyable: !placeholder,
             holdsKey,
@@ -448,6 +448,25 @@ export function buildSetupCopySections(
  * 보인다 — 아직 복사하지도, '옮겨 적었어요'로 넘어가지도 않았는데 닫으면 새로 발급하는 수밖에 없다.
  * 첫 문자를 이미 받았으면 열쇠가 자동화 앱에 들어간 것이라 묻지 않는다.
  */
+/**
+ * 마법사가 '연결이 끝났어요'를 띄울지. 이 창에서 토큰을 받았으면 그 뒤로 문자가 새로 들어왔을 때만
+ * (마지막 문자 시각이 받은 순간 값에서 바뀌었는지 — 휴대폰 시계와 섞지 않으려고 시각 비교는 하지 않는다),
+ * 토큰 없이 '설정 계속하기'로 열었으면 첫 문자가 있을 때다. 재발급한 기기는 예전 문자(firstEventAt)가
+ * 이미 있어서, 그것으로 판정하면 새 토큰을 보여 주기도 전에 성공 화면이 떴다(2026-11-22 사용자 지적:
+ * 재발급했는데 토큰을 복사할 창이 없다).
+ */
+export function collectWizardReceived(state: {
+  hasIssuedKey: boolean;
+  /** 이 창에서 토큰을 받은 순간의 마지막 문자 시각(서버 값). */
+  baselineLastEventAt: string | null;
+  lastEventAt: string | null;
+  firstEventAt: string | null;
+}): boolean {
+  return state.hasIssuedKey
+    ? state.lastEventAt != null && state.lastEventAt !== state.baselineLastEventAt
+    : state.firstEventAt != null;
+}
+
 export function collectWizardCloseNeedsConfirm(state: {
   hasIssuedKey: boolean;
   keyKept: boolean;

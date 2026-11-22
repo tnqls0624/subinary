@@ -64,6 +64,7 @@ import {
   buildSetupCopySections,
   collectWizardBackAction,
   collectWizardCloseNeedsConfirm,
+  collectWizardReceived,
   type SetupCopyRow,
 } from "@/lib/collect-setup";
 import { FIRST_EVENT_WAIT_MS, diagnoseDeviceSignal } from "@/lib/device-signal";
@@ -75,6 +76,13 @@ import { registerTransactionDetailBack } from "@/lib/transaction-detail-back";
 const WAIT_POLL_MS = 5_000;
 
 type WizardStep = 1 | 2 | 3;
+
+/** 재발급한 토큰을 넣을 자리 — 자동화가 이미 있으므로 어느 칸을 바꾸는지만 말한다. */
+const REISSUE_WHERE: Readonly<Record<DeviceSummary["platform"], string>> = {
+  ios: "단축어 자동화의 'URL의 콘텐츠 가져오기'에서",
+  android: "MacroDroid 매크로의 'HTTP 요청'에서",
+  other: "문자를 보내는 도구에서",
+};
 
 interface CollectSetupWizardProps {
   open: boolean;
@@ -97,6 +105,13 @@ interface CollectSetupWizardProps {
   reissuePending?: boolean;
   /** 재발급 실패 문구. 마법사가 화면을 덮고 있으므로 페이지가 아니라 여기서 보여 준다. */
   reissueError?: string | null;
+  /**
+   * 기기 목록 ⋯ 메뉴의 '토큰 재발급'으로 열렸는가. 이때는 자동화가 이미 만들어져 있고 바꿀 것은
+   * 토큰 하나뿐이라, 처음 설정용 칸별 안내 대신 새 토큰과 '토큰 복사'만 먼저 보여 준다.
+   * '처음부터 설정하기'를 누르면 기존 단계 안내로 펼친다(2026-11-22 사용자 지적: 재발급했는데
+   * 토큰을 복사할 창이 없다).
+   */
+  reissued?: boolean;
   /**
    * 열릴 때 시작할 단계. 재발급·설정 이어가기로 들어오면 앱은 이미 깔려 있으므로
    * 2단계부터 시작한다 — 이미 한 일을 다시 시키면 사용자는 화면을 닫는다.
@@ -173,12 +188,22 @@ export function CollectSetupWizard({
   reissuePending = false,
   reissueError = null,
   initialStep = 1,
+  reissued = false,
 }: CollectSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>(initialStep);
   const [copyResult, setCopyResult] = useState<CopyResult>(null);
   // 연결 열쇠를 챙겼는가 — 열쇠가 든 값을 복사했거나(전체 복사 포함) '옮겨 적었어요'로 넘어갔다.
   const [keyKept, setKeyKept] = useState(false);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  // 재발급 직후 '새 토큰 + 토큰 복사'만 보여 주는 상태. '처음부터 설정하기'로 단계 안내를 펼친다.
+  const [tokenOnly, setTokenOnly] = useState(reissued);
+  // 토큰을 받은 순간의 마지막 문자 시각(서버 값). '연결이 끝났어요'는 그 뒤로 문자가 새로 들어왔을
+  // 때만 띄운다. 재발급한 기기는 예전에 받은 문자(firstEventAt)가 이미 있어서, 그것으로 판정하면
+  // 새 토큰을 보여 주기도 전에 성공 화면이 떴다 — 재발급하면 토큰이 한 번도 보이지 않던 원인
+  // (2026-11-22). 휴대폰 시계와 섞지 않으려고 시각 비교 대신 값이 바뀌었는지만 본다.
+  const latestLastEventAt = useRef(device.lastEventAt);
+  latestLastEventAt.current = device.lastEventAt;
+  const [baselineLastEventAt, setBaselineLastEventAt] = useState(device.lastEventAt);
 
   // 연결 테스트(인증만 확인).
   const [pingState, setPingState] = useState<
@@ -199,7 +224,7 @@ export function CollectSetupWizard({
         platform: device.platform,
         // 열쇠가 없는 '이어가기' 모드에서도 절차는 보여줘야 한다. 값 자리에는
         // 실제 열쇠 대신 무엇을 넣어야 하는지를 적는다(추측 값을 인쇄하지 않는다).
-        collectToken: collectToken ?? "(등록할 때 받은 연결 열쇠)",
+        collectToken: collectToken ?? "(등록할 때 받은 토큰)",
         apiBaseUrl: API_BASE_URL,
         deviceName: device.name,
       }),
@@ -212,7 +237,15 @@ export function CollectSetupWizard({
 
   // 첫 문자 대기 중에만 폴링한다. 다이얼로그가 닫히면 이 컴포넌트가 사라지고
   // 폴링도 함께 멈춘다.
-  const waiting = open && step === 3 && device.firstEventAt == null;
+  const received = collectWizardReceived({
+    hasIssuedKey: collectToken != null,
+    baselineLastEventAt,
+    lastEventAt: device.lastEventAt,
+    firstEventAt: device.firstEventAt,
+  });
+  const receivedAt = collectToken != null ? device.lastEventAt : device.firstEventAt;
+  const showTokenOnly = tokenOnly && collectToken != null && !received;
+  const waiting = open && step === 3 && !received;
   useDevices({ refetchInterval: waiting ? WAIT_POLL_MS : false });
 
   // 열릴 때마다, 그리고 **열쇠가 새로 발급될 때마다** 처음 상태로 되돌린다.
@@ -224,11 +257,13 @@ export function CollectSetupWizard({
     setCopyResult(null);
     setKeyKept(false);
     setConfirmCloseOpen(false);
+    setTokenOnly(reissued);
+    setBaselineLastEventAt(latestLastEventAt.current);
     setPingState("idle");
     setPingError(null);
     setWaitStartedAt(null);
     setWaitedEnough(false);
-  }, [open, initialStep, device.id, collectToken]);
+  }, [open, initialStep, reissued, device.id, collectToken]);
 
   useEffect(() => {
     if (step !== 3) return;
@@ -245,7 +280,6 @@ export function CollectSetupWizard({
     return () => clearTimeout(timer);
   }, [step, waitStartedAt]);
 
-  const received = device.firstEventAt != null;
   const needsCloseConfirm = collectWizardCloseNeedsConfirm({
     hasIssuedKey: collectToken != null,
     keyKept,
@@ -310,6 +344,14 @@ export function CollectSetupWizard({
     void copyText({ id: row.id, name: row.name }, row.value, row.holdsKey === true);
   }
 
+  /** 재발급 화면의 '토큰 복사' — 자동화 앱의 Authorization 값 칸을 통째로 바꾸도록 'Bearer '까지 복사한다. */
+  function copyReissuedToken() {
+    if (!collectToken) return;
+    void copyText({ id: "reissued-token", name: "새 토큰" }, `Bearer ${collectToken}`, true);
+  }
+  const tokenCopied = copyResult?.id === "reissued-token" && copyResult.ok;
+  const tokenCopyFailed = copyResult?.id === "reissued-token" && !copyResult.ok;
+
   async function runPing() {
     if (!collectToken) return;
     setPingState("pending");
@@ -321,7 +363,7 @@ export function CollectSetupWizard({
       setPingState("failed");
       setPingError(
         error instanceof ApiError && error.status === 401
-          ? "연결 열쇠가 맞지 않아요. 복사한 값을 다시 붙여넣어 주세요."
+          ? "토큰이 맞지 않아요. 복사한 값을 다시 붙여넣어 주세요."
           : "연결하지 못했어요. 인터넷 연결과 주소를 확인해 주세요.",
       );
     }
@@ -345,17 +387,21 @@ export function CollectSetupWizard({
           <DialogTitle>
             {received
               ? "연결이 끝났어요"
-              : `'${device.name}' 연결하는 중 ${step}/3`}
+              : showTokenOnly
+                ? "토큰을 재발급했어요"
+                : `'${device.name}' 연결하는 중 ${step}/3`}
           </DialogTitle>
           <DialogDescription>
             {received
               ? "이제 카드 문자가 오면 자동으로 지출에 쌓여요."
-              : "카드 문자를 자동으로 모아오도록 휴대폰을 설정할게요."}
+              : showTokenOnly
+                ? `'${device.name}'에 넣어 둔 예전 토큰은 이제 쓸 수 없어요.`
+                : "카드 문자를 자동으로 모아오도록 휴대폰을 설정할게요."}
           </DialogDescription>
         </DialogHeader>
 
         {/* 진행 표시 — 3단계 중 어디인지 항상 보이게 둔다. */}
-        {!received ? (
+        {!received && !showTokenOnly ? (
           <div className="flex gap-1.5" aria-hidden="true">
             {([1, 2, 3] as const).map((s) => (
               <span
@@ -376,8 +422,50 @@ export function CollectSetupWizard({
             </span>
             <p className="text-body font-semibold">첫 문자를 받았어요</p>
             <p className="text-caption text-muted-foreground">
-              {formatMonthDayTime(device.firstEventAt)}에 이 휴대폰에서 카드 문자가
+              {formatMonthDayTime(receivedAt)}에 이 휴대폰에서 카드 문자가
               도착했어요. 앞으로는 따로 할 일이 없어요.
+            </p>
+          </div>
+        ) : showTokenOnly ? (
+          /* --- 토큰 재발급: 자동화는 그대로, 바꿀 것은 토큰 하나 -------------- */
+          <div className="text-body flex flex-col gap-4">
+            <p
+              className="text-caption text-destructive flex items-start gap-1.5 font-medium"
+              role="alert"
+            >
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              이 화면을 닫으면 토큰을 다시 볼 수 없으니 먼저 복사해 주세요.
+            </p>
+            <div className="bg-muted flex min-w-0 flex-col gap-1 rounded-control p-3">
+              <span className="text-caption text-muted-foreground">
+                새 토큰 (Authorization 값)
+              </span>
+              <code className="text-caption font-mono break-all whitespace-pre-wrap">
+                {`Bearer ${collectToken}`}
+              </code>
+            </div>
+            <Button type="button" className="w-full" onClick={copyReissuedToken}>
+              {tokenCopied ? (
+                <>
+                  <Check /> 복사했어요
+                </>
+              ) : (
+                <>
+                  <Copy /> 토큰 복사
+                </>
+              )}
+            </Button>
+            {tokenCopyFailed ? (
+              <p className="text-caption text-destructive" role="alert">
+                복사하지 못했어요. 값을 길게 눌러 직접 복사해 주세요.
+              </p>
+            ) : null}
+            <p className="text-caption text-muted-foreground">
+              {REISSUE_WHERE[plan.platform]} Authorization 헤더 값을 모두 지우고 붙여 넣어 주세요.
+              &lsquo;Bearer &rsquo;까지 함께 복사돼요.
+            </p>
+            <p role="status" className="sr-only">
+              {tokenCopied ? "새 토큰, 복사했어요." : ""}
             </p>
           </div>
         ) : step === 1 ? (
@@ -432,15 +520,15 @@ export function CollectSetupWizard({
                 role="alert"
               >
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-                이 화면을 닫으면 연결 열쇠를 다시 볼 수 없으니 먼저 복사해 주세요.
+                이 화면을 닫으면 토큰을 다시 볼 수 없으니 먼저 복사해 주세요.
               </p>
             ) : (
               <div className="bg-muted flex flex-col gap-2 rounded-control p-3">
                 <p className="text-caption">
-                  연결 열쇠는 등록할 때 한 번만 보여드려요.{" "}
+                  토큰은 등록할 때 한 번만 보여드려요.{" "}
                   {onReissue
-                    ? "적어둔 값이 없다면 새로 발급받아 다시 넣어 주세요."
-                    : "적어둔 값이 없다면 이 기기를 등록한 사람이나 가족의 소유자가 새로 발급해 줄 수 있어요."}
+                    ? "적어둔 값이 없다면 토큰을 재발급해 다시 넣어 주세요."
+                    : "적어둔 값이 없다면 이 기기를 등록한 사람이나 가족의 소유자가 토큰을 재발급해 줄 수 있어요."}
                 </p>
                 {onReissue ? (
                   <Button
@@ -450,7 +538,7 @@ export function CollectSetupWizard({
                     disabled={reissuePending}
                   >
                     <RefreshCw />
-                    {reissuePending ? "발급 중…" : "새로 발급받기"}
+                    {reissuePending ? "재발급 중…" : "토큰 재발급"}
                   </Button>
                 ) : null}
                 {reissueError ? (
@@ -539,7 +627,7 @@ export function CollectSetupWizard({
               </Button>
               {!collectToken ? (
                 <p className="text-caption text-muted-foreground">
-                  연결 확인은 연결 열쇠가 있어야 할 수 있어요.
+                  연결 확인은 토큰이 있어야 할 수 있어요.
                 </p>
               ) : pingState === "ok" ? (
                 <p className="text-caption text-success-strong font-medium">
@@ -551,7 +639,7 @@ export function CollectSetupWizard({
                 </p>
               ) : (
                 <p className="text-caption text-muted-foreground">
-                  문자 없이 연결 열쇠가 맞는지만 먼저 확인해 볼 수 있어요.
+                  문자 없이 토큰이 맞는지만 먼저 확인해 볼 수 있어요.
                 </p>
               )}
             </div>
@@ -606,6 +694,23 @@ export function CollectSetupWizard({
             <Button className="w-full" onClick={() => onOpenChange(false)}>
               다 했어요
             </Button>
+          ) : showTokenOnly ? (
+            <>
+              <Button type="button" variant="weak" className="w-full" onClick={requestClose}>
+                닫기
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setTokenOnly(false);
+                  setStep(1);
+                }}
+              >
+                처음부터 설정하기
+              </Button>
+            </>
           ) : (
             <>
               {step < 3 ? (
@@ -653,9 +758,9 @@ export function CollectSetupWizard({
         <AlertDialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>닫으면 연결 열쇠를 다시 볼 수 없어요</AlertDialogTitle>
+              <AlertDialogTitle>닫으면 토큰을 다시 볼 수 없어요</AlertDialogTitle>
               <AlertDialogDescription>
-                아직 열쇠를 복사하지 않았어요. 닫은 뒤에는 열쇠를 새로 발급해야 해요.
+                아직 토큰을 복사하지 않았어요. 닫은 뒤에는 토큰을 재발급해야 해요.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -664,7 +769,7 @@ export function CollectSetupWizard({
                 variant="destructive"
                 onClick={() => onOpenChange(false)}
               >
-                열쇠 없이 닫기
+                토큰 없이 닫기
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -133,7 +133,7 @@ describe("수집 설정 마법사 — 열쇠를 챙기기 전 닫기", () => {
     expect(html).toContain(">닫기</button>");
     expect(html).not.toContain("나중에 할게요");
     // 확인 시트는 닫으려 할 때만 뜬다.
-    expect(html).not.toContain("닫으면 연결 열쇠를 다시 볼 수 없어요");
+    expect(html).not.toContain("닫으면 토큰을 다시 볼 수 없어요");
   });
 
   it("방금 받은 열쇠를 챙기기 전에는 X·Esc로 바로 닫지 않는다", () => {
@@ -160,21 +160,22 @@ describe("수집 설정 마법사 — 열쇠를 챙기기 전 닫기", () => {
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
-  it("닫기 확인에서 남는 쪽은 '계속 설정하기', 위험한 쪽은 '열쇠 없이 닫기'다 — '닫기'로 남지 않는다", () => {
+  it("닫기 확인에서 남는 쪽은 '계속 설정하기', 위험한 쪽은 '토큰 없이 닫기'다 — '닫기'로 남지 않는다", () => {
     captured.forceAlertOpen = true;
     const html = render({ initialStep: 1 });
-    expect(html).toContain("닫으면 연결 열쇠를 다시 볼 수 없어요");
+    expect(html).toContain("닫으면 토큰을 다시 볼 수 없어요");
     expect(html).toContain(">계속 설정하기</button>");
-    expect(html).toContain('data-variant="destructive">열쇠 없이 닫기</button>');
+    expect(html).toContain('data-variant="destructive">토큰 없이 닫기</button>');
     expect(html).not.toContain(">계속하기</button>");
     // 확인 시트 안에서 '닫기'라는 버튼은 위험한 쪽에도 남는 쪽에도 없다.
     const alert = html.slice(html.indexOf("data-alert"));
     expect(alert).not.toContain(">닫기</button>");
   });
 
-  it("첫 문자를 받았으면 묻지 않고 닫는다", () => {
+  it("첫 문자를 받은 기기를 '설정 계속하기'로 열었으면 묻지 않고 닫는다", () => {
     const onOpenChange = vi.fn();
     render({
+      issued: null,
       device: device({ firstEventAt: "2026-11-05T05:31:00.000Z" }),
       onOpenChange,
     });
@@ -208,7 +209,7 @@ describe("수집 설정 마법사 — 2단계 칸마다 복사", () => {
     const html = render({ initialStep: 2, issued: null });
     // 자리표시자를 자동화 앱에 붙이면 이미 넣어 둔 진짜 열쇠를 덮어써 수집이 멈춘다.
     expect(html).not.toContain('aria-label="Authorization 헤더 값 복사"');
-    expect(html).toContain("Bearer (등록할 때 받은 연결 열쇠)");
+    expect(html).toContain("Bearer (등록할 때 받은 토큰)");
     expect(html).toContain("이미 넣었다면 그대로 두세요");
     // 다른 칸은 그대로 복사할 수 있다.
     expect(html).toContain('aria-label="Authorization 헤더 이름 복사"');
@@ -236,9 +237,48 @@ describe("수집 설정 마법사 — 2단계 칸마다 복사", () => {
     expect(step2).not.toContain(">연결 테스트<");
 
     const done = render({
+      issued: null,
       device: device({ firstEventAt: "2026-11-05T05:31:00.000Z" }),
     });
     expect(done).toMatch(/11월 5일 오후 2:31/);
     expect(done).not.toMatch(/2026\. ?11\. ?0?5\./);
+  });
+});
+
+describe("수집 설정 마법사 — 토큰 재발급", () => {
+  // 예전에 문자를 받은 적이 있는 기기(2026-11-22 실제 상황: 7월에 첫 문자, 11월 6일에 마지막 문자).
+  const connected = () =>
+    device({
+      platform: "ios",
+      firstEventAt: "2026-07-18T11:52:00.000Z",
+      lastEventAt: "2026-11-06T08:55:00.000Z",
+    });
+
+  it("⋯ 메뉴에서 재발급하면 새 토큰과 '토큰 복사'만 먼저 보인다", () => {
+    const html = render({ reissued: true, initialStep: 2, device: connected() });
+    expect(html).toContain("토큰을 재발급했어요");
+    expect(html).toContain(`Bearer ${KEY}`);
+    expect(html).toContain("토큰 복사</button>");
+    expect(html).toContain("URL의 콘텐츠 가져오기");
+    expect(html).toContain(">처음부터 설정하기</button>");
+    // 예전 첫 문자를 보고 성공 화면을 띄우지 않는다 — 그러면 토큰이 한 번도 보이지 않았다.
+    expect(html).not.toContain("연결이 끝났어요");
+    // 처음 설정용 칸별 안내는 접혀 있다. 토큰은 한 곳에만 보인다.
+    expect(html).not.toContain("설정 전체 복사하기");
+    expect(html.split(KEY).length - 1).toBe(1);
+  });
+
+  it("토큰을 복사하기 전에는 닫기 전에 묻는다", () => {
+    const onOpenChange = vi.fn();
+    render({ reissued: true, initialStep: 2, device: connected(), onOpenChange });
+    captured.onOpenChange?.(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("설정 도중 마법사 안에서 재발급해도, 예전 문자가 있다고 성공 화면을 띄우지 않는다", () => {
+    const html = render({ initialStep: 2, device: connected() });
+    expect(html).not.toContain("연결이 끝났어요");
+    expect(html).toContain("연결하는 중 2/3");
+    expect(html).toContain(`Bearer ${KEY}`);
   });
 });

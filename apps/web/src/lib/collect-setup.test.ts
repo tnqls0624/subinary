@@ -18,6 +18,7 @@ import {
   buildSetupCopySections,
   collectWizardBackAction,
   collectWizardCloseNeedsConfirm,
+  collectWizardReceived,
   defaultDevicePlatform,
 } from "./collect-setup";
 
@@ -258,7 +259,7 @@ describe("buildSetupCopySections — 2단계 칸마다 복사", () => {
   it.each(["ios", "android", "other"] as const)(
     "%s: 열쇠가 없으면(설정 계속하기) Authorization 값은 자리표시자라 복사할 수 없다",
     (platform) => {
-      const placeholder = "(등록할 때 받은 연결 열쇠)";
+      const placeholder = "(등록할 때 받은 토큰)";
       const rows = buildSetupCopySections(
         buildCollectSetup({ platform, collectToken: placeholder, apiBaseUrl: BASE }),
         { hasKey: false },
@@ -286,6 +287,62 @@ describe("buildSetupCopySections — 2단계 칸마다 복사", () => {
       .filter((row) => row.id.startsWith("field-"))
       .map((row) => row.value);
     expect(keys).toEqual(["eventId", "sender", "content"]);
+  });
+});
+
+describe("collectWizardReceived — '연결이 끝났어요' 판정", () => {
+  const OLD = "2026-11-06T08:55:00.000Z";
+  const NEW = "2026-11-22T12:00:00.000Z";
+
+  it("토큰을 재발급한 기기에 예전 문자만 있으면 아직 연결된 게 아니다", () => {
+    // 2026-11-22: 예전 firstEventAt 으로 판정해 재발급 직후 토큰 대신 성공 화면이 떴다.
+    expect(
+      collectWizardReceived({
+        hasIssuedKey: true,
+        baselineLastEventAt: OLD,
+        lastEventAt: OLD,
+        firstEventAt: "2026-07-18T11:52:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("토큰을 받은 뒤 문자가 새로 들어오면 연결된 것이다", () => {
+    expect(
+      collectWizardReceived({
+        hasIssuedKey: true,
+        baselineLastEventAt: OLD,
+        lastEventAt: NEW,
+        firstEventAt: "2026-07-18T11:52:00.000Z",
+      }),
+    ).toBe(true);
+    // 새로 등록한 기기는 받은 순간 문자가 없다 — 첫 문자가 오면 연결된 것이다.
+    expect(
+      collectWizardReceived({
+        hasIssuedKey: true,
+        baselineLastEventAt: null,
+        lastEventAt: NEW,
+        firstEventAt: NEW,
+      }),
+    ).toBe(true);
+  });
+
+  it("토큰 없이 '설정 계속하기'로 열었으면 첫 문자가 있는지로 본다", () => {
+    expect(
+      collectWizardReceived({
+        hasIssuedKey: false,
+        baselineLastEventAt: OLD,
+        lastEventAt: OLD,
+        firstEventAt: OLD,
+      }),
+    ).toBe(true);
+    expect(
+      collectWizardReceived({
+        hasIssuedKey: false,
+        baselineLastEventAt: null,
+        lastEventAt: null,
+        firstEventAt: null,
+      }),
+    ).toBe(false);
   });
 });
 

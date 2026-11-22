@@ -70,7 +70,7 @@ import { formatRelativeTime } from "@/lib/format";
 
 import { PLATFORM_LABEL, PlatformSegment } from "./platform-segment";
 
-const ROTATE_FAILED = "연결 열쇠를 다시 발급하지 못했어요.";
+const ROTATE_FAILED = "토큰을 재발급하지 못했어요.";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -115,6 +115,8 @@ export default function DevicesPage() {
     deviceId: string;
     issued: DeviceSecretResponse | null;
     initialStep: 1 | 2;
+    /** ⋯ 메뉴에서 재발급했다 — 마법사가 새 토큰과 '토큰 복사'만 먼저 보여 준다. */
+    reissued: boolean;
   } | null>(null);
 
   // 되돌리기 어려운 행동 확인(다시 발급/연결 해제). 닫히는 동안 문구가 바뀌지 않게 대상은 따로 둔다.
@@ -135,7 +137,7 @@ export default function DevicesPage() {
       setNameError(null);
       setRegisterOpen(false);
       // 등록은 시작이지 완료가 아니다 — 바로 설정 마법사로 이어 붙인다.
-      setWizard({ deviceId: result.device.id, issued: result, initialStep: 1 });
+      setWizard({ deviceId: result.device.id, issued: result, initialStep: 1, reissued: false });
     },
   });
 
@@ -146,7 +148,14 @@ export default function DevicesPage() {
       void invalidateDevices();
       // 다시 발급하면 자동화에 넣어둔 옛 열쇠가 즉시 죽는다. 새 열쇠를 어디에 넣어야
       // 하는지까지 안내해야 수집이 멈춘 채 방치되지 않는다(앱은 이미 깔려 있으므로 2단계).
-      setWizard({ deviceId: result.device.id, issued: result, initialStep: 2 });
+      // ⋯ 메뉴에서 재발급했으면(마법사가 닫혀 있었으면) 토큰 복사 화면부터, 설정 도중 마법사 안에서
+      // 재발급했으면 하던 단계 안내를 그대로 이어 간다.
+      setWizard((prev) => ({
+        deviceId: result.device.id,
+        issued: result,
+        initialStep: 2,
+        reissued: prev == null,
+      }));
     },
   });
 
@@ -269,7 +278,7 @@ export default function DevicesPage() {
                 onContinue={() => {
                   // 지난 재발급 실패 문구를 다른 마법사로 들고 가지 않는다.
                   rotateMutation.reset();
-                  setWizard({ deviceId: d.id, issued: null, initialStep: 2 });
+                  setWizard({ deviceId: d.id, issued: null, initialStep: 2, reissued: false });
                 }}
               />
             ))}
@@ -301,7 +310,7 @@ export default function DevicesPage() {
           <DialogHeader>
             <DialogTitle>기기 등록</DialogTitle>
             <DialogDescription>
-              등록하면 연결 열쇠를 한 번만 보여 드려요.
+              등록하면 토큰을 한 번만 보여 드려요.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onRegister} className="flex flex-col gap-4" noValidate>
@@ -382,6 +391,7 @@ export default function DevicesPage() {
           device={wizardDevice}
           issued={wizard.issued}
           initialStep={wizard.initialStep}
+          reissued={wizard.reissued}
           // 재발급 권한이 없으면 아예 넘기지 않는다 — 마법사가 버튼을 감춘다.
           onReissue={
             canManageDevice(permission, wizardDevice.memberId)
@@ -404,12 +414,12 @@ export default function DevicesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirm?.type === "rotate"
-                ? "연결 열쇠를 다시 발급할까요?"
+                ? "토큰을 재발급할까요?"
                 : "이 기기 연결을 해제할까요?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm?.type === "rotate"
-                ? `'${confirm.device.name}'에 넣어 둔 지금 열쇠는 바로 쓸 수 없게 되니, 새 열쇠를 단축어·MacroDroid에 다시 넣어 주세요.`
+                ? `'${confirm.device.name}'에 넣어 둔 지금 토큰은 바로 쓸 수 없게 되니, 새 토큰을 단축어·MacroDroid에 다시 넣어 주세요.`
                 : confirm
                   ? `'${confirm.device.name}'에서 오는 카드 문자를 더 이상 받지 않아요.`
                   : ""}
@@ -422,7 +432,7 @@ export default function DevicesPage() {
               disabled={actionPending}
               onClick={runConfirm}
             >
-              {confirm?.type === "revoke" ? "연결 해제하기" : "다시 발급하기"}
+              {confirm?.type === "revoke" ? "연결 해제하기" : "재발급하기"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -479,7 +489,7 @@ function DeviceRow({
             label={`${device.name} 메뉴`}
             className="shrink-0"
             actions={[
-              { label: "연결 열쇠 다시 발급", onSelect: onRotate, disabled: busy },
+              { label: "토큰 재발급", onSelect: onRotate, disabled: busy },
               { label: "연결 해제", onSelect: onRevoke, destructive: true, disabled: busy },
             ]}
           />
