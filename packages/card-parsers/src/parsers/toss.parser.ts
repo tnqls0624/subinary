@@ -57,6 +57,12 @@ const FX_PAY_RE = new RegExp(
 const BALANCE_LINE_RE = /^\s*잔액/;
 /** 잔액 라인 존재 여부(접힌 알림 판별용, 본문 전체 대상). */
 const BALANCE_ANY_RE = /잔액\s*[\d,]+\s*원/;
+/**
+ * 가맹점 끝에 같은 줄로 붙은 `잔액 N원`. 2026-11-20부터 접힌 알림이 줄바꿈 없이
+ * `N원 결제 공룡통장 카드 | 쿠팡(쿠페이) 잔액 34,530원` 한 줄로 와서, 잔액이 가맹점
+ * 이름에 섞여 결제 알림에 '쿠팡(쿠페이) 잔액 34,530원 25,800원'처럼 보였다.
+ */
+const TRAILING_BALANCE_RE = /\s*잔액\s*[\d,]+\s*원\s*$/;
 /** `… | <가맹점>` — 파이프 뒤에 실제 가맹점 토큰이 있는지(접힌 알림 판별용). */
 const PIPE_MERCHANT_RE = /\|\s*[^\s|]/;
 /**
@@ -121,7 +127,7 @@ function parseTossAmount(content: string): {
 function parseTossMerchant(content: string): string | undefined {
   const match = content.match(MERCHANT_AFTER_PIPE_RE);
   if (!match) return undefined;
-  const merchant = match[1].trim();
+  const merchant = match[1].replace(TRAILING_BALANCE_RE, '').trim();
   return merchant.length > 0 ? merchant : undefined;
 }
 

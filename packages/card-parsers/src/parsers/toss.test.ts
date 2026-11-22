@@ -146,6 +146,29 @@ describe('TossBankCardParser', () => {
     );
   });
 
+  // 실제 유입 회귀(2026-11-20~): 접힌 알림이 줄바꿈 없이 한 줄로 와서 잔액이 가맹점 끝에 붙는다.
+  it('strips a same-line balance from the merchant (single-line collapsed notification)', () => {
+    const content = '31,500원 결제 공룡통장 카드 | 주식회사 우아한형제들 잔액 95,900원';
+    const receivedAt = new Date('2026-11-20T20:30:36+09:00');
+    expect(parser.supports({ sender: '16617654', content, receivedAt })).toBe(true);
+
+    const result = parser.parse({ sender: '16617654', content, receivedAt });
+    expect(result.amount).toBe(31500);
+    expect(result.currency).toBe('KRW');
+    expect(result.merchantRaw).toBe('주식회사 우아한형제들');
+  });
+
+  it('keeps the merchant when the balance is on its own line (two-line collapsed notification)', () => {
+    const content = '32,000원 결제 공룡통장 카드 | 쿠팡(쿠페이)\n잔액 366,160원';
+    const result = parser.parse({
+      sender: '16617654',
+      content,
+      receivedAt: new Date('2026-11-11T21:05:00+09:00'),
+    });
+    expect(result.amount).toBe(32000);
+    expect(result.merchantRaw).toBe('쿠팡(쿠페이)');
+  });
+
   it('does not misclassify a plain balance/transfer alert as a collapsed card payment', () => {
     // 파이프(가맹점) 없이 잔액만 있는 입금 알림은 접힌 카드 결제가 아니다.
     const receivedAt = new Date();
